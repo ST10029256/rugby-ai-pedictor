@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import os
+import sys
 import sqlite3
 import numpy as np
 import pandas as pd
 from typing import Any, cast
 
 import streamlit as st
+
+# Add the project root to the Python path
+# This allows Streamlit to find the 'prediction' package when run from the 'scripts' directory
+script_dir = os.path.dirname(__file__)
+project_root = os.path.abspath(os.path.join(script_dir, os.pardir))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from prediction.features import build_feature_table, FeatureConfig
 
