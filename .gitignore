@@ -5,7 +5,7 @@ __pycache__/
 .DS_Store
 
 # Local data and artifacts
-data.sqlite
+# data.sqlite  # Temporarily commented for deployment
 artifacts/
 
 # Streamlit local config
