@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: rugby-predictor
+Version: 0.0.0
+Summary: Rugby match prediction utilities and UI
+Requires-Python: >=3.10

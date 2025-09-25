@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rugby-predictor"
+version = "0.0.0"
+description = "Rugby match prediction utilities and UI"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["prediction"]
+
+

@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+
+# Local data and artifacts
+data.sqlite
+artifacts/
+
+# Streamlit local config
+.streamlit/secrets.toml
+
+# Large model/files
+*.pkl
+*.csv
+
