@@ -99,11 +99,19 @@ def main() -> None:
     
     # Add refresh button to force reload
     st.write("**Cache Control:**")
-    if st.button("🔄 Force Refresh Data"):
+    st.write("Buttons should appear below:")
+    
+    # Try different button approaches
+    refresh_clicked = st.button("🔄 Force Refresh Data", key="refresh_btn")
+    clear_clicked = st.button("🗑️ Clear All Caches", key="clear_btn")
+    
+    if refresh_clicked:
+        st.write("🔄 Refresh button clicked!")
         st.cache_data.clear()
         st.rerun()
     
-    if st.button("🗑️ Clear All Caches"):
+    if clear_clicked:
+        st.write("🗑️ Clear button clicked!")
         st.cache_data.clear()
         st.cache_resource.clear()
         st.rerun()
@@ -111,6 +119,8 @@ def main() -> None:
     st.write("**Debug Info:**")
     st.write(f"Session state data_refresh: {st.session_state.get('data_refresh', 'Not set')}")
     st.write(f"Current cache buster: {cache_buster}")
+    st.write(f"Refresh clicked: {refresh_clicked}")
+    st.write(f"Clear clicked: {clear_clicked}")
     
     # Connect to database (SQLite doesn't support query parameters)
     conn = sqlite3.connect(db_path)
