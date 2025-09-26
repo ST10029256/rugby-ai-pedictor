@@ -78,7 +78,11 @@ def main() -> None:
     elo_k = 24  # handled automatically; no manual control in UI
 
     # Data and features
-    conn = sqlite3.connect("data.sqlite")
+    # Force absolute path to ensure correct database file
+    import os
+    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.sqlite")
+    st.write(f"Using database: {db_path}")
+    conn = sqlite3.connect(db_path)
     df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=float(elo_k), neutral_mode=bool(neutral_mode)))
 
     # Upcoming fixtures for selected league (future/today only)
