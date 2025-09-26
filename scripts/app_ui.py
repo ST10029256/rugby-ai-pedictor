@@ -102,25 +102,33 @@ def main() -> None:
     st.write("Buttons should appear below:")
     
     # Try different button approaches
-    refresh_clicked = st.button("🔄 Force Refresh Data", key="refresh_btn")
-    clear_clicked = st.button("🗑️ Clear All Caches", key="clear_btn")
-    
-    if refresh_clicked:
+    if st.button("🔄 Force Refresh Data", key="refresh_btn"):
         st.write("🔄 Refresh button clicked!")
         st.cache_data.clear()
+        st.session_state.refresh_triggered = True
         st.rerun()
     
-    if clear_clicked:
+    if st.button("🗑️ Clear All Caches", key="clear_btn"):
         st.write("🗑️ Clear button clicked!")
         st.cache_data.clear()
         st.cache_resource.clear()
+        st.session_state.clear_triggered = True
         st.rerun()
+    
+    # Show button click status
+    if st.session_state.get('refresh_triggered', False):
+        st.success("✅ Refresh triggered successfully!")
+        st.session_state.refresh_triggered = False
+    
+    if st.session_state.get('clear_triggered', False):
+        st.success("✅ Clear triggered successfully!")
+        st.session_state.clear_triggered = False
     
     st.write("**Debug Info:**")
     st.write(f"Session state data_refresh: {st.session_state.get('data_refresh', 'Not set')}")
     st.write(f"Current cache buster: {cache_buster}")
-    st.write(f"Refresh clicked: {refresh_clicked}")
-    st.write(f"Clear clicked: {clear_clicked}")
+    st.write(f"Refresh triggered: {st.session_state.get('refresh_triggered', False)}")
+    st.write(f"Clear triggered: {st.session_state.get('clear_triggered', False)}")
     
     # Connect to database (SQLite doesn't support query parameters)
     conn = sqlite3.connect(db_path)
