@@ -23,7 +23,7 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.linear_model import LogisticRegression, Ridge, ElasticNet
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestRegressor, GradientBoostingRegressor
 
 
 def safe_to_float(value: Any, default: float = 0.0) -> float:
@@ -106,7 +106,11 @@ def main() -> None:
         "elo_diff", "form_diff", "elo_home_pre", "elo_away_pre",
         "home_form", "away_form", "home_rest_days", "away_rest_days",
         "rest_diff", "home_goal_diff_form", "away_goal_diff_form",
-        "goal_diff_form_diff", "h2h_home_rate", "season_phase", "is_home"
+        "goal_diff_form_diff", "h2h_home_rate", "season_phase", "is_home",
+        # Advanced features
+        "elo_ratio", "elo_sum", "form_diff_10", "h2h_recent", "rest_ratio", "home_advantage",
+        "home_attack_strength", "away_attack_strength", "home_defense_strength", "away_defense_strength",
+        "home_momentum", "away_momentum", "momentum_diff", "league_strength", "home_league_form", "away_league_form"
     ]
     present_cols = [c for c in feature_cols if c in hist.columns]
     if len(hist) == 0 or len(present_cols) == 0:
@@ -155,110 +159,71 @@ def main() -> None:
     gbdt_clf = HistGradientBoostingClassifier(random_state=42)
     gbdt_clf.fit(X_hist, y_hist)
     
-    # === SMART OPTIMIZED REGRESSION MODELS ===
-    # League-specific optimizations: apply optimizations only for Rugby Championship & URC
+    # === LEAGUE-SPECIFIC RANDOM FOREST MODELS ===
+    # Apply league-specific Random Forest models with advanced features
     league_id = hist["league_id"].iloc[0] if len(hist) > 0 else None
-    use_optimized = league_id in [4986, 4446]  # Rugby Championship & URC
     
-    if use_optimized:
-        # Optimized time-decay weights (6-7 months for better leagues)
-        weights = None
-        try:
-            if "date_event" in hist.columns:
-                max_dt = pd.to_datetime(hist["date_event"]).max()
-                days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
-                half_life_days = 200.0  # 6-7 months
-                weights = np.exp(-days / half_life_days).astype(float)
-            else:
-                weights = np.ones(len(hist), dtype=float)
-        except Exception:
+    # Time-decay weights
+    weights = None
+    try:
+        if "date_event" in hist.columns:
+            max_dt = pd.to_datetime(hist["date_event"]).max()
+            days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
+            half_life_days = 200.0
+            weights = np.exp(-days / half_life_days).astype(float)
+        else:
             weights = np.ones(len(hist), dtype=float)
+    except Exception:
+        weights = np.ones(len(hist), dtype=float)
 
-        # Optimized winsorization (less aggressive)
-        def _winsorize(arr: np.ndarray, low: float = 0.01, high: float = 0.99) -> np.ndarray:
-            a = np.asarray(arr, dtype=float)
-            lo = float(np.quantile(a, low)) if len(a) else 0.0
-            hi = float(np.quantile(a, high)) if len(a) else 0.0
-            return np.clip(a, lo, hi)
+    # Winsorization
+    def _winsorize(arr: np.ndarray, low: float = 0.01, high: float = 0.99) -> np.ndarray:
+        a = np.asarray(arr, dtype=float)
+        lo = float(np.quantile(a, low)) if len(a) else 0.0
+        hi = float(np.quantile(a, high)) if len(a) else 0.0
+        return np.clip(a, lo, hi)
 
-        y_home_w = _winsorize(y_home)
-        y_away_w = _winsorize(y_away)
+    y_home_w = _winsorize(y_home)
+    y_away_w = _winsorize(y_away)
 
-        # Optimized regression models (less regularization)
-        reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
-        reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
-        reg_home.fit(X_hist, y_home_w, ridge__sample_weight=weights)
-        reg_away.fit(X_hist, y_away_w, ridge__sample_weight=weights)
-        
-        # Optimized gradient boosting models
-        gbdt_home = HistGradientBoostingRegressor(
-            random_state=42,
-            learning_rate=0.08,
-            max_iter=180,
-            max_depth=7,
-            min_samples_leaf=8,
-            max_features=0.95
+    # League-specific Random Forest models
+    if league_id == 4446:  # United Rugby Championship
+        reg_home = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
+        reg_away = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
+    elif league_id == 4574:  # Rugby World Cup
+        reg_home = HistGradientBoostingRegressor(
+            learning_rate=0.05, max_iter=300, max_depth=8, 
+            min_samples_leaf=3, max_features=0.9, random_state=42
         )
-        gbdt_away = HistGradientBoostingRegressor(
-            random_state=42,
-            learning_rate=0.05,
-            max_iter=150,
-            max_depth=6,
-            min_samples_leaf=12,
-            max_features=0.85
+        reg_away = HistGradientBoostingRegressor(
+            learning_rate=0.05, max_iter=300, max_depth=8, 
+            min_samples_leaf=3, max_features=0.9, random_state=42
         )
-        gbdt_home.fit(X_hist, y_home_w, sample_weight=weights)
-        gbdt_away.fit(X_hist, y_away_w, sample_weight=weights)
-        
+    elif league_id == 4986:  # Rugby Championship
+        reg_home = ElasticNet(alpha=0.05, l1_ratio=0.3)
+        reg_away = ElasticNet(alpha=0.05, l1_ratio=0.3)
+    elif league_id == 5069:  # Currie Cup
+        reg_home = GradientBoostingRegressor(
+            n_estimators=200, learning_rate=0.05, max_depth=8, random_state=42
+        )
+        reg_away = GradientBoostingRegressor(
+            n_estimators=200, learning_rate=0.05, max_depth=8, random_state=42
+        )
+    else:  # Default fallback
+        reg_home = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
+        reg_away = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
+    
+    # Scale features for non-tree models
+    scaler = None
+    if league_id in [4986]:  # Rugby Championship uses ElasticNet
+        scaler = RobustScaler()
+        X_hist_scaled = scaler.fit_transform(X_hist)
+        reg_home.fit(X_hist_scaled, y_home_w)
+        reg_away.fit(X_hist_scaled, y_away_w)
     else:
-        # Current approach for Currie Cup & World Cup
-        weights = None
-        try:
-            if "date_event" in hist.columns:
-                max_dt = pd.to_datetime(hist["date_event"]).max()
-                days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
-                half_life_days = 200.0
-                weights = np.exp(-days / half_life_days).astype(float)
-            else:
-                weights = np.ones(len(hist), dtype=float)
-        except Exception:
-            weights = np.ones(len(hist), dtype=float)
-
-        # Improved winsorization (less aggressive)
-        def _winsorize(arr: np.ndarray, low: float = 0.01, high: float = 0.99) -> np.ndarray:
-            a = np.asarray(arr, dtype=float)
-            lo = float(np.quantile(a, low)) if len(a) else 0.0
-            hi = float(np.quantile(a, high)) if len(a) else 0.0
-            return np.clip(a, lo, hi)
-
-        y_home_w = _winsorize(y_home)
-        y_away_w = _winsorize(y_away)
-
-        # Improved regression models with better hyperparameters
-        reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
-        reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
-        reg_home.fit(X_hist, y_home_w, ridge__sample_weight=weights)
-        reg_away.fit(X_hist, y_away_w, ridge__sample_weight=weights)
-        
-        # Improved gradient boosting models with better hyperparameters
-        gbdt_home = HistGradientBoostingRegressor(
-            random_state=42,
-            learning_rate=0.1,
-            max_iter=200,
-            max_depth=6,
-            min_samples_leaf=5,
-            max_features=0.8
-        )
-        gbdt_away = HistGradientBoostingRegressor(
-            random_state=42,
-            learning_rate=0.1,
-            max_iter=200,
-            max_depth=6,
-            min_samples_leaf=5,
-            max_features=0.8
-        )
-        gbdt_home.fit(X_hist, y_home_w, sample_weight=weights)
-        gbdt_away.fit(X_hist, y_away_w, sample_weight=weights)
+        # Tree-based models don't need scaling
+        reg_home.fit(X_hist, y_home_w)
+        reg_away.fit(X_hist, y_away_w)
 
     # Prepare upcoming rows
     if len(upc) == 0:
@@ -289,15 +254,16 @@ def main() -> None:
     prob_home = 0.5 * (prob_lr + prob_gbdt)
     prob_away = 1.0 - prob_home
     
-    # Use improved ensemble weights based on league
-    if use_optimized:
-        # Improved ensemble weights (30% Ridge, 70% GBDT for home; 30% Ridge, 70% GBDT for away)
-        pred_home = 0.3 * cast(np.ndarray, reg_home.predict(X_upc)) + 0.7 * cast(np.ndarray, gbdt_home.predict(X_upc))
-        pred_away = 0.3 * cast(np.ndarray, reg_away.predict(X_upc)) + 0.7 * cast(np.ndarray, gbdt_away.predict(X_upc))
+    # Use league-specific models directly (no ensemble needed)
+    if league_id in [4986] and scaler is not None:  # Rugby Championship uses ElasticNet (needs scaling)
+        assert scaler is not None  # Type check for linter
+        X_upc_scaled = scaler.transform(X_upc)
+        pred_home = cast(np.ndarray, reg_home.predict(X_upc_scaled))
+        pred_away = cast(np.ndarray, reg_away.predict(X_upc_scaled))
     else:
-        # Current ensemble weights (50% Ridge, 50% GBDT)
-        pred_home = 0.5 * cast(np.ndarray, reg_home.predict(X_upc)) + 0.5 * cast(np.ndarray, gbdt_home.predict(X_upc))
-        pred_away = 0.5 * cast(np.ndarray, reg_away.predict(X_upc)) + 0.5 * cast(np.ndarray, gbdt_away.predict(X_upc))
+        # Tree-based models don't need scaling
+        pred_home = cast(np.ndarray, reg_home.predict(X_upc))
+        pred_away = cast(np.ndarray, reg_away.predict(X_upc))
 
     # Display table
     def _name(tid: Any) -> str:

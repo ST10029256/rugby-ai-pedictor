@@ -294,6 +294,45 @@ def add_rest_goal_h2h_features(df: pd.DataFrame, config: FeatureConfig) -> pd.Da
     return df
 
 
+def add_advanced_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
+    """Add advanced features for better score prediction"""
+    # Elo ratio and sum
+    df["elo_ratio"] = df["elo_home_pre"] / df["elo_away_pre"].replace(0, 1)
+    df["elo_sum"] = df["elo_home_pre"] + df["elo_away_pre"]
+    
+    # Extended form (10 games)
+    df["form_diff_10"] = df["form_diff"]  # Placeholder - would need 10-game form calculation
+    
+    # Recent head-to-head (5 games)
+    df["h2h_recent"] = df["h2h_home_rate"]  # Placeholder - would need recent H2H calculation
+    
+    # Rest ratio
+    df["rest_ratio"] = df["home_rest_days"] / df["away_rest_days"].replace(0, 1)
+    
+    # Home advantage (league-specific)
+    df["home_advantage"] = 0.55  # Default home advantage
+    
+    # Attack and defense strengths (simplified)
+    df["home_attack_strength"] = 0.5  # Placeholder
+    df["away_attack_strength"] = 0.5  # Placeholder
+    df["home_defense_strength"] = 0.5  # Placeholder
+    df["away_defense_strength"] = 0.5  # Placeholder
+    
+    # Momentum (simplified)
+    df["home_momentum"] = df["home_form"]
+    df["away_momentum"] = df["away_form"]
+    df["momentum_diff"] = df["home_momentum"] - df["away_momentum"]
+    
+    # League strength (simplified)
+    df["league_strength"] = 0.5  # Placeholder
+    
+    # League-specific form (simplified)
+    df["home_league_form"] = df["home_form"]
+    df["away_league_form"] = df["away_form"]
+    
+    return df
+
+
 def build_feature_table(conn: sqlite3.Connection, config: FeatureConfig) -> pd.DataFrame:
     df = load_events_dataframe(conn)
     df = add_elo_features(df, config)
@@ -301,6 +340,9 @@ def build_feature_table(conn: sqlite3.Connection, config: FeatureConfig) -> pd.D
     df = add_rest_goal_h2h_features(df, config)
     # Home binary; set to 0 in neutral mode
     df["is_home"] = 0 if config.neutral_mode else 1
+    # Add advanced features for better score prediction
+    df = add_advanced_features(df, config)
+    
     # Keep essential columns
     cols = [
         "event_id",
@@ -327,6 +369,23 @@ def build_feature_table(conn: sqlite3.Connection, config: FeatureConfig) -> pd.D
         "h2h_home_rate",
         "season_phase",
         "is_home",
+        # Advanced features
+        "elo_ratio",
+        "elo_sum",
+        "form_diff_10",
+        "h2h_recent",
+        "rest_ratio",
+        "home_advantage",
+        "home_attack_strength",
+        "away_attack_strength",
+        "home_defense_strength",
+        "away_defense_strength",
+        "home_momentum",
+        "away_momentum",
+        "momentum_diff",
+        "league_strength",
+        "home_league_form",
+        "away_league_form",
     ]
     # Ensure DataFrame return
     return df.loc[:, cols].copy()
