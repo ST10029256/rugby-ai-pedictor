@@ -295,7 +295,7 @@ def main() -> None:
         "pred_home": np.round(pred_home, 1),
         "pred_away": np.round(pred_away, 1),
         "margin": np.round(pred_home - pred_away, 1),
-        "pick": [(_name(h) if p >= 0.5 else _name(a)) for h, a, p in zip(upc["home_team_id"], upc["away_team_id"], prob_home)],
+        "pick": [(_name(h) if pred_home[i] >= pred_away[i] else _name(a)) for i, (h, a) in enumerate(zip(upc["home_team_id"], upc["away_team_id"]))],
     })
     disp = disp.sort_values(["date", "home"], ignore_index=True)
 
