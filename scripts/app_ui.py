@@ -81,7 +81,17 @@ def main() -> None:
     # Force absolute path to ensure correct database file
     import os
     db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.sqlite")
-    st.write(f"Using database: {db_path}")
+    st.write(f"🔍 DEBUG: Using database: {db_path}")
+    st.write(f"📁 Current working directory: {os.getcwd()}")
+    st.write(f"📂 Files in current dir: {os.listdir('.')}")
+    
+    # Check if database file exists and its size
+    if os.path.exists(db_path):
+        file_size = os.path.getsize(db_path)
+        st.write(f"✅ Database exists, size: {file_size} bytes")
+    else:
+        st.error(f"❌ Database file not found at: {db_path}")
+    
     conn = sqlite3.connect(db_path)
     df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=float(elo_k), neutral_mode=bool(neutral_mode)))
 
