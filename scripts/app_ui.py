@@ -92,7 +92,18 @@ def main() -> None:
     else:
         st.error(f"❌ Database file not found at: {db_path}")
     
-    conn = sqlite3.connect(db_path)
+    # Force cache refresh by adding timestamp to database connection
+    import time
+    cache_buster = time.time()
+    st.write(f"🔄 Cache buster: {cache_buster}")
+    
+    # Add refresh button to force reload
+    if st.button("🔄 Force Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+    
+    # Connect to database with cache busting
+    conn = sqlite3.connect(f"{db_path}?cache_buster={cache_buster}")
     df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=float(elo_k), neutral_mode=bool(neutral_mode)))
 
     # Upcoming fixtures for selected league (future/today only)
