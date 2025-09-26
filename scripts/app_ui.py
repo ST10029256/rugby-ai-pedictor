@@ -212,41 +212,96 @@ def main() -> None:
     gbdt_clf = HistGradientBoostingClassifier(random_state=42)
     gbdt_clf.fit(X_hist, y_hist)
     
-    # === ADVANCED REGRESSION MODELS (from local script) ===
-    # Time-decay weights for better recent game emphasis
-    weights = None
-    try:
-        if "date_event" in hist.columns:
-            max_dt = pd.to_datetime(hist["date_event"]).max()
-            days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
-            half_life_days = 365.0
-            weights = np.exp(-days / half_life_days).astype(float)
-        else:
-            weights = np.ones(len(hist), dtype=float)
-    except Exception:
-        weights = np.ones(len(hist), dtype=float)
-
-    # Winsorization for outlier handling
-    def _winsorize(arr: np.ndarray, low: float = 0.02, high: float = 0.98) -> np.ndarray:
-        a = np.asarray(arr, dtype=float)
-        lo = float(np.quantile(a, low)) if len(a) else 0.0
-        hi = float(np.quantile(a, high)) if len(a) else 0.0
-        return np.clip(a, lo, hi)
-
-    y_home_w = _winsorize(y_home)
-    y_away_w = _winsorize(y_away)
-
-    # Advanced regression models with time-decay weights
-    reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
-    reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
-    reg_home.fit(X_hist, y_home_w, ridge__sample_weight=weights)
-    reg_away.fit(X_hist, y_away_w, ridge__sample_weight=weights)
+    # === SMART OPTIMIZED REGRESSION MODELS ===
+    # League-specific optimizations: apply optimizations only for Rugby Championship & URC
+    league_id = hist["league_id"].iloc[0] if len(hist) > 0 else None
+    use_optimized = league_id in [4986, 4446]  # Rugby Championship & URC
     
-    # Advanced gradient boosting models with time-decay weights
-    gbdt_home = HistGradientBoostingRegressor(random_state=42)
-    gbdt_away = HistGradientBoostingRegressor(random_state=42)
-    gbdt_home.fit(X_hist, y_home_w, sample_weight=weights)
-    gbdt_away.fit(X_hist, y_away_w, sample_weight=weights)
+    if use_optimized:
+        # Optimized time-decay weights (6-7 months for better leagues)
+        weights = None
+        try:
+            if "date_event" in hist.columns:
+                max_dt = pd.to_datetime(hist["date_event"]).max()
+                days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
+                half_life_days = 200.0  # 6-7 months
+                weights = np.exp(-days / half_life_days).astype(float)
+            else:
+                weights = np.ones(len(hist), dtype=float)
+        except Exception:
+            weights = np.ones(len(hist), dtype=float)
+
+        # Optimized winsorization (less aggressive)
+        def _winsorize(arr: np.ndarray, low: float = 0.01, high: float = 0.99) -> np.ndarray:
+            a = np.asarray(arr, dtype=float)
+            lo = float(np.quantile(a, low)) if len(a) else 0.0
+            hi = float(np.quantile(a, high)) if len(a) else 0.0
+            return np.clip(a, lo, hi)
+
+        y_home_w = _winsorize(y_home)
+        y_away_w = _winsorize(y_away)
+
+        # Optimized regression models (less regularization)
+        reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
+        reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
+        reg_home.fit(X_hist, y_home_w, ridge__sample_weight=weights)
+        reg_away.fit(X_hist, y_away_w, ridge__sample_weight=weights)
+        
+        # Optimized gradient boosting models
+        gbdt_home = HistGradientBoostingRegressor(
+            random_state=42,
+            learning_rate=0.08,
+            max_iter=180,
+            max_depth=7,
+            min_samples_leaf=8,
+            max_features=0.95
+        )
+        gbdt_away = HistGradientBoostingRegressor(
+            random_state=42,
+            learning_rate=0.05,
+            max_iter=150,
+            max_depth=6,
+            min_samples_leaf=12,
+            max_features=0.85
+        )
+        gbdt_home.fit(X_hist, y_home_w, sample_weight=weights)
+        gbdt_away.fit(X_hist, y_away_w, sample_weight=weights)
+        
+    else:
+        # Current approach for Currie Cup & World Cup
+        weights = None
+        try:
+            if "date_event" in hist.columns:
+                max_dt = pd.to_datetime(hist["date_event"]).max()
+                days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
+                half_life_days = 365.0
+                weights = np.exp(-days / half_life_days).astype(float)
+            else:
+                weights = np.ones(len(hist), dtype=float)
+        except Exception:
+            weights = np.ones(len(hist), dtype=float)
+
+        # Current winsorization
+        def _winsorize(arr: np.ndarray, low: float = 0.02, high: float = 0.98) -> np.ndarray:
+            a = np.asarray(arr, dtype=float)
+            lo = float(np.quantile(a, low)) if len(a) else 0.0
+            hi = float(np.quantile(a, high)) if len(a) else 0.0
+            return np.clip(a, lo, hi)
+
+        y_home_w = _winsorize(y_home)
+        y_away_w = _winsorize(y_away)
+
+        # Current regression models
+        reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
+        reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
+        reg_home.fit(X_hist, y_home_w, ridge__sample_weight=weights)
+        reg_away.fit(X_hist, y_away_w, ridge__sample_weight=weights)
+        
+        # Current gradient boosting models
+        gbdt_home = HistGradientBoostingRegressor(random_state=42)
+        gbdt_away = HistGradientBoostingRegressor(random_state=42)
+        gbdt_home.fit(X_hist, y_home_w, sample_weight=weights)
+        gbdt_away.fit(X_hist, y_away_w, sample_weight=weights)
 
     # Prepare upcoming rows
     if len(upc) == 0:
@@ -276,8 +331,16 @@ def main() -> None:
     prob_gbdt = cast(np.ndarray, gbdt_clf.predict_proba(X_upc))[:, 1]
     prob_home = 0.5 * (prob_lr + prob_gbdt)
     prob_away = 1.0 - prob_home
-    pred_home = 0.5 * cast(np.ndarray, reg_home.predict(X_upc)) + 0.5 * cast(np.ndarray, gbdt_home.predict(X_upc))
-    pred_away = 0.5 * cast(np.ndarray, reg_away.predict(X_upc)) + 0.5 * cast(np.ndarray, gbdt_away.predict(X_upc))
+    
+    # Use optimized ensemble weights for better leagues
+    if use_optimized:
+        # Optimized ensemble weights (40% Ridge, 60% GBDT for home; 30% Ridge, 70% GBDT for away)
+        pred_home = 0.4 * cast(np.ndarray, reg_home.predict(X_upc)) + 0.6 * cast(np.ndarray, gbdt_home.predict(X_upc))
+        pred_away = 0.3 * cast(np.ndarray, reg_away.predict(X_upc)) + 0.7 * cast(np.ndarray, gbdt_away.predict(X_upc))
+    else:
+        # Current ensemble weights (50% Ridge, 50% GBDT)
+        pred_home = 0.5 * cast(np.ndarray, reg_home.predict(X_upc)) + 0.5 * cast(np.ndarray, gbdt_home.predict(X_upc))
+        pred_away = 0.5 * cast(np.ndarray, reg_away.predict(X_upc)) + 0.5 * cast(np.ndarray, gbdt_away.predict(X_upc))
 
     # Display table
     def _name(tid: Any) -> str:
