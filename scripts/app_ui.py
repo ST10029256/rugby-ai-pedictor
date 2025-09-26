@@ -81,66 +81,9 @@ def main() -> None:
     # Force absolute path to ensure correct database file
     import os
     db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.sqlite")
-    st.write(f"🔍 DEBUG: Using database: {db_path}")
-    st.write(f"📁 Current working directory: {os.getcwd()}")
-    st.write(f"📂 Files in current dir: {os.listdir('.')}")
     
-    # Check if database file exists and its size
-    if os.path.exists(db_path):
-        file_size = os.path.getsize(db_path)
-        st.write(f"✅ Database exists, size: {file_size} bytes")
-    else:
-        st.error(f"❌ Database file not found at: {db_path}")
-    
-    # Force cache refresh by adding timestamp to database connection
-    import time
-    cache_buster = time.time()
-    st.write(f"🔄 Cache buster: {cache_buster}")
-    
-    # Add refresh button to force reload
-    st.write("**Cache Control:**")
-    st.write("Buttons should appear below:")
-    
-    # Try different button approaches
-    if st.button("🔄 Force Refresh Data", key="refresh_btn"):
-        st.write("🔄 Refresh button clicked!")
-        st.cache_data.clear()
-        st.session_state.refresh_triggered = True
-        st.rerun()
-    
-    if st.button("🗑️ Clear All Caches", key="clear_btn"):
-        st.write("🗑️ Clear button clicked!")
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.session_state.clear_triggered = True
-        st.rerun()
-    
-    # Show button click status
-    if st.session_state.get('refresh_triggered', False):
-        st.success("✅ Refresh triggered successfully!")
-        st.session_state.refresh_triggered = False
-    
-    if st.session_state.get('clear_triggered', False):
-        st.success("✅ Clear triggered successfully!")
-        st.session_state.clear_triggered = False
-    
-    st.write("**Debug Info:**")
-    st.write(f"Session state data_refresh: {st.session_state.get('data_refresh', 'Not set')}")
-    st.write(f"Current cache buster: {cache_buster}")
-    st.write(f"Refresh triggered: {st.session_state.get('refresh_triggered', False)}")
-    st.write(f"Clear triggered: {st.session_state.get('clear_triggered', False)}")
-    
-    # Connect to database (SQLite doesn't support query parameters)
+    # Connect to database
     conn = sqlite3.connect(db_path)
-    
-    # Force fresh data load by checking session state
-    if 'data_refresh' not in st.session_state:
-        st.session_state.data_refresh = cache_buster
-    
-    # If cache buster changed, force reload
-    if st.session_state.data_refresh != cache_buster:
-        st.session_state.data_refresh = cache_buster
-        st.cache_data.clear()
     
     df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=float(elo_k), neutral_mode=bool(neutral_mode)))
 
