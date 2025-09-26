@@ -62,6 +62,7 @@ def safe_to_int(value: Any, default: int = 0) -> int:
 def main() -> None:
     st.set_page_config(page_title="Rugby Predictions", layout="wide")
     st.title("Rugby Predictions Dashboard")
+    # Updated: Database sync fix - 2025-09-26
 
     # Controls
     league_name_to_id = {
