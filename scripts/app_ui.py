@@ -102,8 +102,8 @@ def main() -> None:
         st.cache_data.clear()
         st.rerun()
     
-    # Connect to database with cache busting
-    conn = sqlite3.connect(f"{db_path}?cache_buster={cache_buster}")
+    # Connect to database (SQLite doesn't support query parameters)
+    conn = sqlite3.connect(db_path)
     df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=float(elo_k), neutral_mode=bool(neutral_mode)))
 
     # Upcoming fixtures for selected league (future/today only)
