@@ -20,10 +20,10 @@ from prediction.features import build_feature_table, FeatureConfig
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.linear_model import LogisticRegression, Ridge, ElasticNet
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestRegressor
 
 
 def safe_to_float(value: Any, default: float = 0.0) -> float:
@@ -217,15 +217,15 @@ def main() -> None:
             if "date_event" in hist.columns:
                 max_dt = pd.to_datetime(hist["date_event"]).max()
                 days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
-                half_life_days = 365.0
+                half_life_days = 200.0
                 weights = np.exp(-days / half_life_days).astype(float)
             else:
                 weights = np.ones(len(hist), dtype=float)
         except Exception:
             weights = np.ones(len(hist), dtype=float)
 
-        # Current winsorization
-        def _winsorize(arr: np.ndarray, low: float = 0.02, high: float = 0.98) -> np.ndarray:
+        # Improved winsorization (less aggressive)
+        def _winsorize(arr: np.ndarray, low: float = 0.01, high: float = 0.99) -> np.ndarray:
             a = np.asarray(arr, dtype=float)
             lo = float(np.quantile(a, low)) if len(a) else 0.0
             hi = float(np.quantile(a, high)) if len(a) else 0.0
@@ -234,15 +234,29 @@ def main() -> None:
         y_home_w = _winsorize(y_home)
         y_away_w = _winsorize(y_away)
 
-        # Current regression models
-        reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
-        reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
+        # Improved regression models with better hyperparameters
+        reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
+        reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=0.5))
         reg_home.fit(X_hist, y_home_w, ridge__sample_weight=weights)
         reg_away.fit(X_hist, y_away_w, ridge__sample_weight=weights)
         
-        # Current gradient boosting models
-        gbdt_home = HistGradientBoostingRegressor(random_state=42)
-        gbdt_away = HistGradientBoostingRegressor(random_state=42)
+        # Improved gradient boosting models with better hyperparameters
+        gbdt_home = HistGradientBoostingRegressor(
+            random_state=42,
+            learning_rate=0.1,
+            max_iter=200,
+            max_depth=6,
+            min_samples_leaf=5,
+            max_features=0.8
+        )
+        gbdt_away = HistGradientBoostingRegressor(
+            random_state=42,
+            learning_rate=0.1,
+            max_iter=200,
+            max_depth=6,
+            min_samples_leaf=5,
+            max_features=0.8
+        )
         gbdt_home.fit(X_hist, y_home_w, sample_weight=weights)
         gbdt_away.fit(X_hist, y_away_w, sample_weight=weights)
 
@@ -275,10 +289,10 @@ def main() -> None:
     prob_home = 0.5 * (prob_lr + prob_gbdt)
     prob_away = 1.0 - prob_home
     
-    # Use optimized ensemble weights for better leagues
+    # Use improved ensemble weights based on league
     if use_optimized:
-        # Optimized ensemble weights (40% Ridge, 60% GBDT for home; 30% Ridge, 70% GBDT for away)
-        pred_home = 0.4 * cast(np.ndarray, reg_home.predict(X_upc)) + 0.6 * cast(np.ndarray, gbdt_home.predict(X_upc))
+        # Improved ensemble weights (30% Ridge, 70% GBDT for home; 30% Ridge, 70% GBDT for away)
+        pred_home = 0.3 * cast(np.ndarray, reg_home.predict(X_upc)) + 0.7 * cast(np.ndarray, gbdt_home.predict(X_upc))
         pred_away = 0.3 * cast(np.ndarray, reg_away.predict(X_upc)) + 0.7 * cast(np.ndarray, gbdt_away.predict(X_upc))
     else:
         # Current ensemble weights (50% Ridge, 50% GBDT)
