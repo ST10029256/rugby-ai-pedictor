@@ -211,14 +211,42 @@ def main() -> None:
     clf.fit(X_hist, y_hist)
     gbdt_clf = HistGradientBoostingClassifier(random_state=42)
     gbdt_clf.fit(X_hist, y_hist)
+    
+    # === ADVANCED REGRESSION MODELS (from local script) ===
+    # Time-decay weights for better recent game emphasis
+    weights = None
+    try:
+        if "date_event" in hist.columns:
+            max_dt = pd.to_datetime(hist["date_event"]).max()
+            days = (pd.to_datetime(hist["date_event"]) - max_dt).dt.days.abs().astype(float)
+            half_life_days = 365.0
+            weights = np.exp(-days / half_life_days).astype(float)
+        else:
+            weights = np.ones(len(hist), dtype=float)
+    except Exception:
+        weights = np.ones(len(hist), dtype=float)
+
+    # Winsorization for outlier handling
+    def _winsorize(arr: np.ndarray, low: float = 0.02, high: float = 0.98) -> np.ndarray:
+        a = np.asarray(arr, dtype=float)
+        lo = float(np.quantile(a, low)) if len(a) else 0.0
+        hi = float(np.quantile(a, high)) if len(a) else 0.0
+        return np.clip(a, lo, hi)
+
+    y_home_w = _winsorize(y_home)
+    y_away_w = _winsorize(y_away)
+
+    # Advanced regression models with time-decay weights
     reg_home = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
     reg_away = make_pipeline(SimpleImputer(strategy="median"), RobustScaler(), Ridge(alpha=1.0))
-    reg_home.fit(X_hist, y_home)
-    reg_away.fit(X_hist, y_away)
+    reg_home.fit(X_hist, y_home_w, ridge__sample_weight=weights)
+    reg_away.fit(X_hist, y_away_w, ridge__sample_weight=weights)
+    
+    # Advanced gradient boosting models with time-decay weights
     gbdt_home = HistGradientBoostingRegressor(random_state=42)
     gbdt_away = HistGradientBoostingRegressor(random_state=42)
-    gbdt_home.fit(X_hist, y_home)
-    gbdt_away.fit(X_hist, y_away)
+    gbdt_home.fit(X_hist, y_home_w, sample_weight=weights)
+    gbdt_away.fit(X_hist, y_away_w, sample_weight=weights)
 
     # Prepare upcoming rows
     if len(upc) == 0:
