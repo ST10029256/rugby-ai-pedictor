@@ -98,12 +98,30 @@ def main() -> None:
     st.write(f"🔄 Cache buster: {cache_buster}")
     
     # Add refresh button to force reload
-    if st.button("🔄 Force Refresh Data"):
-        st.cache_data.clear()
-        st.rerun()
+    st.write("**Cache Control:**")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Force Refresh Data"):
+            st.cache_data.clear()
+            st.rerun()
+    with col2:
+        if st.button("🗑️ Clear All Caches"):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.rerun()
     
     # Connect to database (SQLite doesn't support query parameters)
     conn = sqlite3.connect(db_path)
+    
+    # Force fresh data load by checking session state
+    if 'data_refresh' not in st.session_state:
+        st.session_state.data_refresh = cache_buster
+    
+    # If cache buster changed, force reload
+    if st.session_state.data_refresh != cache_buster:
+        st.session_state.data_refresh = cache_buster
+        st.cache_data.clear()
+    
     df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=float(elo_k), neutral_mode=bool(neutral_mode)))
 
     # Upcoming fixtures for selected league (future/today only)
