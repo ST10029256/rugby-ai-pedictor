@@ -6,7 +6,7 @@ __pycache__/
 
 # Local data and artifacts
 # data.sqlite  # Temporarily commented for deployment
-artifacts/
+# artifacts/  # Commented out to allow GitHub Actions to commit trained models
 
 # Streamlit local config
 .streamlit/secrets.toml
