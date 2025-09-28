@@ -1,0 +1,60 @@
+name: Automated Rugby AI - All Leagues
+
+on:
+  schedule:
+    # Run every 2 hours to check for completed matches across all leagues
+    - cron: '0 */2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+  push:
+    paths:
+      - 'data.sqlite'  # Trigger when database is updated
+
+jobs:
+  update-and-retrain-all-leagues:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Complete automation for all leagues
+      env:
+        THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
+        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+      run: |
+        echo "🚀 Running complete automation for ALL 4 leagues..."
+        echo "🏉 Rugby Championship, URC, Currie Cup, Rugby World Cup"
+        python scripts/complete_automation.py --db data.sqlite --verbose
+        
+    - name: Commit and push all changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data.sqlite artifacts/ last_checkpoint.json
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Auto-update: Updated all leagues and retrained AI models [skip ci]"
+          git push
+        fi
+        
+    - name: Upload training logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: all-leagues-training-logs
+        path: |
+          model_training.log
+          match_detection.log
+          auto_update.log
+          *.log
