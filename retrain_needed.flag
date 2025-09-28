@@ -1,1 +1,1 @@
-{"leagues_to_retrain": [4986, 4446], "completed_matches": [{"home_team": "Springboks", "away_team": "New Zealand", "home_score": 67, "away_score": 30}], "timestamp": "2025-09-28T22:32:00", "reason": "completed_matches"}
+Manual trigger - testing workflow after gitignore fix
