@@ -1,16 +1,15 @@
-name: Automated Rugby AI - All Leagues
+name: Retrain AI Models
 
 on:
-  schedule:
-    # Run every 2 hours to check for completed matches across all leagues
-    - cron: '0 */2 * * *'
+  # Only run when there are actual changes - no scheduled runs
   workflow_dispatch:  # Allow manual triggering
   push:
     paths:
       - 'data.sqlite'  # Trigger when database is updated
+      - 'retrain_needed.flag'  # Trigger when retraining flag is created
 
 jobs:
-  update-and-retrain-all-leagues:
+  retrain-models:
     runs-on: ubuntu-latest
     
     steps:
@@ -27,16 +26,35 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: Complete automation for all leagues
-      env:
-        THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+    - name: Check if retraining is needed
+      id: check-retrain
       run: |
-        echo "🚀 Running complete automation for ALL 4 leagues..."
-        echo "🏉 Rugby Championship, URC, Currie Cup, Rugby World Cup"
-        python scripts/complete_automation.py --db data.sqlite --verbose
+        if [ -f "retrain_needed.flag" ]; then
+          echo "retrain_needed=true" >> $GITHUB_OUTPUT
+          echo "🔄 Retraining flag found - models will be retrained"
+          cat retrain_needed.flag
+        else
+          echo "retrain_needed=false" >> $GITHUB_OUTPUT
+          echo "✅ No retraining needed - no flag file found"
+          exit 0
+        fi
+        
+    - name: Retrain models
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      run: |
+        echo "🤖 Retraining AI models..."
+        python scripts/train_models.py --db data.sqlite --verbose
+        
+    - name: Clean up retraining flag
+      if: always()
+      run: |
+        if [ -f "retrain_needed.flag" ]; then
+          rm retrain_needed.flag
+          echo "🧹 Cleaned up retraining flag file"
+        fi
         
     - name: Commit and push all changes
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
@@ -44,15 +62,15 @@ jobs:
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
-          git commit -m "Auto-update: Updated all leagues and retrained AI models [skip ci]"
+          git commit -m "Auto-retrain: Updated AI models with new data [skip ci]"
           git push
         fi
         
     - name: Upload training logs
-      if: always()
-      uses: actions/upload-artifact@v3
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      uses: actions/upload-artifact@v4
       with:
-        name: all-leagues-training-logs
+        name: model-training-logs
         path: |
           model_training.log
           match_detection.log

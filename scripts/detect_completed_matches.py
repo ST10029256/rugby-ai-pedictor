@@ -116,7 +116,7 @@ def detect_completed_matches(db_path: str, last_check: Optional[datetime] = None
     conn.close()
     return completed_matches
 
-def get_league_retraining_status() -> Dict[int, bool]:
+def get_league_retraining_status() -> tuple[Dict[int, bool], List[Dict[str, Any]]]:
     """Check which leagues need retraining based on completed matches"""
     db_path = os.path.join(project_root, "data.sqlite")
     last_check = get_last_checkpoint()
@@ -277,25 +277,22 @@ def main():
         save_checkpoint(datetime.now())
         return 0
     
-    # Trigger retraining
-    retraining_success = trigger_model_retraining(leagues_to_retrain)
-    
-    if retraining_success:
-        # Update model registry
-        update_model_registry(completed_matches)
-        
-        # Commit and push changes
-        commit_success = commit_and_push_changes()
-        
-        if commit_success:
-            logger.info("Successfully completed automated retraining cycle")
-            save_checkpoint(datetime.now())
-            return 0
-        else:
-            logger.error("Failed to commit/push changes")
-            return 1
-    else:
-        logger.error("Model retraining failed")
+    # Create retraining flag file
+    retrain_flag_file = os.path.join(project_root, "retrain_needed.flag")
+    try:
+        with open(retrain_flag_file, 'w') as f:
+            json.dump({
+                "leagues_to_retrain": leagues_to_retrain,
+                "completed_matches": completed_matches,
+                "timestamp": datetime.now().isoformat(),
+                "reason": "completed_matches"
+            }, f, indent=2)
+        logger.info(f"Created retraining flag file: {retrain_flag_file}")
+        logger.info(f"Leagues to retrain: {leagues_to_retrain}")
+        save_checkpoint(datetime.now())
+        return 0
+    except Exception as e:
+        logger.error(f"Failed to create retraining flag file: {e}")
         return 1
 
 if __name__ == "__main__":
