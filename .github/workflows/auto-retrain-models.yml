@@ -35,13 +35,10 @@ jobs:
         echo "🔍 Checking for completed matches..."
         python scripts/detect_completed_matches.py
         
-    - name: Update upcoming games
-      env:
-        THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+    - name: Update all games from TheSportsDB
       run: |
-        echo "📅 Updating upcoming games..."
-        python scripts/simple_auto_update.py --db data.sqlite --days-ahead 30 --verbose
+        echo "📅 Updating all games from TheSportsDB..."
+        python scripts/enhanced_auto_update.py --db data.sqlite --verbose
         
     - name: Commit and push changes
       run: |
