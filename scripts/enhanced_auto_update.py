@@ -180,10 +180,9 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
     
     logger.info(f"Found {len(games)} total games, {len(unique_games)} unique games for {league_name}")
     
-    # If no games found from API, try manual fallback for URC
-    if not unique_games and league_id == 4446:  # URC
-        logger.warning("No URC games found from API, trying manual fallback...")
-        unique_games = get_manual_urc_fixtures()
+    # If no games found from API, log warning
+    if not unique_games:
+        logger.warning(f"No games found from API for {league_name}")
     
     return unique_games
 
@@ -401,7 +400,20 @@ def main():
     logger.info(f"🎉 Update complete! Total games updated: {total_updated}")
     
     if total_updated > 0:
-        logger.info("🔄 Run 'python scripts/detect_completed_matches.py' to retrain models with new data")
+        # Create retraining flag file for new games
+        retrain_flag_file = "retrain_needed.flag"
+        try:
+            with open(retrain_flag_file, 'w') as f:
+                json.dump({
+                    "leagues_to_retrain": list(LEAGUE_MAPPINGS.keys()),
+                    "games_updated": total_updated,
+                    "timestamp": datetime.now().isoformat(),
+                    "reason": "new_games_fetched"
+                }, f, indent=2)
+            logger.info(f"🔄 Created retraining flag file: {retrain_flag_file}")
+            logger.info("🤖 Models will be retrained with new game data")
+        except Exception as e:
+            logger.error(f"Failed to create retraining flag file: {e}")
 
 if __name__ == "__main__":
     main()
