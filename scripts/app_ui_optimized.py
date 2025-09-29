@@ -428,15 +428,17 @@ def main() -> None:
         registry_summary = model_manager.get_registry_summary()
         
         if "error" not in registry_summary:
+            leagues_data = registry_summary.get("leagues", {})
             with st.expander("System Status", expanded=False):
                 st.write(f"**Last Updated:** {registry_summary.get('last_updated', 'Unknown')}")
-                st.write(f"**Total Leagues:** {registry_summary.get('total_leagues', 0)}")
+                st.write(f"**Total Leagues:** {len(leagues_data)}")
                 
                 # Show league-specific status in a more compact format
-                for league_id_key, info in registry_summary.get("leagues", {}).items():
+                for league_id_key, info in leagues_data.items():
                     league_name = info.get("name", f"League {league_id_key}")
-                    accuracy = info.get("winner_accuracy", 0)
-                    mae = info.get("overall_mae", 0)
+                    performance = info.get("performance", {})
+                    accuracy = performance.get("winner_accuracy", 0)
+                    mae = performance.get("overall_mae", 0)
                     st.metric(
                         label=league_name,
                         value=f"{accuracy:.1%}",
