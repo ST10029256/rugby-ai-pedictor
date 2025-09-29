@@ -52,7 +52,19 @@ def safe_to_int(value: Any, default: int = 0) -> int:
 @st.cache_resource
 def load_model_manager():
     """Load the model manager with caching"""
-    return ModelManager()
+    # Get the project root directory to ensure correct path resolution
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(current_dir, os.pardir))
+    artifacts_path = os.path.join(project_root, 'artifacts')
+    
+    # Verify artifacts directory exists
+    if not os.path.exists(artifacts_path):
+        st.error(f"❌ Artifacts directory not found at: {artifacts_path}")
+        st.error(f"Current working directory: {os.getcwd()}")
+        return None
+    
+    return ModelManager(artifacts_path)
 
 def main() -> None:
     st.set_page_config(
@@ -342,6 +354,20 @@ def main() -> None:
 
     # Initialize model manager
     model_manager = load_model_manager()
+    
+    if model_manager is None:
+        st.error("❌ **Critical Error**: Unable to load model manager!")
+        st.error("The artifacts directory or models could not be found.")
+        st.stop()
+    
+    # Debug information (hidden by default)  
+    debug_info = st.expander("🔍 Debug Information", expanded=False)
+    with debug_info:
+        registry_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, 'artifacts', 'model_registry.json')
+        st.write(f"**Model Manager Status:** ✅ Loaded successfully")
+        st.write(f"**Registry Path:** `{registry_path}`")
+        st.write(f"**Current Directory:** `{os.getcwd()}`")
+        st.write(f"**App Directory:** `{os.path.dirname(os.path.abspath(__file__))}`")
     
     # Mobile-optimized sidebar
     with st.sidebar:
