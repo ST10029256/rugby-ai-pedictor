@@ -1,25 +1,11 @@
 [server]
-# Security and performance settings
+# Minimal configuration for Streamlit Cloud
 runOnSave = false
 maxUploadSize = 200
-enableWebsocketCompression = false
-enableXsrfProtection = true
-enableCORS = false
-
-# Minimize browser warnings
-headless = false
 
 [browser]
-# Disable unnecessary features to reduce console warnings
 gatherUsageStats = false
 
-[theme]
-# Optimize default theme
-primaryColor = "#1f77b4"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
-
 [logger]
-# Reduce log verbosity
-level = "warning"
+# More verbose logging for debugging
+level = "info"
