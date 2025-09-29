@@ -162,13 +162,31 @@ class ModelManager:
                 if features.ndim == 1:
                     features = features.reshape(1, -1)
             
+            # Debug logging for Rugby Championship
+            if league_id == 4986:
+                print(f"[DEBUG] PRE-SCALING features shape: {features.shape}")
+                print(f"[DEBUG] PRE-SCALING features min/max: {features.min():.3f}/{features.max():.3f}")
+                print(f"[DEBUG] Scaler exists: {scaler is not None}")
+                if scaler:
+                    print(f"[DEBUG] Scaler type: {type(scaler)}")
+            
             # Apply scaling if scaler exists (essential for Rugby Championship)
             if scaler is not None:
-                features = scaler.transform(features)
+                features_scaled = scaler.transform(features)
+                if league_id == 4986:
+                    print(f"[DEBUG] POST-SCALING features min/max: {features_scaled.min():.3f}/{features_scaled.max():.3f}")
+                features = features_scaled
             
             # Make predictions
-            home_score = float(home_regressor.predict(features)[0])
-            away_score = float(away_regressor.predict(features)[0])
+            raw_home = home_regressor.predict(features)[0]
+            raw_away = away_regressor.predict(features)[0]
+            
+            # Debug the raw predictions
+            if league_id == 4986:
+                print(f"[DEBUG] RAW predictions - Home: {raw_home:.3f}, Away: {raw_away:.3f}")
+            
+            home_score = float(raw_home)
+            away_score = float(raw_away)
             
             # Ensure non-negative scores
             home_score = max(0.0, home_score)
