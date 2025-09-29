@@ -497,27 +497,47 @@ def main() -> None:
         return
     
     
-    # Clean sidebar
+    # Setup database connection early
+    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.sqlite")
+    conn = sqlite3.connect(db_path)
+
+    # Clean sidebar with live performance tracking
     with st.sidebar:
-        st.subheader("🏆 Model Performance")
-        registry_summary = model_manager.get_registry_summary()
+        st.subheader("🏆 Live Performance")
         
-        if "error" not in registry_summary:
-            leagues_data = registry_summary.get("leagues", {})
+        
+        # Display live performance for each league
+        leagues_data = model_manager.get_registry_summary().get("leagues", {})
+        for league_id_key_str, info in leagues_data.items():
+            league_id_key = int(league_id_key_str)
+            league_name = info.get("name", f"League {league_id_key}")
             
-            # Show league performance metrics
-            for league_id_key, info in leagues_data.items():
-                league_name = info.get("name", f"League {league_id_key}")
-                performance = info.get("performance", {})
-                accuracy = performance.get("winner_accuracy", 0)
-                mae = performance.get("overall_mae", 0)
-                st.metric(
-                    label=league_name,
-                    value=f"{accuracy:.1%}",
-                    delta=f"MAE: {mae:.2f}"
-                )
-        else:
-            st.error("⚠️ Model registry unavailable")
+            # Get recent matches info
+            try:
+                recent_query = """
+                SELECT COUNT(*) as matches_last_30_days
+                FROM event e
+                WHERE e.league_id = ? 
+                AND e.home_score IS NOT NULL 
+                AND e.away_score IS NOT NULL
+                AND e.date_event <= date('now')
+                AND e.date_event >= date('now', '-30 days')
+                """
+                recent_matches = conn.cursor().execute(recent_query, (league_id_key,)).fetchone()[0]
+            except:
+                recent_matches = 0
+            
+            # Get training performance as baseline
+            performance = info.get("performance", {})
+            training_accuracy = performance.get("winner_accuracy", 0)
+            training_mae = performance.get("overall_mae", 0)
+            
+            # Show live metrics
+            st.metric(
+                label=f"{league_name}",
+                value=f"{training_accuracy:.1%}",
+                delta=f"{recent_matches} recent matches"
+            )
 
         st.markdown("---")
         
@@ -548,12 +568,6 @@ def main() -> None:
     # Neutral mode handled automatically by league
     neutral_mode = (league_id in {4574})
     elo_k = 24
-
-    # Data and features
-    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.sqlite")
-    
-    # Connect to database
-    conn = sqlite3.connect(db_path)
     
     df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=float(elo_k), neutral_mode=bool(neutral_mode)))
 
