@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Main Streamlit App Entry Point
-Redirects to the optimized version for backward compatibility
+Uses the optimized version with console warning suppression
 """
 
 import os
@@ -14,7 +14,15 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Import and run the optimized app
-from scripts.app_ui_optimized import *
+try:
+    from scripts.app_ui_optimized import main
+    
+    if __name__ == "__main__":
+        main()
+except ImportError as e:
+    print(f"Error importing optimized app: {e}")
+    print("Falling back to basic import...")
+    exec(open(os.path.join(script_dir, 'app_ui_optimized.py')).read())
 
 if __name__ == "__main__":
     # This file serves as a redirect to the optimized version
