@@ -1,0 +1,24 @@
+[server]
+# Configure CORS for iframe security
+enableCORS = false
+
+# Browser security settings
+runOnSave = false
+
+# Performance optimizations
+maxUploadSize = 200
+
+[browser]
+# Disable unnecessary features to reduce console warnings
+gatherUsageStats = false
+
+[theme]
+# Optimize default theme
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+
+[logger]
+# Reduce log verbosity
+level = "warning"
