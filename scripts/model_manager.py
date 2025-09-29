@@ -67,6 +67,7 @@ class ModelManager:
             
             self._models[league_id] = model_package
             logger.info(f"Loaded model for league {league_id}")
+            logger.info(f"Model package keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
             return model_package
             
         except AttributeError as e:
@@ -95,6 +96,7 @@ class ModelManager:
             classifier = model_package.get('classifier')
             if classifier is None:
                 logger.error(f"No classifier found for league {league_id}")
+                logger.error(f"Available keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
                 return 0.5, 0.5  # Default to equal probability
             
             # Make prediction
@@ -130,6 +132,7 @@ class ModelManager:
             
             if home_regressor is None or away_regressor is None:
                 logger.error(f"No regressors found for league {league_id}")
+                logger.error(f"Available keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
                 return 0.0, 0.0  # Default to zero scores
             
             # Make predictions
