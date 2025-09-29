@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple, cast
 
 import pandas as pd
+import numpy as np
 
 
 @dataclass
@@ -158,6 +159,8 @@ def add_form_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
     team_last_n_wins: Dict[Tuple[int, int], List[int]] = {}  # (league_id, team_id) -> results list 1/0
     home_form: List[float] = []
     away_form: List[float] = []
+    home_form_10: List[float] = []
+    away_form_10: List[float] = []
 
     window = config.form_window
 
@@ -172,11 +175,15 @@ def add_form_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
         home_id = int(home_val) if pd.notna(home_val) else -1
         away_id = int(away_val) if pd.notna(away_val) else -1
 
-        # Compute pre-match rolling win rate for each side
+        # Compute pre-match rolling win rate for each side (5-game window)
         home_hist = team_last_n_wins.get((league_id, home_id), [])
         away_hist = team_last_n_wins.get((league_id, away_id), [])
         home_form.append(sum(home_hist[-window:]) / window if len(home_hist) >= window else (sum(home_hist) / max(1, len(home_hist)) if home_hist else 0.0))
         away_form.append(sum(away_hist[-window:]) / window if len(away_hist) >= window else (sum(away_hist) / max(1, len(away_hist)) if away_hist else 0.0))
+        
+        # QUICK WIN: 10-game window for more stable form
+        home_form_10.append(sum(home_hist[-10:]) / 10 if len(home_hist) >= 10 else (sum(home_hist) / max(1, len(home_hist)) if home_hist else 0.0))
+        away_form_10.append(sum(away_hist[-10:]) / 10 if len(away_hist) >= 10 else (sum(away_hist) / max(1, len(away_hist)) if away_hist else 0.0))
 
         # After match, update histories if we have results
         if pd.notna(home_score_val) and pd.notna(away_score_val):
@@ -189,6 +196,11 @@ def add_form_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
     df["home_form"] = pd.Series(home_form, index=df.index, dtype="float64")
     df["away_form"] = pd.Series(away_form, index=df.index, dtype="float64")
     df["form_diff"] = df["home_form"] - df["away_form"]
+    
+    # QUICK WIN: Add 10-game form features
+    df["home_form_10"] = pd.Series(home_form_10, index=df.index, dtype="float64")
+    df["away_form_10"] = pd.Series(away_form_10, index=df.index, dtype="float64")
+    
     return df
 
 
@@ -326,12 +338,28 @@ def add_advanced_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFra
     df = add_win_rate_features(df)
     df = add_elo_expectation_features(df)
     
-    # Elo ratio and sum
-    df["elo_ratio"] = df["elo_home_pre"] / df["elo_away_pre"].replace(0, 1)
-    df["elo_sum"] = df["elo_home_pre"] + df["elo_away_pre"]
+    # QUICK WIN 1: League-specific ELO adjustments (highest impact)
+    league_strength_factors = {
+        4446: 1.0,   # URC (baseline)
+        4986: 1.1,   # Rugby Championship (stronger competition)
+        5069: 0.9,   # Currie Cup (weaker competition)
+        4574: 1.3    # Rugby World Cup (strongest competition)
+    }
     
-    # Improved form calculation (longer window for better stability)
+    df["league_strength_factor"] = df["league_id"].replace(league_strength_factors).fillna(1.0)
+    df["elo_home_adjusted"] = df["elo_home_pre"] * df["league_strength_factor"]
+    df["elo_away_adjusted"] = df["elo_away_pre"] * df["league_strength_factor"]
+    df["elo_diff_adjusted"] = df["elo_home_adjusted"] - df["elo_away_adjusted"]
+    
+    # Enhanced ELO ratio and sum with league adjustments
+    df["elo_ratio"] = df["elo_home_adjusted"] / df["elo_away_adjusted"].replace(0, 1)
+    df["elo_sum"] = df["elo_home_adjusted"] + df["elo_away_adjusted"]
+    
+    # QUICK WIN 2: Enhanced form calculation (more stable windows)
     df["form_diff_10"] = df["home_form"] - df["away_form"]  # More stable than 5-game
+    
+    # Use the actual 10-game form calculated in add_form_features
+    df["form_diff_10_advanced"] = df["home_form_10"] - df["away_form_10"]
     
     # Recent head-to-head (better calculation)
     df["h2h_recent"] = df["h2h_home_rate"]  # Already calculated properly
@@ -355,10 +383,15 @@ def add_advanced_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFra
     df["home_defense_strength"] = 1.0 - df["away_form"]  # Inversely related to opponent scoring
     df["away_defense_strength"] = 1.0 - df["home_form"]
     
-    # Enhanced momentum (accounts for trend direction)
+    # QUICK WIN 3: Enhanced momentum indicators (trending up/down)
     df["home_momentum"] = df["home_form"] + (df["home_goal_diff_form"] / 10.0)
     df["away_momentum"] = df["away_form"] + (df["away_goal_diff_form"] / 10.0)
     df["momentum_diff"] = df["home_momentum"] - df["away_momentum"]
+    
+    # Additional momentum features for better trend detection
+    df["home_momentum_trend"] = df["home_momentum"] * df["home_form"]  # Combined momentum
+    df["away_momentum_trend"] = df["away_momentum"] * df["away_form"]
+    df["momentum_advantage"] = df["home_momentum_trend"] - df["away_momentum_trend"]
     
     # League strength based on historical competitiveness
     league_strength_map = {
@@ -367,6 +400,30 @@ def add_advanced_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFra
         5069: 0.70,  # Good domestic level
         4574: 0.95   # Elite tournament level
     }
+    
+    # QUICK WIN 4: Advanced feature engineering (interactions and polynomials)
+    # ELO and form interactions
+    df["elo_form_interaction"] = df["elo_diff_adjusted"] * df["form_diff_10_advanced"]
+    df["elo_momentum_interaction"] = df["elo_diff_adjusted"] * df["momentum_advantage"]
+    df["form_momentum_interaction"] = df["form_diff_10_advanced"] * df["momentum_advantage"]
+    
+    # Polynomial features for non-linear relationships
+    df["elo_diff_squared"] = df["elo_diff_adjusted"] ** 2
+    df["form_diff_squared"] = df["form_diff_10_advanced"] ** 2
+    df["momentum_squared"] = df["momentum_advantage"] ** 2
+    
+    # Advanced combinations
+    df["home_strength_composite"] = (df["elo_home_adjusted"] * df["home_form_10"] * df["home_momentum_trend"]) / 1000
+    df["away_strength_composite"] = (df["elo_away_adjusted"] * df["away_form_10"] * df["away_momentum_trend"]) / 1000
+    df["strength_ratio_advanced"] = df["home_strength_composite"] / df["away_strength_composite"].replace(0, 0.001)
+    
+    # League-adjusted home advantage
+    df["home_advantage_league_adjusted"] = df["home_advantage"] * df["league_strength_factor"]
+    
+    # Rest days impact (more rest = better performance, but diminishing returns)
+    df["home_rest_impact"] = np.log(df["home_rest_days"] + 1) * df["home_form_10"]
+    df["away_rest_impact"] = np.log(df["away_rest_days"] + 1) * df["away_form_10"]
+    df["rest_impact_diff"] = df["home_rest_impact"] - df["away_rest_impact"]
     df["league_strength"] = df["league_id"].replace(league_strength_map).fillna(0.65)
     
     # League-specific form (adjusted for league strength)
@@ -412,6 +469,36 @@ def build_feature_table(conn: sqlite3.Connection, config: FeatureConfig) -> pd.D
         "h2h_home_rate",
         "season_phase",
         "is_home",
+        # QUICK WIN FEATURES - League-adjusted ELO
+        "league_strength_factor",
+        "elo_home_adjusted",
+        "elo_away_adjusted", 
+        "elo_diff_adjusted",
+        # QUICK WIN FEATURES - Enhanced form
+        "home_form_10",
+        "away_form_10",
+        "form_diff_10_advanced",
+        # QUICK WIN FEATURES - Enhanced momentum
+        "home_momentum_trend",
+        "away_momentum_trend",
+        "momentum_advantage",
+        # QUICK WIN FEATURES - Advanced interactions
+        "elo_form_interaction",
+        "elo_momentum_interaction", 
+        "form_momentum_interaction",
+        # QUICK WIN FEATURES - Polynomial features
+        "elo_diff_squared",
+        "form_diff_squared",
+        "momentum_squared",
+        # QUICK WIN FEATURES - Composite strength
+        "home_strength_composite",
+        "away_strength_composite",
+        "strength_ratio_advanced",
+        # QUICK WIN FEATURES - Advanced adjustments
+        "home_advantage_league_adjusted",
+        "home_rest_impact",
+        "away_rest_impact",
+        "rest_impact_diff",
         # Advanced features
         "elo_ratio",
         "elo_sum",

@@ -240,9 +240,10 @@ def make_prediction(model_data, game_row, team_names, feature_cols):
         models = model_data.get('models', {})
         scaler = model_data.get('scaler')
         
+        # Use ensemble models (new enhanced models)
         winner_model = models.get('gbdt_clf', models.get('clf'))
-        home_model = models.get('gbdt_reg_home', models.get('reg_home'))
-        away_model = models.get('gbdt_reg_away', models.get('reg_away'))
+        home_model = models.get('reg_home')
+        away_model = models.get('reg_away')
         
         home_id = safe_int(game_row['home_team_id'])
         away_id = safe_int(game_row['away_team_id'])
@@ -472,15 +473,27 @@ def main():
             league_data = leagues[selected_league]
             perf = league_data.get('performance', {})
             
-            # Clean performance display
-            st.subheader("📊 Model Performance")
+            # Enhanced Smart AI performance display
+            st.subheader("🧠 Smart AI Performance")
             accuracy = perf.get('winner_accuracy', 0)
+            mae = perf.get('overall_mae', 0)
             
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Winner Accuracy", f"{accuracy:.1%}")
+                if accuracy > 0.65:
+                    st.success(f"Winner Accuracy: {accuracy:.1%} (EXCELLENT!)")
+                elif accuracy > 0.60:
+                    st.info(f"Winner Accuracy: {accuracy:.1%} (GOOD)")
+                else:
+                    st.metric("Winner Accuracy", f"{accuracy:.1%}")
+            
             with col2:
-                st.metric("Score MAE", f"{perf.get('overall_mae', 0):.1f}")
+                if mae < 10:
+                    st.success(f"Score MAE: {mae:.1f} (EXCELLENT!)")
+                elif mae < 12:
+                    st.info(f"Score MAE: {mae:.1f} (GOOD)")
+                else:
+                    st.metric("Score MAE", f"{mae:.1f}")
             
             # Training info
             trained_at = league_data.get('trained_at', 'Unknown')
@@ -499,7 +512,7 @@ def main():
             else:
                 trained_str = "Unknown"
             
-            st.caption(f"Model trained: {trained_str}")
+            st.caption(f"🧠 Smart AI (Ensemble) trained: {trained_str}")
     
     # Main content
     if selected_league:
