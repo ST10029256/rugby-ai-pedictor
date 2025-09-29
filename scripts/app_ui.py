@@ -72,15 +72,68 @@ def main():
         if selected_league:
             league_name = league_names[selected_league]
             
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write(f"**League:** {league_name}")
-                st.write(f"**League ID:** {selected_league}")
+            # Try to load model and make predictions
+            try:
+                model_data = model_manager.load_model(selected_league)
                 
-            with col2:
-                st.write("**Features:** 34 advanced prediction features")
-                st.write("**Accuracy:** Enhanced AI model")
+                if model_data and "error" not in model_data:
+                    st.success(f"✅ **{league_name}** model loaded successfully")
+                    
+                    # Show model performance
+                    perf = model_data.get("performance", {})
+                    st.write("**📊 Model Performance:**")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Winner Accuracy", f"{perf.get('winner_accuracy', 0):.1%}")
+                    with col2:
+                        st.metric("Home MAE", f"{perf.get('home_mae', 0):.1f}")
+                    with col3:
+                        st.metric("Away MAE", f"{perf.get('away_mae', 0):.1f}")
+                    with col4:
+                        st.metric("Overall MAE", f"{perf.get('overall_mae', 0):.1f}")
+                    
+                    # Feature information
+                    feature_count = len(model_data.get("feature_columns", []))
+                    st.write(f"**🔧 Features:** {feature_count} advanced prediction features")
+                    
+                    # Training information
+                    training_games = model_data.get("training_games", 0)
+                    trained_at = model_data.get("trained_at", "Unknown")
+                    st.write(f"**📈 Training:** {training_games} games (trained: {trained_at})")
+                    
+                    # Sample prediction demo
+                    st.subheader("🎲 Prediction Demo")
+                    st.write("Model ready for real-time predictions...")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write("**🏠 Home Team Example:**")
+                        st.write("- Team Strength: High")
+                        st.write("- Recent Form: Good") 
+                        
+                    with col2:
+                        st.write("**✈️ Away Team Example:**")
+                        st.write("- Team Strength: Medium")
+                        st.write("- Recent Form: Fair")
+                    
+                    st.info("💡 **Real Predictions**: Use the full app for team selection and live score predictions")
+                    
+                else:
+                    st.warning("⚠️ Model data incomplete")
+                    
+            except Exception as pred_e:
+                st.error(f"🚨 **Prediction Error**: {pred_e}")
+                
+                # Show basic info as fallback
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**League:** {league_name}")
+                    st.write(f"**League ID:** {selected_league}")
+                    
+                with col2:
+                    st.write("**Features:** 34 advanced prediction features")
+                    st.write("**Accuracy:** Enhanced AI model")
         
         # Close database
         conn.close()
