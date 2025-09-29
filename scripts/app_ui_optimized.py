@@ -66,12 +66,37 @@ def main() -> None:
         }
     )
     
-    # Add security headers and feature policy to reduce console warnings
+    # Immediately inject console warning suppression script
+    st.markdown("""
+    <script>
+        // Immediately suppress console warnings before Streamlit loads
+        (function() {
+            const originalWarn = console.warn;
+            const originalError = console.error;
+            const blockedFeatures = ['ambient-light-sensor', 'battery', 'document-domain', 'layout-animations', 'legacy-image-formats', 'oversized-images', 'vr', 'wake-lock'];
+            
+            console.warn = function(msg) {
+                if (typeof msg === 'string' && blockedFeatures.some(f => msg.includes(f))) return;
+                if (arguments.length > 0 && typeof arguments[0] === 'string' && arguments[0].includes('Unrecognized feature')) return;
+                originalWarn.apply(console, arguments);
+            };
+            
+            console.error = function(msg) {
+                if (typeof msg === 'string' && msg.includes('iframe') && msg.includes('sandbox')) return;
+                originalError.apply(console, arguments);
+            };
+        })();
+    </script>
+    """, unsafe_allow_html=True)
+    
+    # Add comprehensive security headers after script
     st.markdown("""
     <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
         <meta http-equiv="Permissions-Policy" content="ambient-light-sensor=(), battery=(), document-domain=(), layout-animations=(self), legacy-image-formats=(self), oversized-images=(self), vr=(self), wake-lock=()">
-        <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'self'">
+        <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'self'; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+        <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
+        <meta http-equiv="X-Content-Type-Options" content="nosniff">
     </head>
     """, unsafe_allow_html=True)
     

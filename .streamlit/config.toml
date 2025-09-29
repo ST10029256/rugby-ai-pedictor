@@ -8,9 +8,21 @@ runOnSave = false
 # Performance optimizations
 maxUploadSize = 200
 
+# Disable unnecessary features
+enableWebsocketCompression = false
+maxRequestSize = 50
+
+# Frame options to reduce iframe warnings
+frameOptions = "SAMEORIGIN"
+
 [browser]
 # Disable unnecessary features to reduce console warnings
 gatherUsageStats = false
+
+# Additional browser security settings
+serverHeadless = false
+serverRunOnSave = false
+serverEnableWebsocketCompression = false
 
 [theme]
 # Optimize default theme
