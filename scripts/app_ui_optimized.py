@@ -66,9 +66,28 @@ def main() -> None:
         }
     )
     
+    # Add security headers and feature policy to reduce console warnings
+    st.markdown("""
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="Permissions-Policy" content="ambient-light-sensor=(), battery=(), document-domain=(), layout-animations=(self), legacy-image-formats=(self), oversized-images=(self), vr=(self), wake-lock=()">
+        <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'self'">
+    </head>
+    """, unsafe_allow_html=True)
+    
     # Add enhanced CSS for mobile responsiveness
     st.markdown("""
     <style>
+    /* Suppress browser warnings */
+    html { 
+        overflow-x: hidden; 
+    }
+    
+    body {
+        overscroll-behavior: none;
+        touch-action: manipulation;
+    }
+    
     /* Global mobile optimizations */
     .main .block-container {
         padding-top: 2rem;
