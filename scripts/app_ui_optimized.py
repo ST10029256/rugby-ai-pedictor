@@ -62,7 +62,15 @@ def load_model_manager():
     if not os.path.exists(artifacts_path):
         st.error(f"❌ Artifacts directory not found at: {artifacts_path}")
         st.error(f"Current working directory: {os.getcwd()}")
-        return None
+        # Try to find any artifacts directory
+        for root, dirs, files in os.walk(os.getcwd()):
+            if 'artifacts' in dirs:
+                found_path = os.path.join(root, 'artifacts')
+                st.error(f"Found artifacts directory at: {found_path}")
+                artifacts_path = found_path
+                break
+        else:
+            return None
     
     return ModelManager(artifacts_path)
 
@@ -368,6 +376,20 @@ def main() -> None:
         st.write(f"**Registry Path:** `{registry_path}`")
         st.write(f"**Current Directory:** `{os.getcwd()}`")
         st.write(f"**App Directory:** `{os.path.dirname(os.path.abspath(__file__))}`")
+        
+        # Model availability debugging
+        st.write("**Model Availability Check:**")
+        league_names = model_manager.get_league_names()
+        for league_id, league_name in league_names.items():
+            is_available = model_manager.is_model_available(league_id)
+            model_file = f"/mount/src/rugby-ai-pedictor/artifacts/league_{league_id}_model.pkl"
+            st.write(f"- **{league_name}** (ID: {league_id}): {'✅ Available' if is_available else '❌ Not Found'}")
+            if not is_available:
+                st.write(f"  Expected file: `{model_file}`")
+        
+        # Registry content
+        registry_summary = model_manager.get_registry_summary()
+        st.write(f"**Total Leagues in Registry:** {len(registry_summary.get('leagues', {}))}")
     
     # Mobile-optimized sidebar
     with st.sidebar:
