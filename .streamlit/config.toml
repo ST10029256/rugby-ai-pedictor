@@ -1,18 +1,13 @@
 [server]
-# Configure CORS for iframe security (disabled due to XSRF protection conflict)
-# enableCORS = true  # Required by XSRF protection
-
-# Browser security settings
+# Security and performance settings
 runOnSave = false
-
-# Performance optimizations
 maxUploadSize = 200
-
-# Disable unnecessary features
 enableWebsocketCompression = false
-
-# Security headers (removed invalid options)
 enableXsrfProtection = true
+enableCORS = false
+
+# Minimize browser warnings
+headless = false
 
 [browser]
 # Disable unnecessary features to reduce console warnings

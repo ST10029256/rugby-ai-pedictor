@@ -156,8 +156,7 @@ def main() -> None:
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
         <meta http-equiv="Permissions-Policy" content="ambient-light-sensor=(), battery=(), document-domain=(), layout-animations=(self), legacy-image-formats=(self), oversized-images=(self), vr=(self), wake-lock=()">
-        <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'self'; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
-        <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
         <meta http-equiv="X-Content-Type-Options" content="nosniff">
     </head>
     """, unsafe_allow_html=True)
