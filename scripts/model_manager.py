@@ -67,7 +67,6 @@ class ModelManager:
             
             self._models[league_id] = model_package
             logger.info(f"Loaded model for league {league_id}")
-            logger.info(f"Model package keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
             return model_package
             
         except AttributeError as e:
@@ -92,10 +91,13 @@ class ModelManager:
                 logger.error(f"Model loading failed for league {league_id}")
                 return 0.5, 0.5  # Default to equal probability
             
-            # Get the classification model
-            classifier = model_package.get('classifier')
+            # Get the models sub-dictionary
+            models_dict = model_package.get('models', {})
+            classifier = models_dict.get('classifier') or models_dict.get('winner_predictor') or models_dict.get('clf')
+            
             if classifier is None:
                 logger.error(f"No classifier found for league {league_id}")
+                logger.error(f"Models dict keys: {list(models_dict.keys()) if isinstance(models_dict, dict) else 'Not a dict'}")
                 logger.error(f"Available keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
                 return 0.5, 0.5  # Default to equal probability
             
@@ -126,12 +128,14 @@ class ModelManager:
                 logger.error(f"Model loading failed for league {league_id}")
                 return 0.0, 0.0  # Default to zero scores
             
-            # Get the regression models
-            home_regressor = model_package.get('home_regressor')
-            away_regressor = model_package.get('away_regressor')
+            # Get the models sub-dictionary  
+            models_dict = model_package.get('models', {})
+            home_regressor = models_dict.get('home_regressor') or models_dict.get('home_score_predictor') or models_dict.get('reg_home')
+            away_regressor = models_dict.get('away_regressor') or models_dict.get('away_score_predictor') or models_dict.get('reg_away')
             
             if home_regressor is None or away_regressor is None:
                 logger.error(f"No regressors found for league {league_id}")
+                logger.error(f"Models dict keys: {list(models_dict.keys()) if isinstance(models_dict, dict) else 'Not a dict'}")
                 logger.error(f"Available keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
                 return 0.0, 0.0  # Default to zero scores
             
