@@ -14,7 +14,7 @@ if project_root not in sys.path:
 
 # Import and run the optimized app
 try:
-    from scripts.app_ui_optimized import main
+    from enhanced_app import main
     
     if __name__ == "__main__":
         main()
