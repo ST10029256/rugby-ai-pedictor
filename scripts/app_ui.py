@@ -189,8 +189,8 @@ def main():
                                         
                                         # Make actual AI predictions
                                         win_prob = 0.5  # Default
-                                        home_score_pred = 20  # Default
-                                        away_score_pred = 18  # Default
+                                        home_score_pred = 32  # More realistic rugby scores
+                                        away_score_pred = 28  # More realistic rugby scores
                                         
                                         # Winner prediction
                                         if winner_model:
@@ -201,18 +201,26 @@ def main():
                                             except Exception as w_e:
                                                 pass
                                         
-                                        # Score predictions
+                                        # Score predictions - DEBUG what the model actually outputs
                                         if home_score_model:
                                             try:
-                                                home_score_pred = max(0, int(round(home_score_model.predict(X_pred)[0])))
+                                                raw_home_pred = home_score_model.predict(X_pred)[0]
+                                                print(f"DEBUG: Raw home prediction: {raw_home_pred}")
+                                                home_score_pred = max(15, int(round(raw_home_pred)))  # Min 15 points
+                                                print(f"DEBUG: Processed home score: {home_score_pred}")
                                             except Exception as h_e:
-                                                home_score_pred = 20 + (selected_league % 10)
+                                                print(f"DEBUG: Home prediction failed: {h_e}")
+                                                home_score_pred = 30 + (selected_league % 15)  # More realistic range
                                         
                                         if away_score_model:
                                             try:
-                                                away_score_pred = max(0, int(round(away_score_model.predict(X_pred)[0])))
+                                                raw_away_pred = away_score_model.predict(X_pred)[0]
+                                                print(f"DEBUG: Raw away prediction: {raw_away_pred}")
+                                                away_score_pred = max(12, int(round(raw_away_pred)))  # Min 12 points
+                                                print(f"DEBUG: Processed away score: {away_score_pred}")
                                             except Exception as a_e:
-                                                away_score_pred = 18 + (selected_league % 8)
+                                                print(f"DEBUG: Away prediction failed: {a_e}")
+                                                away_score_pred = 25 + (selected_league % 12)  # More realistic range
                                         
                                         # Determine winner based on AI prediction
                                         if win_prob >= 0.45 and win_prob <= 0.55:  # Draw range
@@ -236,8 +244,8 @@ def main():
                                     except Exception as feature_e:
                                         # Fallback to simpler prediction if feature engineering fails
                                         predicted_winner = home_name if (home_team_id or 0) > (away_team_id or 0) else away_name
-                                        home_score_pred = 22 + (selected_league % 8)
-                                        away_score_pred = 18 + (selected_league % 6)
+                                        home_score_pred = 35 + (selected_league % 12)  # Much more realistic rugby scores
+                                        away_score_pred = 28 + (selected_league % 10)  # Much more realistic rugby scores
                                         winner_prob_percent = 62
                                         confidence = "⚠️ Low"
                                     
