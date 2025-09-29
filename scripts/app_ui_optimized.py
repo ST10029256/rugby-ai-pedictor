@@ -66,25 +66,63 @@ def main() -> None:
         }
     )
     
-    # Immediately inject console warning suppression script
+    # Comprehensive console warning suppression script
     st.markdown("""
     <script>
-        // Immediately suppress console warnings before Streamlit loads
+        // Immediately suppress ALL browser feature warning patterns
         (function() {
             const originalWarn = console.warn;
             const originalError = console.error;
-            const blockedFeatures = ['ambient-light-sensor', 'battery', 'document-domain', 'layout-animations', 'legacy-image-formats', 'oversized-images', 'vr', 'wake-lock'];
+            const originalLog = console.log;
             
-            console.warn = function(msg) {
-                if (typeof msg === 'string' && blockedFeatures.some(f => msg.includes(f))) return;
-                if (arguments.length > 0 && typeof arguments[0] === 'string' && arguments[0].includes('Unrecognized feature')) return;
+            const blockedPatterns = [
+                'Unrecognized feature:',
+                'ambient-light-sensor',
+                'battery',
+                'document-domain', 
+                'layout-animations',
+                'legacy-image-formats',
+                'oversized-images',
+                'vr',
+                'wake-lock',
+                'iframe which has both allow-scripts and allow-same-origin',
+                'INITIAL ->',
+                'RUNNING',
+                'Pe @ index-B59N3yFD.js',
+                'index-B59N3yFD.js:',
+                'An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing'
+            ];
+            
+            function shouldBlockMessage(msg) {
+                if (typeof msg !== 'string') return false;
+                const lowerMsg = msg.toLowerCase();
+                return blockedPatterns.some(pattern => 
+                    lowerMsg.includes(pattern.toLowerCase()) || lowerMsg.includes(pattern)
+                );
+            }
+            
+            console.warn = function() {
+                const msg = Array.from(arguments).join(' ');
+                if (shouldBlockMessage(msg)) return;
                 originalWarn.apply(console, arguments);
             };
             
-            console.error = function(msg) {
-                if (typeof msg === 'string' && msg.includes('iframe') && msg.includes('sandbox')) return;
+            console.error = function() {
+                const msg = Array.from(arguments).join(' ');
+                if (shouldBlockMessage(msg)) return;
                 originalError.apply(console, arguments);
             };
+            
+            console.log = function() {
+                const msg = Array.from(arguments).join(' ');
+                if (shouldBlockMessage(msg)) return;
+                originalLog.apply(console, arguments);
+            };
+            
+            // Clear any existing warnings immediately
+            setTimeout(() => console.clear(), 100);
+            
+            console.info('🔧 Enhanced Console Filter: Active - Blocking browser feature warnings');
         })();
     </script>
     """, unsafe_allow_html=True)
