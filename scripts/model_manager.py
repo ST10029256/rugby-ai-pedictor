@@ -41,9 +41,17 @@ class ModelManager:
     def is_model_available(self, league_id: int) -> bool:
         """Check if a model is available for the given league"""
         model_path = os.path.join(self.artifacts_dir, f"league_{league_id}_model.pkl")
-        return os.path.exists(model_path)
+        if not os.path.exists(model_path):
+            return False
+        
+        # Try to load the model to check for compatibility issues
+        try:
+            test_load = self.load_model(league_id)
+            return test_load is not None
+        except Exception:
+            return False
     
-    def load_model(self, league_id: int) -> Dict[str, Any]:
+    def load_model(self, league_id: int) -> Optional[Dict[str, Any]]:
         """Load a trained model for the given league"""
         if league_id in self._models:
             return self._models[league_id]
@@ -61,19 +69,33 @@ class ModelManager:
             logger.info(f"Loaded model for league {league_id}")
             return model_package
             
+        except AttributeError as e:
+            logger.error(f"Model compatibility error for league {league_id}: {e}")
+            logger.error("This usually indicates a scikit-learn version mismatch.")
+            logger.error(f"Model file location: {model_path}")
+            # Don't re-raise - return None to indicate loading failure
+            return None
+            
         except Exception as e:
             logger.error(f"Error loading model for league {league_id}: {e}")
-            raise
+            logger.error(f"Model file location: {model_path}")
+            # Don't re-raise - return None to indicate loading failure  
+            return None
     
     def predict_winner_probability(self, league_id: int, features: pd.DataFrame) -> Tuple[float, float]:
         """Predict winner probability for home and away teams"""
         try:
             model_package = self.load_model(league_id)
             
+            if model_package is None:
+                logger.error(f"Model loading failed for league {league_id}")
+                return 0.5, 0.5  # Default to equal probability
+            
             # Get the classification model
             classifier = model_package.get('classifier')
             if classifier is None:
-                raise ValueError(f"No classifier found for league {league_id}")
+                logger.error(f"No classifier found for league {league_id}")
+                return 0.5, 0.5  # Default to equal probability
             
             # Make prediction
             probabilities = classifier.predict_proba(features)
@@ -98,12 +120,17 @@ class ModelManager:
         try:
             model_package = self.load_model(league_id)
             
+            if model_package is None:
+                logger.error(f"Model loading failed for league {league_id}")
+                return 0.0, 0.0  # Default to zero scores
+            
             # Get the regression models
             home_regressor = model_package.get('home_regressor')
             away_regressor = model_package.get('away_regressor')
             
             if home_regressor is None or away_regressor is None:
-                raise ValueError(f"No regressors found for league {league_id}")
+                logger.error(f"No regressors found for league {league_id}")
+                return 0.0, 0.0  # Default to zero scores
             
             # Make predictions
             home_score = float(home_regressor.predict(features)[0])
