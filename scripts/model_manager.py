@@ -82,7 +82,7 @@ class ModelManager:
             # Don't re-raise - return None to indicate loading failure  
             return None
     
-    def predict_winner_probability(self, league_id: int, features: pd.DataFrame) -> Tuple[float, float]:
+    def predict_winner_probability(self, league_id: int, features: pd.DataFrame | np.ndarray) -> Tuple[float, float]:
         """Predict winner probability for home and away teams"""
         try:
             model_package = self.load_model(league_id)
@@ -100,6 +100,16 @@ class ModelManager:
                 logger.error(f"Models dict keys: {list(models_dict.keys()) if isinstance(models_dict, dict) else 'Not a dict'}")
                 logger.error(f"Available keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
                 return 0.5, 0.5  # Default to equal probability
+            
+            # Ensure features is a 2D array (required by scikit-learn)
+            import numpy as np
+            if isinstance(features, np.ndarray):
+                if features.ndim == 1:
+                    features = features.reshape(1, -1)  # Reshape 1D to 2D with one sample
+            elif isinstance(features, pd.DataFrame):
+                features = features.to_numpy()
+                if features.ndim == 1:
+                    features = features.reshape(1, -1)
             
             # Make prediction
             probabilities = classifier.predict_proba(features)
@@ -119,7 +129,7 @@ class ModelManager:
             logger.error(f"Error predicting winner probability: {e}")
             return 0.5, 0.5  # Default to equal probability
     
-    def predict_scores(self, league_id: int, features: pd.DataFrame) -> Tuple[float, float]:
+    def predict_scores(self, league_id: int, features: pd.DataFrame | np.ndarray) -> Tuple[float, float]:
         """Predict scores for home and away teams"""
         try:
             model_package = self.load_model(league_id)
@@ -138,6 +148,16 @@ class ModelManager:
                 logger.error(f"Models dict keys: {list(models_dict.keys()) if isinstance(models_dict, dict) else 'Not a dict'}")
                 logger.error(f"Available keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
                 return 0.0, 0.0  # Default to zero scores
+            
+            # Ensure features is a 2D array (required by scikit-learn)
+            import numpy as np
+            if isinstance(features, np.ndarray):
+                if features.ndim == 1:
+                    features = features.reshape(1, -1)  # Reshape 1D to 2D with one sample
+            elif isinstance(features, pd.DataFrame):
+                features = features.to_numpy()
+                if features.ndim == 1:
+                    features = features.reshape(1, -1)
             
             # Make predictions
             home_score = float(home_regressor.predict(features)[0])

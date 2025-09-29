@@ -659,7 +659,6 @@ def main() -> None:
     
     st.dataframe(
         disp, 
-        use_container_width=True,
         column_config=column_config,
         hide_index=True
     )
