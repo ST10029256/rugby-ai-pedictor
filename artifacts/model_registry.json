@@ -1,48 +1,48 @@
 {
-  "last_updated": "2025-09-29T18:11:58.193662",
+  "last_updated": "2025-09-29T18:28:01.119771",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2025-09-29T18:11:50.890678",
+      "trained_at": "2025-09-29T18:25:22.554771",
       "training_games": 140,
       "performance": {
-        "winner_accuracy": 0.6071428571428571,
-        "home_mae": 10.692853950705313,
-        "away_mae": 7.853374649893615,
-        "overall_mae": 9.273114300299465
+        "winner_accuracy": 0.5714285714285714,
+        "home_mae": 9.232370315338112,
+        "away_mae": 8.448512075721332,
+        "overall_mae": 8.840441195529722
       }
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2025-09-29T18:11:53.972788",
+      "trained_at": "2025-09-29T18:26:28.305057",
       "training_games": 254,
       "performance": {
         "winner_accuracy": 0.6470588235294118,
-        "home_mae": 11.464566220491246,
-        "away_mae": 8.17002385511947,
-        "overall_mae": 9.817295037805359
+        "home_mae": 10.865938373817281,
+        "away_mae": 8.152470529333153,
+        "overall_mae": 9.509204451575217
       }
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2025-09-29T18:11:56.725481",
+      "trained_at": "2025-09-29T18:27:25.462610",
       "training_games": 229,
       "performance": {
-        "winner_accuracy": 0.6521739130434783,
-        "home_mae": 12.556856929781235,
-        "away_mae": 13.10065929674994,
-        "overall_mae": 12.828758113265588
+        "winner_accuracy": 0.6304347826086957,
+        "home_mae": 13.071148853354874,
+        "away_mae": 12.591058332859674,
+        "overall_mae": 12.831103593107274
       }
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2025-09-29T18:11:58.098469",
+      "trained_at": "2025-09-29T18:28:00.137318",
       "training_games": 151,
       "performance": {
         "winner_accuracy": 0.8709677419354839,
-        "home_mae": 10.750231705103586,
-        "away_mae": 6.301055032069036,
-        "overall_mae": 8.52564336858631
+        "home_mae": 12.256339662388097,
+        "away_mae": 6.337044410232204,
+        "overall_mae": 9.296692036310152
       }
     }
   }
