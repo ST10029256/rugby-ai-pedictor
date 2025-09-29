@@ -9,9 +9,6 @@ enableCORS = false
 # Minimize browser warnings
 headless = false
 
-# Run the optimized app
-[theme]
-
 [browser]
 # Disable unnecessary features to reduce console warnings
 gatherUsageStats = false
