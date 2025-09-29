@@ -414,10 +414,10 @@ def make_prediction_for_upcoming_game(game_row, model_data, team_names):
         conn.close()
         
         # Find our specific game
-        game_features = feature_df[feature_df['event_id'] == game_row['event_id']]
+        game_features = feature_df[feature_df['event_id'] == game_row['id']]
         
         if len(game_features) == 0:
-            print(f"No features found for game {game_row['event_id']}")
+            print(f"No features found for game {game_row['id']}")
             return None
         
         # Get feature columns and prepare data
