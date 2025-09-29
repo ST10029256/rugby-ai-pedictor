@@ -19,6 +19,8 @@ from prediction.features import build_feature_table, FeatureConfig
 from scripts.model_manager import ModelManager
 
 def safe_to_float(value: Any, default: float = 0.0) -> float:
+    import numpy as np  # Local import for type checking
+    
     if value is None:
         return default
     if isinstance(value, (float, np.floating)):
@@ -36,6 +38,8 @@ def safe_to_float(value: Any, default: float = 0.0) -> float:
         return default
 
 def safe_to_int(value: Any, default: int = 0) -> int:
+    import numpy as np  # Local import for type checking
+    
     if value is None:
         return default
     if isinstance(value, (int, np.integer)):
@@ -390,6 +394,19 @@ def main() -> None:
         # Registry content
         registry_summary = model_manager.get_registry_summary()
         st.write(f"**Total Leagues in Registry:** {len(registry_summary.get('leagues', {}))}")
+        
+        # Environment information
+        try:
+            import sklearn
+            st.write(f"**Scikit-learn Version:** {sklearn.__version__}")
+        except ImportError:
+            st.write("**Scikit-learn:** Not available")
+        
+        try:
+            import numpy as np
+            st.write(f"**NumPy Version:** {np.__version__}")
+        except ImportError:
+            st.write("**NumPy:** Not available")
     
     # Mobile-optimized sidebar
     with st.sidebar:
@@ -441,9 +458,16 @@ def main() -> None:
         return
 
     # Load the trained model
-    model_package = model_manager.load_model(league_id)
-    if not model_package:
-        st.error(f"Failed to load model for {league}")
+    try:
+        model_package = model_manager.load_model(league_id)
+        if not model_package:
+            st.error(f"❌ **Model Loading Failed** for {league}")
+            st.error("This usually indicates a scikit-learn version compatibility issue.")
+            st.info("💡 **Solution:** The models may have been trained with a different version of scikit-learn.")
+            return
+    except Exception as e:
+        st.error(f"❌ **Critical Error** loading model for {league}: {str(e)}")
+        st.error("Check the debug information for more details.")
         return
 
         # Show current model info in a more mobile-friendly format
@@ -527,6 +551,9 @@ def main() -> None:
         return
 
     upc = upc.copy()
+    
+    # Import numpy for this section
+    import numpy as np
     
     # Add missing columns with default values
     for col in feature_cols:
