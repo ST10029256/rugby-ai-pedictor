@@ -557,12 +557,6 @@ def main() -> None:
             tid = safe_to_int(tid_raw, default=-1)
             team_name[tid] = nm or f"Team {tid}"
         
-        # Debug: Show team names for this league
-        if league_id == 4986:  # Rugby Championship
-            debug_info.info(f"**Debug - Rugby Championship Team Names:**")
-            for tid, name in team_name.items():
-                debug_info.write(f"- Team ID {tid}: '{name}'")
-                
     except Exception as e:
         debug_info.error(f"Error loading team names: {e}")
         pass
@@ -633,9 +627,6 @@ def main() -> None:
     def _name(tid: Any) -> str:
         tid_int = safe_to_int(tid, -1)
         name = team_name.get(tid_int, str(tid_int))
-        # Debug for Rugby Championship
-        if league_id == 4986 and tid_int not in team_name:
-            debug_info.warning(f"Missing team name for ID {tid_int}")
         return name
 
     if "date_event" in upc.columns:
@@ -643,13 +634,6 @@ def main() -> None:
     else:
         date_series = pd.Series([""] * len(upc), dtype=str)
     
-    # Debug: Show upcoming fixture team IDs for Rugby Championship
-    if league_id == 4986:
-        debug_info.write("**Rugby Championship Upcoming Fixtures:**")
-        for i, row in upc.head().iterrows():
-            home_id = safe_to_int(row.get('home_team_id', -1), -1)
-            away_id = safe_to_int(row.get('away_team_id', -1), -1)
-            debug_info.write(f"- Home ID: {home_id}, Away ID: {away_id}")
     
     # Create mobile-friendly display data
     disp = pd.DataFrame({

@@ -149,6 +149,9 @@ class ModelManager:
                 logger.error(f"Available keys: {list(model_package.keys()) if isinstance(model_package, dict) else 'Not a dict'}")
                 return 0.0, 0.0  # Default to zero scores
             
+            # Get the scaler if it exists (needed for Rugby Championship)
+            scaler = model_package.get('scaler')
+            
             # Ensure features is a 2D array (required by scikit-learn)
             import numpy as np
             if isinstance(features, np.ndarray):
@@ -158,6 +161,10 @@ class ModelManager:
                 features = features.to_numpy()
                 if features.ndim == 1:
                     features = features.reshape(1, -1)
+            
+            # Apply scaling if scaler exists (essential for Rugby Championship)
+            if scaler is not None:
+                features = scaler.transform(features)
             
             # Make predictions
             home_score = float(home_regressor.predict(features)[0])
