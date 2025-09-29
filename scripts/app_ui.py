@@ -14,17 +14,31 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Import and run the optimized app
-try:
-    from scripts.app_ui_optimized import main
-    
-    if __name__ == "__main__":
-        main()
-except ImportError as e:
-    print(f"Error importing optimized app: {e}")
-    print("Falling back to basic import...")
-    exec(open(os.path.join(script_dir, 'app_ui_optimized.py')).read())
+def main():
+    try:
+        # Import the optimized app's main function
+        from scripts.app_ui_optimized import main as optimized_main
+        return optimized_main()
+    except ImportError as e:
+        # Fallback: copy the optimized app code directly
+        import streamlit as st
+        
+        st.set_page_config(
+            page_title="Rugby Predictions", 
+            layout="wide", 
+            initial_sidebar_state="expanded"
+        )
+        
+        st.title("🏈 Enhanced Rugby AI Prediction System")
+        st.write("---")
+        
+        st.error(f"🚨 **Import Error**: {e}")
+        st.info("**Troubleshooting:**")
+        st.write("1. Check that scripts/app_ui_optimized.py exists")
+        st.write("2. Verify all dependencies are installed")
+        st.write("3. Check Python path configuration")
+        
+        return None
 
 if __name__ == "__main__":
-    # This file serves as a redirect to the optimized version
-    # Streamlit Cloud will use this as the main entry point
-    pass
+    main()
