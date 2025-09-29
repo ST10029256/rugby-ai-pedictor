@@ -435,81 +435,20 @@ def main():
         st.error("No leagues found. Please train models first.")
         return
     
-    # Automation Status Check
+    # Silent automation check (no UI feedback)
     if st.session_state.auto_update_enabled:
         time_since_check = datetime.now() - st.session_state.last_automation_check
         if time_since_check.total_seconds() > 300:  # Check every 5 minutes
             freshness = check_data_freshness()
             if freshness['needs_update']:
-                with st.spinner("Auto-updating data..."):
-                    success, message = auto_update_data()
-                    if success:
-                        st.success(f"Auto-updated: {message}")
-                        # Auto-retrain if data was updated
-                        with st.spinner("Auto-retraining models..."):
-                            retrain_success, retrain_message = auto_retrain_models()
-                            if retrain_success:
-                                st.success(f"Auto-retrained: {retrain_message}")
-                            else:
-                                st.warning(f"Auto-retrain failed: {retrain_message}")
-                    else:
-                        st.warning(f"Auto-update failed: {message}")
+                # Silent background update
+                auto_update_data()
+                auto_retrain_models()
                 st.session_state.last_automation_check = datetime.now()
     
     # Sidebar
     with st.sidebar:
-        st.header("Configuration")
-        
-        # Automation Controls
-        st.subheader("🤖 Automation")
-        st.session_state.auto_update_enabled = st.checkbox(
-            "Enable Auto-Updates", 
-            value=st.session_state.auto_update_enabled,
-            help="Automatically update data and retrain models when needed"
-        )
-        
-        # Manual controls
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 Update Data", disabled=not AUTOMATION_AVAILABLE):
-                with st.spinner("Updating data..."):
-                    success, message = auto_update_data()
-                    if success:
-                        st.success(message)
-                        st.rerun()  # Refresh the page to show updated data
-                    else:
-                        st.error(message)
-        
-        with col2:
-            if st.button("🧠 Retrain Models", disabled=not AUTOMATION_AVAILABLE):
-                with st.spinner("Retraining models..."):
-                    success, message = auto_retrain_models()
-                    if success:
-                        st.success(message)
-                        st.rerun()  # Refresh the page to show updated models
-                    else:
-                        st.error(message)
-        
-        # Full automation button
-        if st.button("🚀 Run Full Automation", disabled=not AUTOMATION_AVAILABLE):
-            with st.spinner("Running complete automation..."):
-                success, message = run_automation_background()
-                if success:
-                    st.success(message)
-                    st.rerun()  # Refresh the page to show updated data
-                else:
-                    st.error(message)
-        
-        # Data freshness indicator
-        freshness = check_data_freshness()
-        if freshness['needs_update']:
-            st.warning(f"📊 Data is {freshness['days_since_update']} days old")
-        else:
-            st.success("📊 Data is up to date")
-        
-        st.info(f"🎮 {freshness['upcoming_games']} upcoming games")
-        
-        st.divider()
+        st.header("🏉 Rugby Predictions")
         
         # League selection
         league_options = {}
@@ -517,7 +456,7 @@ def main():
             league_options[league_id] = data['name']
         
         selected_league = st.selectbox(
-            "Choose League:",
+            "Select League:",
             options=list(league_options.keys()),
             format_func=lambda x: league_options[x]
         )
@@ -526,27 +465,34 @@ def main():
             league_data = leagues[selected_league]
             perf = league_data.get('performance', {})
             
-            # Enhanced sidebar metrics
-            st.markdown("### Model Performance")
-            accuracy = perf.get('winner_accuracy', 0) * 100
+            # Clean performance display
+            st.subheader("📊 Model Performance")
+            accuracy = perf.get('winner_accuracy', 0)
             
-            # Accuracy indicator
-            if accuracy >= 90:
-                st.success(f"Accuracy: {accuracy:.1f}%")
-            elif accuracy >= 75:
-                st.info(f"Accuracy: {accuracy:.1f}%")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Winner Accuracy", f"{accuracy:.1%}")
+            with col2:
+                st.metric("Score MAE", f"{perf.get('overall_mae', 0):.1f}")
+            
+            # Training info
+            trained_at = league_data.get('trained_at', 'Unknown')
+            if trained_at != 'Unknown':
+                try:
+                    trained_time = datetime.fromisoformat(trained_at)
+                    time_ago = datetime.now() - trained_time
+                    if time_ago.days > 0:
+                        trained_str = f"{time_ago.days}d ago"
+                    elif time_ago.seconds > 3600:
+                        trained_str = f"{time_ago.seconds // 3600}h ago"
+                    else:
+                        trained_str = "Recent"
+                except:
+                    trained_str = "Unknown"
             else:
-                st.warning(f"Accuracy: {accuracy:.1f}%")
+                trained_str = "Unknown"
             
-            st.metric("Games Trained", league_data.get('training_games', 0))
-            
-            # Performance details
-            with st.expander("Performance Details"):
-                st.write(f"Winner Accuracy: {perf.get('winner_accuracy', 0):.1%}")
-                st.write(f"Home Score MAE: {perf.get('home_mae', 0):.1f}")
-                st.write(f"Away Score MAE: {perf.get('away_mae', 0):.1f}")
-                st.write(f"Overall MAE: {perf.get('overall_mae', 0):.1f}")
-                st.write(f"Trained: {league_data.get('trained_at', 'Unknown')[:16]}")
+            st.caption(f"Model trained: {trained_str}")
     
     # Main content
     if selected_league:
@@ -559,33 +505,11 @@ def main():
             st.error("Unable to load model")
             return
         
-        st.header(f"Predictions for {league_name}")
+        st.header(f"🏉 {league_name} Predictions")
         
-        # Automation status indicator
-        if st.session_state.auto_update_enabled:
-            st.success("🤖 Auto-updates enabled - System will automatically refresh data and retrain models")
-        else:
-            st.info("⏸️ Auto-updates disabled - Use manual controls in sidebar")
-        
-        # Show model info
+        # Clean model info
         feature_count = len(model_data.get('feature_columns', []))
-        model_trained_at = model_data.get('trained_at', 'Unknown')
-        if model_trained_at != 'Unknown':
-            try:
-                trained_time = datetime.fromisoformat(model_trained_at)
-                time_ago = datetime.now() - trained_time
-                if time_ago.days > 0:
-                    trained_str = f"{time_ago.days} days ago"
-                elif time_ago.seconds > 3600:
-                    trained_str = f"{time_ago.seconds // 3600} hours ago"
-                else:
-                    trained_str = "Recently"
-            except:
-                trained_str = "Unknown"
-        else:
-            trained_str = "Unknown"
-            
-        st.info(f"🧠 AI model with {feature_count} features | Trained: {trained_str}")
+        st.caption(f"AI model with {feature_count} advanced features")
         
         # Get upcoming games
         try:
@@ -648,60 +572,62 @@ def main():
                     hide_index=True
                 )
                 
-                # Individual match summaries
-                st.subheader("Detailed Match Analysis")
-                for prediction in predictions:
-                    display_individual_match_summary(prediction)
+                # Clean match analysis
+                st.subheader("📊 Match Predictions")
                 
-                # Enhanced summary statistics
-                st.subheader("Prediction Summary")
+                for i, prediction in enumerate(predictions):
+                    with st.container():
+                        col1, col2, col3 = st.columns([2, 1, 2])
+                        
+                        with col1:
+                            st.markdown(f"**{prediction['home_team']}**")
+                            st.caption("Home Team")
+                        
+                        with col2:
+                            st.markdown(f"**{prediction['home_score']} - {prediction['away_score']}**")
+                            st.caption("Predicted Score")
+                        
+                        with col3:
+                            st.markdown(f"**{prediction['away_team']}**")
+                            st.caption("Away Team")
+                        
+                        # Winner and confidence
+                        col4, col5 = st.columns([2, 1])
+                        with col4:
+                            if prediction['winner'] != 'Draw':
+                                st.success(f"🏆 Winner: {prediction['winner']}")
+                            else:
+                                st.info("🤝 Predicted Draw")
+                        with col5:
+                            st.metric("Confidence", prediction['confidence'])
+                        
+                        if i < len(predictions) - 1:
+                            st.divider()
                 
-                col1, col2, col3, col4 = st.columns(4)
+                # Clean summary
+                st.subheader("📈 Summary")
+                
+                col1, col2, col3 = st.columns(3)
                 
                 with col1:
                     home_wins = len([p for p in predictions if p['winner'] == p['home_team']])
-                    st.metric("Home Wins", f"{home_wins}/{len(predictions)}")
+                    away_wins = len([p for p in predictions if p['winner'] == p['away_team']])
+                    draws = len([p for p in predictions if p['winner'] == 'Draw'])
+                    st.metric("Predictions", f"{len(predictions)} matches")
                 
                 with col2:
-                    away_wins = len([p for p in predictions if p['winner'] == p['away_team']])
-                    st.metric("Away Wins", f"{away_wins}/{len(predictions)}")
-                
-                with col3:
-                    draws = len([p for p in predictions if p['winner'] == 'Draw'])
-                    st.metric("Draws", f"{draws}/{len(predictions)}")
-                
-                with col4:
                     avg_confidence = np.mean([float(p['confidence'].rstrip('%')) for p in predictions])
                     st.metric("Avg Confidence", f"{avg_confidence:.1f}%")
                 
-                # Additional insights
-                col5, col6 = st.columns(2)
-                
-                with col5:
+                with col3:
                     avg_home = np.mean([p['home_score'] for p in predictions])
                     avg_away = np.mean([p['away_score'] for p in predictions])
-                    st.metric("Average Scores", f"{avg_home:.1f} vs {avg_away:.1f}")
+                    st.metric("Avg Score", f"{avg_home:.1f} - {avg_away:.1f}")
                 
-                with col6:
-                    high_conf = len([p for p in predictions if float(p['confidence'].rstrip('%')) > 70])
-                    st.metric("High Confidence (>70%)", f"{high_conf}/{len(predictions)}")
-                
-                # Home advantage analysis
-                home_games = len([p for p in predictions if p['home_prob'] != 'Unknown'])
-                if home_games > 0:
-                    avg_home_prob = np.mean([float(p['home_prob'].rstrip('%')) for p in predictions if p['home_prob'] != 'Unknown'])
-                    
-                    if avg_home_prob > 55:
-                        st.success(f"Strong home advantage: {avg_home_prob:.1f}% average home win probability")
-                    elif avg_home_prob < 45:
-                        st.info(f"Away teams favored: {avg_home_prob:.1f}% average home win probability")
-                    else:
-                        st.warning("Balanced competition - home advantage negligible")
-                
-                # Download functionality
+                # Download button
                 csv_data = pd.DataFrame(predictions).to_csv(index=False)
                 st.download_button(
-                    label="Download Predictions CSV",
+                    label="📥 Download Predictions",
                     data=csv_data,
                     file_name=f"{league_name}_predictions_{datetime.now().strftime('%Y%m%d')}.csv",
                     mime="text/csv"
@@ -750,58 +676,33 @@ def main():
             except Exception as db_e:
                 st.error(f"Database error: {db_e}")
     else:
-        # Enhanced overview when no league selected
-        st.header("Available Leagues")
+        # Clean overview when no league selected
+        st.header("🏉 Select a League")
         
-        # Create a more engaging overview
+        # Create clean league cards
         cols = st.columns(2)
         for i, (league_id, league_data) in enumerate(leagues.items()):
             with cols[i % 2]:
                 perf = league_data.get('performance', {})
-                accuracy = perf.get('winner_accuracy', 0) * 100
+                accuracy = perf.get('winner_accuracy', 0)
                 games = league_data.get('training_games', 0)
                 
-                # Performance badge
-                if accuracy >= 90:
-                    badge = "Excellent"
-                elif accuracy >= 75:
-                    badge = "Good"
-                else:
-                    badge = "Needs Improvement"
-                
-                # Create an expandable card for each league
-                with st.expander(f"{badge} - {league_data['name']} ({accuracy:.1f}% accuracy)"):
-                    st.write(f"Accuracy: {accuracy:.1f}%")
-                    st.write(f"Games Trained: {games:,}")
-                    st.write(f"Model MAE: {perf.get('overall_mae', 0):.1f}")
+                with st.container():
+                    st.markdown(f"### {league_data['name']}")
                     
-                    # Performance assessment
-                    if accuracy >= 90:
-                        st.success("Excellent model performance!")
-                    elif accuracy >= 75:
-                        st.info("Good model performance")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Accuracy", f"{accuracy:.1%}")
+                    with col2:
+                        st.metric("Games", f"{games:,}")
+                    
+                    if accuracy >= 0.9:
+                        st.success("Excellent performance")
+                    elif accuracy >= 0.75:
+                        st.info("Good performance")
                     else:
-                        st.warning("Model needs improvement")
+                        st.warning("Needs improvement")
     
-    # Status footer
-    st.divider()
-    freshness = check_data_freshness()
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if freshness['needs_update']:
-            st.error(f"⚠️ Data needs update ({freshness['days_since_update']} days old)")
-        else:
-            st.success("✅ Data is current")
-    
-    with col2:
-        if st.session_state.auto_update_enabled:
-            st.success("🤖 Auto-updates ON")
-        else:
-            st.info("⏸️ Auto-updates OFF")
-    
-    with col3:
-        st.info(f"🎮 {freshness['upcoming_games']} upcoming games")
 
 if __name__ == "__main__":
     main()
