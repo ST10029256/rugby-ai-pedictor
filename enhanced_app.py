@@ -2,8 +2,7 @@
 """
 Enhanced Rugby Prediction App
 Improved winner determination and individual match summaries
-Last Updated: 2025-09-29 12:15 UTC
-Force Redeploy: 2025-09-29
+Last Updated: 2025-09-29 12:30 UTC
 """
 
 import streamlit as st
