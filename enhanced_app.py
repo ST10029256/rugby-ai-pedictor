@@ -155,24 +155,64 @@ def get_live_performance(league_id):
 def make_prediction_for_game(game_data, model_data):
     """Make prediction for a single historical game"""
     try:
-        # Get team names
-        team_names = get_teams()
+        # Import feature building
+        from prediction.features import build_feature_table, FeatureConfig
         
-        # Get feature columns from model
+        # Build features for all games (we'll filter later)
+        conn = sqlite3.connect('data.sqlite')
+        config = FeatureConfig(elo_priors=None, elo_k=24.0, neutral_mode=False)
+        feature_df = build_feature_table(conn, config)
+        conn.close()
+        
+        # Find our specific game
+        game_features = feature_df[feature_df['event_id'] == game_data['event_id']]
+        
+        if len(game_features) == 0:
+            print(f"No features found for game {game_data['event_id']}")
+            return None
+        
+        # Get feature columns and prepare data
         feature_cols = model_data.get('feature_columns', [])
+        X = game_features[feature_cols].fillna(0)
         
-        # Convert single game to DataFrame format expected by make_prediction
-        game_info = pd.DataFrame([{
-            'home_team_id': game_data['home_team_id'],
-            'away_team_id': game_data['away_team_id'],
-            'date_event': game_data['date_event']
-        }])
+        # Get models
+        models = model_data.get('models', {})
+        clf = models.get('gbdt_clf') or models.get('clf')
         
-        # Use the existing make_prediction function
-        return make_prediction(model_data, game_info, team_names, feature_cols)
+        if not clf:
+            print("No classifier found in model")
+            return None
+        
+        # Make prediction
+        if hasattr(clf, 'predict_proba'):
+            proba = clf.predict_proba(X)
+            home_win_prob = proba[0, 1] if len(proba[0]) > 1 else proba[0, 0]
+        else:
+            pred = clf.predict(X)[0]
+            home_win_prob = 1.0 if pred == 1 else 0.0
+        
+        # Get score predictions if available
+        reg_home = models.get('reg_home')
+        reg_away = models.get('reg_away')
+        
+        if reg_home and reg_away:
+            home_score = max(0, reg_home.predict(X)[0])
+            away_score = max(0, reg_away.predict(X)[0])
+        else:
+            # Fallback to expected scores based on win probability
+            home_score = 20 + home_win_prob * 20  # 20-40 range
+            away_score = 20 + (1 - home_win_prob) * 20
+        
+        return {
+            'home_win_prob': home_win_prob,
+            'home_score': home_score,
+            'away_score': away_score
+        }
         
     except Exception as e:
         print(f"Error making prediction for game: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def check_data_freshness():
