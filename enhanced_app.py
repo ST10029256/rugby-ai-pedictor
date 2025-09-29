@@ -424,32 +424,33 @@ def main():
     st.title("Enhanced Rugby Predictions AI")
     st.markdown("Advanced machine learning predictions with automated updates and detailed match analysis")
     
-    # Initialize session state for automation
-    if 'last_automation_check' not in st.session_state:
-        st.session_state.last_automation_check = datetime.now() - timedelta(hours=1)
-    if 'automation_status' not in st.session_state:
-        st.session_state.automation_status = "Ready"
+    # Initialize session state for automation (simplified)
     if 'auto_update_enabled' not in st.session_state:
         st.session_state.auto_update_enabled = True
     
-    # Load registry
-    registry = load_registry()
-    leagues = registry.get('leagues', {})
-    
-    if not leagues:
-        st.error("No leagues found. Please train models first.")
+    # Load registry with error handling
+    try:
+        registry = load_registry()
+        leagues = registry.get('leagues', {})
+        
+        if not leagues:
+            st.error("No leagues found. Please train models first.")
+            return
+    except Exception as e:
+        st.error(f"Error loading registry: {e}")
+        st.info("Please check if the model registry file exists.")
         return
     
-    # Reduced automation frequency for faster loading
-    if st.session_state.auto_update_enabled:
-        time_since_check = datetime.now() - st.session_state.last_automation_check
-        if time_since_check.total_seconds() > 1800:  # Check every 30 minutes instead of 5
-            freshness = check_data_freshness()
-            if freshness['needs_update']:
-                # Silent background update (async)
-                auto_update_data()
-                auto_retrain_models()
-                st.session_state.last_automation_check = datetime.now()
+    # Disabled automation to prevent reboots - will re-enable after testing
+    # if st.session_state.auto_update_enabled:
+    #     time_since_check = datetime.now() - st.session_state.last_automation_check
+    #     if time_since_check.total_seconds() > 1800:  # Check every 30 minutes instead of 5
+    #         freshness = check_data_freshness()
+    #         if freshness['needs_update']:
+    #             # Silent background update (async)
+    #             auto_update_data()
+    #             auto_retrain_models()
+    #             st.session_state.last_automation_check = datetime.now()
     
     # Sidebar
     with st.sidebar:
