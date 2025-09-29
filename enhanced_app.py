@@ -245,6 +245,14 @@ def make_prediction(model_data, game_row, team_names, feature_cols):
         home_model = models.get('reg_home')
         away_model = models.get('reg_away')
         
+        # Debug: Check if models exist
+        if not winner_model:
+            print(f"Warning: No winner model found. Available models: {list(models.keys())}")
+        if not home_model:
+            print(f"Warning: No home model found. Available models: {list(models.keys())}")
+        if not away_model:
+            print(f"Warning: No away model found. Available models: {list(models.keys())}")
+        
         home_id = safe_int(game_row['home_team_id'])
         away_id = safe_int(game_row['away_team_id'])
         
@@ -523,6 +531,14 @@ def main():
         
         if not model_data:
             st.error("Unable to load model")
+            st.info(f"Trying to load model for league: {selected_league}")
+            # Check if model file exists
+            import os
+            model_path = f"artifacts/league_{selected_league}_model.pkl"
+            if os.path.exists(model_path):
+                st.info(f"Model file exists: {model_path}")
+            else:
+                st.info(f"Model file missing: {model_path}")
             return
         
         st.header(f"🏉 {league_name} Predictions")
