@@ -394,3 +394,87 @@
 2025-09-29 18:11:58,194 - INFO - Saved model registry to artifacts\model_registry.json
 2025-09-29 18:11:58,194 - INFO - Successfully trained models for 4 leagues: [4986, 4446, 5069, 4574]
 2025-09-29 18:11:58,194 - INFO - Model training completed successfully
+2025-09-29 18:24:49,018 - INFO - Starting automated model training
+2025-09-29 18:24:49,018 - INFO - Training models for league 4986 (Rugby Championship)
+2025-09-29 18:24:49,265 - INFO - Training on 112 samples, validating on 28 samples
+2025-09-29 18:24:49,265 - INFO - Training classification models for league 4986
+2025-09-29 18:24:57,035 - INFO - Training regression models for league 4986
+2025-09-29 18:25:22,554 - INFO - League 4986 performance:
+2025-09-29 18:25:22,554 - INFO -   Winner accuracy: 0.571
+2025-09-29 18:25:22,554 - INFO -   Home score MAE: 9.232
+2025-09-29 18:25:22,554 - INFO -   Away score MAE: 8.449
+2025-09-29 18:25:22,554 - INFO -   Overall MAE: 8.840
+2025-09-29 18:25:22,558 - INFO - Training models for league 4446 (United Rugby Championship)
+2025-09-29 18:25:22,732 - INFO - Training on 203 samples, validating on 51 samples
+2025-09-29 18:25:22,733 - INFO - Training classification models for league 4446
+2025-09-29 18:25:27,818 - INFO - Training regression models for league 4446
+2025-09-29 18:26:28,304 - INFO - League 4446 performance:
+2025-09-29 18:26:28,304 - INFO -   Winner accuracy: 0.647
+2025-09-29 18:26:28,304 - INFO -   Home score MAE: 10.866
+2025-09-29 18:26:28,304 - INFO -   Away score MAE: 8.152
+2025-09-29 18:26:28,304 - INFO -   Overall MAE: 9.509
+2025-09-29 18:26:28,312 - INFO - Training models for league 5069 (Currie Cup)
+2025-09-29 18:26:28,487 - INFO - Training on 183 samples, validating on 46 samples
+2025-09-29 18:26:28,487 - INFO - Training classification models for league 5069
+2025-09-29 18:26:32,708 - INFO - Training regression models for league 5069
+2025-09-29 18:27:25,462 - INFO - League 5069 performance:
+2025-09-29 18:27:25,462 - INFO -   Winner accuracy: 0.630
+2025-09-29 18:27:25,462 - INFO -   Home score MAE: 13.071
+2025-09-29 18:27:25,462 - INFO -   Away score MAE: 12.591
+2025-09-29 18:27:25,462 - INFO -   Overall MAE: 12.831
+2025-09-29 18:27:25,469 - INFO - Training models for league 4574 (Rugby World Cup)
+2025-09-29 18:27:25,641 - INFO - Training on 120 samples, validating on 31 samples
+2025-09-29 18:27:25,642 - INFO - Training classification models for league 4574
+2025-09-29 18:27:27,661 - INFO - Training regression models for league 4574
+2025-09-29 18:27:44,923 - INFO - Starting automated model training
+2025-09-29 18:27:44,923 - INFO - Training models for league 4986 (Rugby Championship)
+2025-09-29 18:27:45,101 - INFO - Training on 112 samples, validating on 28 samples
+2025-09-29 18:27:45,101 - INFO - Training classification models for league 4986
+2025-09-29 18:27:59,555 - INFO - Training regression models for league 4986
+2025-09-29 18:28:00,136 - INFO - League 4574 performance:
+2025-09-29 18:28:00,137 - INFO -   Winner accuracy: 0.871
+2025-09-29 18:28:00,137 - INFO -   Home score MAE: 12.256
+2025-09-29 18:28:00,137 - INFO -   Away score MAE: 6.337
+2025-09-29 18:28:00,137 - INFO -   Overall MAE: 9.297
+2025-09-29 18:28:00,351 - INFO - Saved model for league 4986 to artifacts\league_4986_model.pkl
+2025-09-29 18:28:00,583 - INFO - Saved model for league 4446 to artifacts\league_4446_model.pkl
+2025-09-29 18:28:00,905 - INFO - Saved model for league 5069 to artifacts\league_5069_model.pkl
+2025-09-29 18:28:01,119 - INFO - Saved model for league 4574 to artifacts\league_4574_model.pkl
+2025-09-29 18:28:01,120 - INFO - Saved model registry to artifacts\model_registry.json
+2025-09-29 18:28:01,121 - INFO - Successfully trained models for 4 leagues: [4986, 4446, 5069, 4574]
+2025-09-29 18:28:01,121 - INFO - Model training completed successfully
+2025-09-29 18:28:37,640 - INFO - League 4986 performance:
+2025-09-29 18:28:37,640 - INFO -   Winner accuracy: 0.643
+2025-09-29 18:28:37,640 - INFO -   Home score MAE: 8.705
+2025-09-29 18:28:37,640 - INFO -   Away score MAE: 8.807
+2025-09-29 18:28:37,640 - INFO -   Overall MAE: 8.756
+2025-09-29 18:28:37,646 - INFO - Training models for league 4446 (United Rugby Championship)
+2025-09-29 18:28:37,949 - INFO - Training on 203 samples, validating on 51 samples
+2025-09-29 18:28:37,949 - INFO - Training classification models for league 4446
+2025-09-29 18:28:45,021 - INFO - Training regression models for league 4446
+2025-09-29 18:30:19,852 - INFO - League 4446 performance:
+2025-09-29 18:30:19,852 - INFO -   Winner accuracy: 0.706
+2025-09-29 18:30:19,853 - INFO -   Home score MAE: 11.120
+2025-09-29 18:30:19,853 - INFO -   Away score MAE: 8.109
+2025-09-29 18:30:19,853 - INFO -   Overall MAE: 9.615
+2025-09-29 18:30:19,865 - INFO - Training models for league 5069 (Currie Cup)
+2025-09-29 18:30:20,168 - INFO - Training on 183 samples, validating on 46 samples
+2025-09-29 18:30:20,168 - INFO - Training classification models for league 5069
+2025-09-29 18:30:27,515 - INFO - Training regression models for league 5069
+2025-09-29 18:31:54,611 - INFO - League 5069 performance:
+2025-09-29 18:31:54,611 - INFO -   Winner accuracy: 0.652
+2025-09-29 18:31:54,611 - INFO -   Home score MAE: 12.499
+2025-09-29 18:31:54,612 - INFO -   Away score MAE: 13.632
+2025-09-29 18:31:54,612 - INFO -   Overall MAE: 13.066
+2025-09-29 18:31:54,624 - INFO - Training models for league 4574 (Rugby World Cup)
+2025-09-29 18:31:54,948 - INFO - Training on 120 samples, validating on 31 samples
+2025-09-29 18:31:54,948 - INFO - Training classification models for league 4574
+2025-09-29 18:31:58,638 - INFO - Training regression models for league 4574
+2025-09-29 18:32:48,369 - INFO - League 4574 performance:
+2025-09-29 18:32:48,369 - INFO -   Winner accuracy: 0.871
+2025-09-29 18:32:48,369 - INFO -   Home score MAE: 12.073
+2025-09-29 18:32:48,369 - INFO -   Away score MAE: 6.264
+2025-09-29 18:32:48,369 - INFO -   Overall MAE: 9.168
+2025-09-29 18:32:48,692 - INFO - Saved model for league 4986 to artifacts\league_4986_model.pkl
+2025-09-29 18:32:49,000 - INFO - Saved model for league 4446 to artifacts\league_4446_model.pkl
+2025-09-29 18:32:49,396 - INFO - Saved model for league 5069 to artifacts\league_5069_model.pkl
