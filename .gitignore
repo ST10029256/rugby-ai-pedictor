@@ -11,7 +11,7 @@ __pycache__/
 # Streamlit local config
 .streamlit/secrets.toml
 
-# Large model/files
-*.pkl
+# Large model/files (excluding trained models for deployment)
+# *.pkl  # Commented out - trained models needed for deployment
 *.csv
 
