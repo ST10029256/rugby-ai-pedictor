@@ -104,20 +104,20 @@ def get_live_performance(league_id):
         # Process each recent game
         for _, game in df.iterrows():
             try:
-                # Make AI prediction for this game
-                prediction = make_prediction_for_game(game, model_data)
+                # Make AI prediction for this game using consistent method
+                prediction = make_prediction_for_upcoming_game(game, model_data, get_teams())
                 
                 if prediction:
                     # Determine actual winner
                     if game['home_score'] > game['away_score']:
-                        actual_winner = 'home'
+                        actual_winner = game['home_team_name']
                     elif game['away_score'] > game['home_score']:
-                        actual_winner = 'away'
+                        actual_winner = game['away_team_name']
                     else:
                         continue  # Skip draws
                     
-                    # Check if prediction was correct
-                    predicted_winner = 'home' if prediction['home_win_prob'] > 0.5 else 'away'
+                    # Check if prediction was correct (new format has predicted_winner directly)
+                    predicted_winner = prediction['predicted_winner']
                     is_correct = predicted_winner == actual_winner
                     
                     if is_correct:
@@ -132,7 +132,7 @@ def get_live_performance(league_id):
                         'predicted': predicted_winner,
                         'actual': actual_winner,
                         'correct': is_correct,
-                        'confidence': prediction['home_win_prob'] if predicted_winner == 'home' else (1 - prediction['home_win_prob'])
+                        'confidence': prediction['home_win_prob'] if predicted_winner == game['home_team_name'] else (1 - prediction['home_win_prob'])
                     })
                     
             except Exception as e:
@@ -642,9 +642,14 @@ def main():
         
         # Use live performance if available, otherwise fall back to historical
         if live_perf['total_games'] > 0:
-            accuracy = live_perf['accuracy']
-            mae = perf.get('overall_mae', 0)  # Keep historical MAE for now
-            live_indicator = f" (LIVE: {live_perf['total_games']} recent games)"
+            # Show both live and historical for comparison
+            live_accuracy = live_perf['accuracy']
+            historical_accuracy = perf.get('winner_accuracy', 0)
+            mae = perf.get('overall_mae', 0)
+            
+            # Use historical accuracy as primary (more reliable with larger sample)
+            accuracy = historical_accuracy
+            live_indicator = f" (Historical: {historical_accuracy:.1%} vs Live: {live_accuracy:.1%} on {live_perf['total_games']} games)"
         else:
             # Updated accuracy based on consistent prediction method testing
             accuracy = perf.get('winner_accuracy', 0)
@@ -703,6 +708,10 @@ def main():
         
         st.caption(f"🚀 WORLD-CLASS AI (Stacking Ensemble) trained: {trained_str}")
         st.caption("✅ Prediction method verified consistent with historical analysis")
+        
+        # Add explanation for live vs historical performance
+        if live_perf['total_games'] > 0 and live_perf['total_games'] < 20:
+            st.info(f"ℹ️ **Note**: Live performance based on {live_perf['total_games']} recent games (small sample). Historical performance based on {perf.get('training_games', 'unknown')} games is more reliable.")
         
         # Show recent game results if available
         if live_perf['total_games'] > 0 and live_perf['recent_games']:
