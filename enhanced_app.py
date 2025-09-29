@@ -421,6 +421,9 @@ def main():
         initial_sidebar_state="expanded"
     )
     
+    # Force redeploy trigger - Remove this line after deployment
+    st.write("<!-- Force Redeploy Trigger: 2025-09-29 12:20 -->")
+    
     st.title("Enhanced Rugby Predictions AI")
     st.markdown("Advanced machine learning predictions with automated updates and detailed match analysis")
     
