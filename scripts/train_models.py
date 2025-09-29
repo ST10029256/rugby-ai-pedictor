@@ -146,7 +146,7 @@ def get_league_specific_models(league_id: int) -> Tuple[Any, Any, Any]:
     
     return (clf, gbdt_clf), (reg_home, reg_away), scaler
 
-def train_league_models(league_id: int, db_path: str) -> Dict[str, Any]:
+def train_league_models(league_id: int, db_path: str) -> Dict[str, Any] | None:
     """Train models for a specific league"""
     logger.info(f"Training models for league {league_id} ({LEAGUE_CONFIGS[league_id]['name']})")
     
@@ -162,7 +162,8 @@ def train_league_models(league_id: int, db_path: str) -> Dict[str, Any]:
     df = build_feature_table(conn, config)
     
     # Filter historical data for this league
-    hist = df[(df["league_id"] == league_id) & df["home_win"].notna()].copy()
+    hist_filtered = df[(df["league_id"] == league_id) & df["home_win"].notna()].copy()
+    hist = pd.DataFrame(hist_filtered)  # Ensure DataFrame type
     
     if len(hist) < 10:
         logger.warning(f"Insufficient data for league {league_id}: {len(hist)} games")
@@ -180,67 +181,95 @@ def train_league_models(league_id: int, db_path: str) -> Dict[str, Any]:
         "home_momentum", "away_momentum", "momentum_diff", "league_strength", "home_league_form", "away_league_form"
     ]
     
+    # Ensure all required features are present
     present_cols = [c for c in feature_cols if c in hist.columns]
     
-    # Add extra features
-    extra_cols = ["home_wr_home", "away_wr_away", "pair_elo_expectation"]
-    home_wr = hist.groupby("home_team_id")["home_win"].mean().astype("float64")
-    away_wr = hist.assign(away_win=lambda d: (1 - d["home_win"]).astype(float)).groupby("away_team_id")["away_win"].mean().astype("float64")
+    # Add critical missing features (these should be handled in build_feature_table)
+    missing_cols = ["home_wr_home", "away_wr_away", "pair_elo_expectation"]
     
-    _home_wr_map = {safe_to_int(k): safe_to_float(v, default=float("nan")) for k, v in home_wr.items()}
-    _away_wr_map = {safe_to_int(k): safe_to_float(v, default=float("nan")) for k, v in away_wr.items()}
+    for col in missing_cols:
+        if col not in hist.columns:
+            print(f"Warning: Missing feature {col} - adding manually")
+            if col == "home_wr_home":
+                home_wr_dict = dict(hist.groupby("home_team_id")["home_win"].mean())
+                hist[col] = hist["home_team_id"].replace(home_wr_dict).fillna(0.5)
+            elif col == "away_wr_away":
+                away_wr_dict = {}
+                for away_id, group in hist.groupby("away_team_id"):
+                    away_wins = (1 - group["home_win"]).mean()
+                    away_wr_dict[away_id] = away_wins
+                hist[col] = hist["away_team_id"].replace(away_wr_dict).fillna(0.5)
+            elif col == "pair_elo_expectation":
+                hist[col] = 1.0 / (1.0 + 10 ** ((hist["elo_away_pre"] - hist["elo_home_pre"]) / 400.0))
     
-    hist["home_wr_home"] = hist["home_team_id"].apply(lambda tid: _home_wr_map.get(safe_to_int(tid, -1), float("nan")))
-    hist["away_wr_away"] = hist["away_team_id"].apply(lambda tid: _away_wr_map.get(safe_to_int(tid, -1), float("nan")))
-    hist["pair_elo_expectation"] = 1.0 / (1.0 + 10 ** ((hist["elo_away_pre"] - hist["elo_home_pre"]) / 400.0))
+    # Include all features: predefined + manually added ones
+    all_cols = [c for c in feature_cols if c in hist.columns] + [c for c in missing_cols if c in hist.columns]
+
+    # Convert for training - ensure proper typing
+    hist_df: pd.DataFrame = hist.copy()  # Ensure DataFrame type
     
-    all_cols = present_cols + extra_cols
-    X_hist = hist[all_cols].to_numpy()
-    y_hist = hist["home_win"].astype(int).to_numpy()
-    y_home = hist["home_score"].to_numpy()
-    y_away = hist["away_score"].to_numpy()
+    # Convert to numpy arrays properly - extract values from pandas DataFrames/Series
+    X_hist = np.asarray(hist_df[all_cols].values)
+    y_hist = np.asarray(hist_df["home_win"].astype(int).values)
+    y_home = np.asarray(hist_df["home_score"].values)
+    y_away = np.asarray(hist_df["away_score"].values)
     
-    # Calculate time-decay weights
-    weights = calculate_time_decay_weights(hist)
+    # Calculate time-decay weights - ensure hist_df is properly typed
+    weights: np.ndarray = calculate_time_decay_weights(hist_df)
     
     # Apply winsorization to scores
-    y_home_w = winsorize(y_home)
-    y_away_w = winsorize(y_away)
+    y_home_w = winsorize(np.array(y_home))
+    y_away_w = winsorize(np.array(y_away))
     
     # Get league-specific models
     (clf, gbdt_clf), (reg_home, reg_away), scaler = get_league_specific_models(league_id)
     
+    # CRITICAL: Split data to prevent overfitting
+    from sklearn.model_selection import train_test_split
+    
+    # Use time-based split (most recent 20% for validation)
+    split_idx = int(0.8 * len(X_hist))
+    X_train, X_val = X_hist[:split_idx], X_hist[split_idx:]
+    y_train, y_val = y_hist[:split_idx], y_hist[split_idx:]
+    y_home_train, y_home_val = y_home_w[:split_idx], y_home_w[split_idx:]
+    y_away_train, y_away_val = y_away_w[:split_idx], y_away_w[split_idx:]
+    weights_train, weights_val = weights[:split_idx], weights[split_idx:]
+    
+    logger.info(f"Training on {len(X_train)} samples, validating on {len(X_val)} samples")
+    
     # Train classification models
     logger.info(f"Training classification models for league {league_id}")
-    clf.fit(X_hist, y_hist)
-    gbdt_clf.fit(X_hist, y_hist)
+    clf.fit(X_train, y_train)
+    gbdt_clf.fit(X_train, y_train)
     
     # Train regression models
     logger.info(f"Training regression models for league {league_id}")
+    X_val_scaled = None  # Initialize
     if scaler is not None:
-        X_hist_scaled = scaler.fit_transform(X_hist)
-        reg_home.fit(X_hist_scaled, y_home_w)
-        reg_away.fit(X_hist_scaled, y_away_w)
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_val_scaled = scaler.transform(X_val)
+        reg_home.fit(X_train_scaled, y_home_train)
+        reg_away.fit(X_train_scaled, y_away_train)
     else:
-        reg_home.fit(X_hist, y_home_w)
-        reg_away.fit(X_hist, y_away_w)
+        reg_home.fit(X_train, y_home_train)
+        reg_away.fit(X_train, y_away_train)
     
-    # Calculate model performance metrics
-    clf_probs = clf.predict_proba(X_hist)[:, 1]
-    gbdt_probs = gbdt_clf.predict_proba(X_hist)[:, 1]
+    # Calculate REALISTIC model performance metrics (validation set only)
+    clf_probs = clf.predict_proba(X_val)[:, 1]
+    gbdt_probs = gbdt_clf.predict_proba(X_val)[:, 1]
     ensemble_probs = 0.5 * (clf_probs + gbdt_probs)
     
-    if scaler is not None:
-        pred_home = reg_home.predict(scaler.transform(X_hist))
-        pred_away = reg_away.predict(scaler.transform(X_hist))
+    if scaler is not None and X_val_scaled is not None:
+        pred_home = reg_home.predict(X_val_scaled)
+        pred_away = reg_away.predict(X_val_scaled)
     else:
-        pred_home = reg_home.predict(X_hist)
-        pred_away = reg_away.predict(X_hist)
+        pred_home = reg_home.predict(X_val)
+        pred_away = reg_away.predict(X_val)
     
-    # Calculate accuracy metrics
-    winner_accuracy = np.mean((ensemble_probs >= 0.5) == y_hist)
-    home_mae = np.mean(np.abs(pred_home - y_home))
-    away_mae = np.mean(np.abs(pred_away - y_away))
+    # Calculate REALISTIC accuracy metrics on validation set
+    winner_accuracy = np.mean((ensemble_probs >= 0.5) == y_val)
+    home_mae = np.mean(np.abs(pred_home - y_home_val))
+    away_mae = np.mean(np.abs(pred_away - y_away_val))
     overall_mae = (home_mae + away_mae) / 2
     
     logger.info(f"League {league_id} performance:")
@@ -270,8 +299,8 @@ def train_league_models(league_id: int, db_path: str) -> Dict[str, Any]:
             "overall_mae": overall_mae,
         },
         "team_mappings": {
-            "home_wr_map": _home_wr_map,
-            "away_wr_map": _away_wr_map,
+            "home_wr_map": dict(hist.groupby("home_team_id")["home_win"].mean()),
+            "away_wr_map": {team_id: (1 - group["home_win"]).mean() for team_id, group in hist.groupby("away_team_id")},
         }
     }
     
