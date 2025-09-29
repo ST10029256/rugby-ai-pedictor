@@ -1,0 +1,11 @@
+{
+  "leagues_to_retrain": [
+    4986,
+    4446,
+    5069,
+    4574
+  ],
+  "games_updated": 1,
+  "timestamp": "2025-09-29T12:48:19.177274",
+  "reason": "new_games_fetched"
+}
