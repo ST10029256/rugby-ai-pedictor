@@ -482,46 +482,62 @@ def main():
             league_data = leagues[selected_league]
             perf = league_data.get('performance', {})
             
-            # Enhanced Smart AI performance display
-            st.subheader("🧠 Smart AI Performance")
-            accuracy = perf.get('winner_accuracy', 0)
-            mae = perf.get('overall_mae', 0)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if accuracy > 0.65:
-                    st.success(f"Winner Accuracy: {accuracy:.1%} (EXCELLENT!)")
-                elif accuracy > 0.60:
-                    st.info(f"Winner Accuracy: {accuracy:.1%} (GOOD)")
-                else:
-                    st.metric("Winner Accuracy", f"{accuracy:.1%}")
-            
-            with col2:
-                if mae < 10:
-                    st.success(f"Score MAE: {mae:.1f} (EXCELLENT!)")
-                elif mae < 12:
-                    st.info(f"Score MAE: {mae:.1f} (GOOD)")
-                else:
-                    st.metric("Score MAE", f"{mae:.1f}")
-            
-            # Training info
-            trained_at = league_data.get('trained_at', 'Unknown')
-            if trained_at != 'Unknown':
-                try:
-                    trained_time = datetime.fromisoformat(trained_at)
-                    time_ago = datetime.now() - trained_time
-                    if time_ago.days > 0:
-                        trained_str = f"{time_ago.days}d ago"
-                    elif time_ago.seconds > 3600:
-                        trained_str = f"{time_ago.seconds // 3600}h ago"
-                    else:
-                        trained_str = "Recent"
-                except:
-                    trained_str = "Unknown"
+        # WORLD-CLASS AI performance display
+        st.subheader("🚀 WORLD-CLASS AI Performance")
+        accuracy = perf.get('winner_accuracy', 0)
+        mae = perf.get('overall_mae', 0)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if accuracy >= 0.95:
+                st.success(f"Winner Accuracy: {accuracy:.1%} (PERFECT!)")
+            elif accuracy >= 0.90:
+                st.success(f"Winner Accuracy: {accuracy:.1%} (GODLIKE!)")
+            elif accuracy >= 0.85:
+                st.success(f"Winner Accuracy: {accuracy:.1%} (LEGENDARY!)")
+            elif accuracy >= 0.80:
+                st.success(f"Winner Accuracy: {accuracy:.1%} (WORLD-CLASS!)")
+            elif accuracy >= 0.75:
+                st.info(f"Winner Accuracy: {accuracy:.1%} (EXCELLENT!)")
+            elif accuracy >= 0.70:
+                st.info(f"Winner Accuracy: {accuracy:.1%} (VERY GOOD)")
             else:
+                st.metric("Winner Accuracy", f"{accuracy:.1%}")
+        
+        with col2:
+            if mae <= 3:
+                st.success(f"Score MAE: {mae:.1f} (PERFECT!)")
+            elif mae <= 5:
+                st.success(f"Score MAE: {mae:.1f} (GODLIKE!)")
+            elif mae <= 7:
+                st.success(f"Score MAE: {mae:.1f} (LEGENDARY!)")
+            elif mae <= 9:
+                st.success(f"Score MAE: {mae:.1f} (WORLD-CLASS!)")
+            elif mae <= 11:
+                st.info(f"Score MAE: {mae:.1f} (EXCELLENT!)")
+            elif mae <= 13:
+                st.info(f"Score MAE: {mae:.1f} (VERY GOOD)")
+            else:
+                st.metric("Score MAE", f"{mae:.1f}")
+        
+        # Training info
+        trained_at = league_data.get('trained_at', 'Unknown')
+        if trained_at != 'Unknown':
+            try:
+                trained_time = datetime.fromisoformat(trained_at)
+                time_ago = datetime.now() - trained_time
+                if time_ago.days > 0:
+                    trained_str = f"{time_ago.days}d ago"
+                elif time_ago.seconds > 3600:
+                    trained_str = f"{time_ago.seconds // 3600}h ago"
+                else:
+                    trained_str = "Recent"
+            except:
                 trained_str = "Unknown"
-            
-            st.caption(f"🧠 Smart AI (Ensemble) trained: {trained_str}")
+        else:
+            trained_str = "Unknown"
+        
+        st.caption(f"🚀 WORLD-CLASS AI (Stacking Ensemble) trained: {trained_str}")
     
     # Main content
     if selected_league:
@@ -553,9 +569,9 @@ def main():
         
         st.header(f"🏉 {league_name} Predictions")
         
-        # Clean model info
+        # WORLD-CLASS AI model info
         feature_count = len(model_data.get('feature_columns', []))
-        st.caption(f"AI model with {feature_count} advanced features")
+        st.caption(f"🚀 WORLD-CLASS AI with {feature_count} advanced features (including mystical & cosmic factors)")
         
         # Load predictions button for faster initial load
         if st.button("📊 Load Predictions", type="primary"):
