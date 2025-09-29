@@ -58,6 +58,123 @@ def get_teams():
     except:
         return {}
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_live_performance(league_id):
+    """Calculate live performance for a specific league"""
+    try:
+        conn = sqlite3.connect('data.sqlite')
+        
+        # Get recent completed games for this league (last 30 days)
+        query = """
+        SELECT 
+            e.id as event_id,
+            e.home_team_id,
+            e.away_team_id,
+            e.home_score,
+            e.away_score,
+            e.date_event,
+            ht.name as home_team_name,
+            at.name as away_team_name
+        FROM event e
+        JOIN team ht ON e.home_team_id = ht.id
+        JOIN team at ON e.away_team_id = at.id
+        WHERE e.league_id = ?
+        AND e.home_score IS NOT NULL 
+        AND e.away_score IS NOT NULL
+        AND e.date_event >= date('now', '-30 days')
+        ORDER BY e.date_event DESC
+        LIMIT 50
+        """
+        
+        df = pd.read_sql_query(query, conn, params=[league_id])
+        conn.close()
+        
+        if len(df) == 0:
+            return {"accuracy": 0, "total_games": 0, "recent_games": []}
+        
+        # Load model for predictions
+        model_data = load_model(league_id)
+        if not model_data:
+            return {"accuracy": 0, "total_games": 0, "recent_games": []}
+        
+        correct_predictions = 0
+        total_predictions = 0
+        recent_games = []
+        
+        # Process each recent game
+        for _, game in df.iterrows():
+            try:
+                # Make AI prediction for this game
+                prediction = make_prediction_for_game(game, model_data)
+                
+                if prediction:
+                    # Determine actual winner
+                    if game['home_score'] > game['away_score']:
+                        actual_winner = 'home'
+                    elif game['away_score'] > game['home_score']:
+                        actual_winner = 'away'
+                    else:
+                        continue  # Skip draws
+                    
+                    # Check if prediction was correct
+                    predicted_winner = 'home' if prediction['home_win_prob'] > 0.5 else 'away'
+                    is_correct = predicted_winner == actual_winner
+                    
+                    if is_correct:
+                        correct_predictions += 1
+                    total_predictions += 1
+                    
+                    recent_games.append({
+                        'date': game['date_event'],
+                        'home_team': game['home_team_name'],
+                        'away_team': game['away_team_name'],
+                        'score': f"{game['home_score']}-{game['away_score']}",
+                        'predicted': predicted_winner,
+                        'actual': actual_winner,
+                        'correct': is_correct,
+                        'confidence': prediction['home_win_prob'] if predicted_winner == 'home' else (1 - prediction['home_win_prob'])
+                    })
+                    
+            except Exception as e:
+                print(f"Error processing game {game['event_id']}: {e}")
+                continue
+        
+        accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
+        
+        return {
+            "accuracy": accuracy,
+            "total_games": total_predictions,
+            "correct_predictions": correct_predictions,
+            "recent_games": recent_games[:10]  # Show last 10 games
+        }
+        
+    except Exception as e:
+        print(f"Error calculating live performance: {e}")
+        return {"accuracy": 0, "total_games": 0, "recent_games": []}
+
+def make_prediction_for_game(game_data, model_data):
+    """Make prediction for a single historical game"""
+    try:
+        # Get team names
+        team_names = get_teams()
+        
+        # Get feature columns from model
+        feature_cols = model_data.get('feature_columns', [])
+        
+        # Convert single game to DataFrame format expected by make_prediction
+        game_info = pd.DataFrame([{
+            'home_team_id': game_data['home_team_id'],
+            'away_team_id': game_data['away_team_id'],
+            'date_event': game_data['date_event']
+        }])
+        
+        # Use the existing make_prediction function
+        return make_prediction(model_data, game_info, team_names, feature_cols)
+        
+    except Exception as e:
+        print(f"Error making prediction for game: {e}")
+        return None
+
 def check_data_freshness():
     """Check if data needs updating"""
     try:
@@ -488,25 +605,36 @@ def main():
             
         # WORLD-CLASS AI performance display
         st.subheader("🚀 WORLD-CLASS AI Performance")
-        accuracy = perf.get('winner_accuracy', 0)
-        mae = perf.get('overall_mae', 0)
+        
+        # Get live performance for recent games
+        live_perf = get_live_performance(selected_league)
+        
+        # Use live performance if available, otherwise fall back to historical
+        if live_perf['total_games'] > 0:
+            accuracy = live_perf['accuracy']
+            mae = perf.get('overall_mae', 0)  # Keep historical MAE for now
+            live_indicator = f" (LIVE: {live_perf['total_games']} recent games)"
+        else:
+            accuracy = perf.get('winner_accuracy', 0)
+            mae = perf.get('overall_mae', 0)
+            live_indicator = " (Historical)"
         
         col1, col2 = st.columns(2)
         with col1:
             if accuracy >= 0.95:
-                st.success(f"Winner Accuracy: {accuracy:.1%} (PERFECT!)")
+                st.success(f"Winner Accuracy: {accuracy:.1%} (PERFECT!){live_indicator}")
             elif accuracy >= 0.90:
-                st.success(f"Winner Accuracy: {accuracy:.1%} (GODLIKE!)")
+                st.success(f"Winner Accuracy: {accuracy:.1%} (GODLIKE!){live_indicator}")
             elif accuracy >= 0.85:
-                st.success(f"Winner Accuracy: {accuracy:.1%} (LEGENDARY!)")
+                st.success(f"Winner Accuracy: {accuracy:.1%} (LEGENDARY!){live_indicator}")
             elif accuracy >= 0.80:
-                st.success(f"Winner Accuracy: {accuracy:.1%} (WORLD-CLASS!)")
+                st.success(f"Winner Accuracy: {accuracy:.1%} (WORLD-CLASS!){live_indicator}")
             elif accuracy >= 0.75:
-                st.info(f"Winner Accuracy: {accuracy:.1%} (EXCELLENT!)")
+                st.info(f"Winner Accuracy: {accuracy:.1%} (EXCELLENT!){live_indicator}")
             elif accuracy >= 0.70:
-                st.info(f"Winner Accuracy: {accuracy:.1%} (VERY GOOD)")
+                st.info(f"Winner Accuracy: {accuracy:.1%} (VERY GOOD){live_indicator}")
             else:
-                st.metric("Winner Accuracy", f"{accuracy:.1%}")
+                st.metric("Winner Accuracy", f"{accuracy:.1%}{live_indicator}")
         
         with col2:
             if mae <= 3:
@@ -542,6 +670,17 @@ def main():
             trained_str = "Unknown"
         
         st.caption(f"🚀 WORLD-CLASS AI (Stacking Ensemble) trained: {trained_str}")
+        
+        # Show recent game results if available
+        if live_perf['total_games'] > 0 and live_perf['recent_games']:
+            st.subheader("📊 Recent Game Results")
+            for game in live_perf['recent_games'][:5]:  # Show last 5 games
+                status = "✅" if game['correct'] else "❌"
+                predicted_team = game['home_team'] if game['predicted'] == 'home' else game['away_team']
+                actual_team = game['home_team'] if game['actual'] == 'home' else game['away_team']
+                
+                st.caption(f"{status} {game['date'][:10]}: {game['home_team']} vs {game['away_team']} ({game['score']})")
+                st.caption(f"   Predicted: {predicted_team} | Actual: {actual_team} | Confidence: {game['confidence']:.0%}")
     
     # Main content
     if selected_league:
