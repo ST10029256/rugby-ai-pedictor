@@ -31,10 +31,10 @@ from sklearn.linear_model import Ridge, Lasso
 
 # Try to import XGBoost, but make it optional
 try:
-    import xgboost as xgb
+    import xgboost as xgb  # type: ignore
     XGBOOST_AVAILABLE = True
 except ImportError:
-    xgb = None
+    xgb = None  # type: ignore
     XGBOOST_AVAILABLE = False
     print("XGBoost not available - using fallback ensemble")
 
@@ -127,7 +127,7 @@ def get_league_specific_models(league_id: int) -> Tuple[Any, Any, Any]:
     
     # Create ensemble based on XGBoost availability (runtime check)
     try:
-        import xgboost
+        import xgboost  # type: ignore
         xgb_clf = xgboost.XGBClassifier(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
         gbdt_clf = VotingClassifier([
             ('hgb', hgb_clf),
@@ -153,7 +153,7 @@ def get_league_specific_models(league_id: int) -> Tuple[Any, Any, Any]:
         hgb_away = HistGradientBoostingRegressor(random_state=42, max_iter=100, learning_rate=0.1)
         
         try:
-            import xgboost
+            import xgboost  # type: ignore
             xgb_home = xgboost.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
             xgb_away = xgboost.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
             
