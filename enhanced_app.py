@@ -173,7 +173,16 @@ def make_prediction_for_game(game_data, model_data):
         
         # Get feature columns and prepare data
         feature_cols = model_data.get('feature_columns', [])
-        X = game_features[feature_cols].fillna(0)
+        
+        # Ensure we get a DataFrame slice and handle missing columns
+        if len(game_features) > 0:
+            # Select columns and ensure it's a DataFrame
+            X = game_features[feature_cols].copy()
+            if not isinstance(X, pd.DataFrame):
+                X = pd.DataFrame(X, columns=feature_cols)
+            X = X.fillna(0)
+        else:
+            X = pd.DataFrame(columns=feature_cols)
         
         # Get models
         models = model_data.get('models', {})
