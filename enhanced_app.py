@@ -424,8 +424,7 @@ def main():
     st.title("Enhanced Rugby Predictions AI")
     st.markdown("Advanced machine learning predictions with automated updates and detailed match analysis")
     
-    # Force UI update trigger
-    st.markdown(f"**Last Updated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    # Clean UI - no timestamp needed
     
     # Initialize session state for automation (simplified)
     if 'auto_update_enabled' not in st.session_state:
