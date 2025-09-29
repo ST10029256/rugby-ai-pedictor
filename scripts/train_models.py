@@ -26,7 +26,9 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.linear_model import LogisticRegression, ElasticNet
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestRegressor, GradientBoostingRegressor, RandomForestClassifier, VotingClassifier, VotingRegressor
+from sklearn.linear_model import Ridge, Lasso
+import xgboost as xgb
 
 # Configure logging
 logging.basicConfig(
@@ -106,16 +108,49 @@ def calculate_time_decay_weights(hist_df: pd.DataFrame, half_life_days: float = 
 def get_league_specific_models(league_id: int) -> Tuple[Any, Any, Any]:
     """Get league-specific model configurations"""
     
-    # Classification models (same for all leagues)
+    # ENHANCED CLASSIFICATION: Ensemble methods for better win accuracy
     base_lr = LogisticRegression(max_iter=2000, solver="lbfgs")
     calibrated_clf = CalibratedClassifierCV(base_lr, method="isotonic", cv=5)
     clf = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), calibrated_clf)
-    gbdt_clf = HistGradientBoostingClassifier(random_state=42)
     
-    # Regression models (league-specific)
+    # Ensemble classifier for better win prediction
+    hgb_clf = HistGradientBoostingClassifier(random_state=42, max_iter=100, learning_rate=0.1)
+    rf_clf = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=10)
+    
+    # Try to use XGBoost if available, otherwise fall back to HGB
+    try:
+        xgb_clf = xgb.XGBClassifier(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
+        gbdt_clf = VotingClassifier([
+            ('hgb', hgb_clf),
+            ('rf', rf_clf),
+            ('xgb', xgb_clf)
+        ], voting='soft')
+    except:
+        # Fallback to simpler ensemble if XGBoost not available
+        gbdt_clf = VotingClassifier([
+            ('hgb', hgb_clf),
+            ('rf', rf_clf)
+        ], voting='soft')
+    
+    # ENHANCED REGRESSION: Ensemble methods for better score prediction
     if league_id == 4446:  # United Rugby Championship
-        reg_home = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
-        reg_away = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
+        # Ensemble for better score prediction
+        rf_home = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
+        hgb_home = HistGradientBoostingRegressor(random_state=42, max_iter=100, learning_rate=0.1)
+        
+        rf_away = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
+        hgb_away = HistGradientBoostingRegressor(random_state=42, max_iter=100, learning_rate=0.1)
+        
+        try:
+            xgb_home = xgb.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
+            xgb_away = xgb.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
+            
+            reg_home = VotingRegressor([('rf', rf_home), ('hgb', hgb_home), ('xgb', xgb_home)])
+            reg_away = VotingRegressor([('rf', rf_away), ('hgb', hgb_away), ('xgb', xgb_away)])
+        except:
+            reg_home = VotingRegressor([('rf', rf_home), ('hgb', hgb_home)])
+            reg_away = VotingRegressor([('rf', rf_away), ('hgb', hgb_away)])
+        
         scaler = None
     elif league_id == 4574:  # Rugby World Cup
         reg_home = HistGradientBoostingRegressor(
@@ -169,22 +204,14 @@ def train_league_models(league_id: int, db_path: str) -> Dict[str, Any] | None:
         logger.warning(f"Insufficient data for league {league_id}: {len(hist)} games")
         return None
     
-    # Feature columns
-    feature_cols = [
-        "elo_diff", "form_diff", "elo_home_pre", "elo_away_pre",
-        "home_form", "away_form", "home_rest_days", "away_rest_days",
-        "rest_diff", "home_goal_diff_form", "away_goal_diff_form",
-        "goal_diff_form_diff", "h2h_home_rate", "season_phase", "is_home",
-        # Advanced features
-        "elo_ratio", "elo_sum", "form_diff_10", "h2h_recent", "rest_ratio", "home_advantage",
-        "home_attack_strength", "away_attack_strength", "home_defense_strength", "away_defense_strength",
-        "home_momentum", "away_momentum", "momentum_diff", "league_strength", "home_league_form", "away_league_form"
-    ]
+    # QUICK WIN: Use all features from the feature table (includes new advanced features)
+    # Get all feature columns, excluding metadata columns
+    metadata_cols = ["event_id", "league_id", "season", "date_event", "home_team_id", "away_team_id", "home_score", "away_score", "home_win"]
+    all_cols = [c for c in hist.columns if c not in metadata_cols]
     
-    # Ensure all required features are present
-    present_cols = [c for c in feature_cols if c in hist.columns]
+    print(f"Using {len(all_cols)} features for training (including new advanced features)")
     
-    # Add critical missing features (these should be handled in build_feature_table)
+    # Add critical missing features if they don't exist
     missing_cols = ["home_wr_home", "away_wr_away", "pair_elo_expectation"]
     
     for col in missing_cols:
@@ -193,17 +220,17 @@ def train_league_models(league_id: int, db_path: str) -> Dict[str, Any] | None:
             if col == "home_wr_home":
                 home_wr_dict = dict(hist.groupby("home_team_id")["home_win"].mean())
                 hist[col] = hist["home_team_id"].replace(home_wr_dict).fillna(0.5)
+                all_cols.append(col)
             elif col == "away_wr_away":
                 away_wr_dict = {}
                 for away_id, group in hist.groupby("away_team_id"):
                     away_wins = (1 - group["home_win"]).mean()
                     away_wr_dict[away_id] = away_wins
                 hist[col] = hist["away_team_id"].replace(away_wr_dict).fillna(0.5)
+                all_cols.append(col)
             elif col == "pair_elo_expectation":
                 hist[col] = 1.0 / (1.0 + 10 ** ((hist["elo_away_pre"] - hist["elo_home_pre"]) / 400.0))
-    
-    # Include all features: predefined + manually added ones
-    all_cols = [c for c in feature_cols if c in hist.columns] + [c for c in missing_cols if c in hist.columns]
+                all_cols.append(col)
 
     # Convert for training - ensure proper typing
     hist_df: pd.DataFrame = hist.copy()  # Ensure DataFrame type
