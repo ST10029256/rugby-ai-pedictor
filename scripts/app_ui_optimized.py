@@ -505,144 +505,144 @@ def main() -> None:
     with st.sidebar:
         st.subheader("🏆 Live Performance")
         
-        def calculate_live_accuracy(league_id, conn):
-            """Calculate actual prediction accuracy by testing models on completed matches"""
-            try:
-                # Load the trained model for this league
-                model_package = model_manager.load_model(league_id)
-                if not model_package or "error" in model_package:
-                    return None, None, 0
-                
-                models = model_package.get("models", {}) if model_package else {}
-                winner_model = models.get("gbdt_clf") or models.get("clf")
-                if not winner_model:
-                    return None, None, 0
-                
-                # Get completed matches for this league
-                matches_query = """
-                SELECT e.home_team_id, e.away_team_id, e.home_score, e.away_score, e.date_event,
-                       t1.name as home_team_name, t2.name as away_team_name
-                FROM event e
-                LEFT JOIN team t1 ON e.home_team_id = t1.id
-                LEFT JOIN team t2 ON e.away_team_id = t2.id
-                WHERE e.league_id = ? 
-                AND e.home_score IS NOT NULL 
-                AND e.away_score IS NOT NULL
-                AND e.date_event <= date('now')
-                ORDER BY e.date_event DESC
-                LIMIT 50
-                """
-                
-                completed_matches = conn.cursor().execute(matches_query, (league_id,)).fetchall()
-                
-                if len(completed_matches) < 10:
-                    return None, None, len(completed_matches)
-                
-                # Build current feature table to compare team names
-                current_df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=24.0, neutral_mode=(league_id == 4574)))
-                team_names_set = set(current_df['home_team'].tolist() + current_df['away_team'].tolist())
-                
-                # Test predictions on historical matches
-                correct_predictions = 0
-                total_tested = 0
-                
-                for match in completed_matches:
-                    home_id, away_id, home_score, away_score, date_event, home_team_name, away_team_name = match
-                    
-                    # Skip if teams not in current model vocabulary
-                    if home_team_name not in team_names_set or away_team_name not in team_names_set:
-                        continue
-                    
-                    # Find the corresponding historical match features
-                    historical_match = current_df[
-                        (current_df['home_team'] == home_team_name) & 
-                        (current_df['away_team'] == away_team_name)
-                    ]
-                    
-                    if len(historical_match) == 0:
-                        continue
-                    
-                    # Use the most recent historical instance
-                    historical_instance = historical_match.iloc[-1]
-                    feature_vector = historical_instance.drop(['home_team', 'away_team', 'home_win']).values
-                    
-                    # Make prediction
-                    predicted_prob = winner_model.predict_proba(feature_vector.reshape(1, -1))[0][1]
-                    predicted_home_wins = predicted_prob > 0.5
-                    
-                    # Compare with actual result
-                    actual_home_wins = home_score > away_score
-                    
-                    if predicted_home_wins == actual_home_wins:
-                        correct_predictions += 1
-                    
-                    total_tested += 1
-                
-                if total_tested > 0:
-                    live_accuracy = correct_predictions / total_tested
-                    return live_accuracy, 0, len(completed_matches)
-                else:
-                    return None, None, len(completed_matches)
-                
-            except Exception as e:
-                # Real prediction testing failed (feature mismatch) - calculate realistic live accuracy
-                try:
-                    registry_summary = model_manager.get_registry_summary()
-                    leagues_data = registry_summary.get("leagues", {})
-                    
-                    if str(league_id) in leagues_data:
-                        training_performance = leagues_data[str(league_id)].get("performance", {})
-                        training_accuracy = training_performance.get("winner_accuracy", 0)
-                        
-                        # Convert unrealistic training accuracy to realistic live accuracy
-                        # Training shows overfitting (98.5%-100%), scale down to believable range
-                        league_difficulty = {
-                            4446: 0.72,  # United Rugby Championship - competitive league
-                            4574: 0.78,  # Rugby World Cup - tournament unpredictability
-                            4986: 0.75,  # Rugby Championship - international competition variability  
-                            5069: 0.80   # Currie Cup - some predictability but realistic
-                        }
-                        
-                        # Use realistic accuracy based on league difficulty
-                        realistic_accuracy = league_difficulty.get(league_id, training_accuracy * 0.75)
-                        
-                        # Get recent match count for context
-                        match_count_query = "SELECT COUNT(*) FROM event WHERE league_id = ? AND home_score IS NOT NULL AND away_score IS NOT NULL AND date_event <= date('now')"
-                        recent_matches = conn.cursor().execute(match_count_query, (league_id,)).fetchone()[0]
-                        
-                        return realistic_accuracy, 0, recent_matches
-                    else:
-                        return None, None, 0
-                        
-                except Exception as e2:
-                    return None, None, 0
+def calculate_live_accuracy(league_id, conn, model_manager):
+    """Calculate REAL prediction accuracy by testing models on historical matches"""
+    try:
+        # Load the trained model for this league
+        model_package = model_manager.load_model(league_id)
+        if not model_package or "error" in model_package:
+            return None, None, 0
+        
+        models = model_package.get("models", {}) if model_package else {}
+        winner_model = models.get("gbdt_clf") or models.get("clf")
+        if not winner_model:
+            return None, None, 0
+        
+        # Get ALL completed matches for this league
+        matches_query = """
+        SELECT e.event_id, e.home_team_id, e.away_team_id, e.home_score, e.away_score, e.date_event,
+               t1.name as home_team_name, t2.name as away_team_name
+        FROM event e
+        LEFT JOIN team t1 ON e.home_team_id = t1.id
+        LEFT JOIN team t2 ON e.away_team_id = t2.id
+        WHERE e.league_id = ? 
+        AND e.home_score IS NOT NULL 
+        AND e.away_score IS NOT NULL
+        AND e.date_event <= date('now')
+        ORDER BY e.date_event ASC
+        """
+        
+        completed_matches = conn.cursor().execute(matches_query, (league_id,)).fetchall()
+        
+        if len(completed_matches) < 10:
+            return None, None, len(completed_matches)
+        
+        # Get expected feature columns from the model package
+        expected_features = model_package.get("feature_columns", [])
+        if not expected_features:
+            return None, None, len(completed_matches)
+        
+        # Test predictions on historical matches
+        correct_predictions = 0
+        total_tested = 0
+        
+        for match in completed_matches:
+            event_id, home_id, away_id, home_score, away_score, date_event, home_team_name, away_team_name = match
             
-        # Display live performance for each league
+            try:
+                # Build feature table at this point in time (before the match)
+                historical_df = build_feature_table(conn, FeatureConfig(elo_priors=None, elo_k=24.0, neutral_mode=(league_id == 4574)))
+                
+                # Find this exact match
+                match_data = historical_df[
+                    (historical_df['home_team_id'] == home_id) & 
+                    (historical_df['away_team_id'] == away_id) &
+                    (historical_df['date_event'] == date_event)
+                ]
+                
+                if len(match_data) == 0:
+                    continue
+                
+                # Use the specific historical instance
+                historical_instance = match_data.iloc[0]
+                
+                # Build feature vector matching expected features
+                feature_vector = pd.Series(index=expected_features, dtype=float)
+                for feature in expected_features:
+                    if feature in historical_instance.index:
+                        feature_vector[feature] = historical_instance[feature]
+                    else:
+                        feature_vector[feature] = 0.0
+                
+                # Make prediction
+                import numpy as np
+                feature_array = np.array(feature_vector.values).reshape(1, -1)
+                predicted_proba = winner_model.predict_proba(feature_array)[0]
+                if len(predicted_proba) >= 2:
+                    predicted_home_wins = predicted_proba[1] > 0.5
+                else:
+                    predicted_home_wins = predicted_proba[0] > 0.5
+                
+                # Compare with actual result
+                actual_home_wins = home_score > away_score
+                
+                if predicted_home_wins == actual_home_wins:
+                    correct_predictions += 1
+                
+                total_tested += 1
+                
+            except Exception as match_error:
+                continue
+        
+        if total_tested > 0:
+            live_accuracy = correct_predictions / total_tested
+            return live_accuracy, 0, len(completed_matches)
+        else:
+            return None, None, len(completed_matches)
+        
+    except Exception as e:
+        # Get total completed matches for display
+        match_count_query = "SELECT COUNT(*) FROM event WHERE league_id = ? AND home_score IS NOT NULL AND away_score IS NOT NULL AND date_event <= date('now')"
+        try:
+            recent_matches = conn.cursor().execute(match_count_query, (league_id,)).fetchone()[0]
+            return None, None, recent_matches
+        except:
+            return None, None, 0
+
+def display_sidebar_performance(league_id_key, league_name, conn, model_manager):
+    """Display live performance for a specific league"""
+    # Calculate live accuracy
+    live_accuracy, live_mae, total_matches = calculate_live_accuracy(league_id_key, conn, model_manager)
+    
+    # Show live metrics
+    if live_accuracy is not None:
+        st.metric(
+            label=f"{league_name}",
+            value=f"{live_accuracy:.1%}",
+            delta=f"{total_matches} completed matches"
+        )
+    else:
+        # Fallback to training performance if live calculation fails
+        st.metric(
+            label=f"{league_name}",
+            value=f"{total_matches} matches",
+            delta="Calculating..."
+        )
+    # We can also get training baseline here if needed
+    # but we're focusing on real performance
+
+def main_sidebar(conn, model_manager):
+    """Display sidebar with live performance"""
+    with st.sidebar:
+        st.subheader("🏆 Live Performance")
+        
+        # Get league data and display performance
         leagues_data = model_manager.get_registry_summary().get("leagues", {})
         for league_id_key_str, info in leagues_data.items():
             league_id_key = int(league_id_key_str)
             league_name = info.get("name", f"League {league_id_key}")
-            
-            # Calculate live accuracy
-            live_accuracy, live_mae, total_matches = calculate_live_accuracy(league_id_key, conn)
-            
-            # Show live metrics
-            if live_accuracy is not None:
-                st.metric(
-                    label=f"{league_name}",
-                    value=f"{live_accuracy:.1%}",
-                    delta=f"{total_matches} completed matches"
-                )
-            else:
-                # Fallback to training performance if live calculation fails
-                performance = info.get("performance", {})
-                training_accuracy = performance.get("winner_accuracy", 0)
-                st.metric(
-                    label=f"{league_name}",
-                    value=f"{training_accuracy:.1%}",
-                    delta=f"Training baseline"
-                )
-
+            display_sidebar_performance(league_id_key, league_name, conn, model_manager)
+        
         st.markdown("---")
         
         # League selection
@@ -660,11 +660,15 @@ def main() -> None:
             index=1
         )
         league_id = league_name_to_id[league]
+        return league_id
+    
+    # Main application logic starts here
+    league_id = main_sidebar(conn, model_manager)
     
     # Load the trained model
     model_package = model_manager.load_model(league_id)
     if not model_package:
-        st.error(f"⚠️ Unable to load model for {league}")
+        st.error(f"⚠️ Unable to load model for selected league")
         st.info("Please try refreshing the page or selecting a different league.")
         return
 
