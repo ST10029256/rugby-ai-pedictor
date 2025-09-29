@@ -84,9 +84,9 @@ def main() -> None:
         layout="wide", 
         initial_sidebar_state="expanded",
         menu_items={
-            'Get Help': 'https://github.com/your-repo',
-            'Report a bug': "https://github.com/your-repo/issues",
-            'About': "# Rugby Predictions\nAI-powered rugby match predictions!"
+            'Get Help': 'https://github.com/ST10029256/rugby-ai-pedictor',
+            'Report a bug': "https://github.com/ST10029256/rugby-ai-pedictor/issues",
+            'About': "# Rugby Predictions\nAI-powered rugby match predictions using machine learning models"
         }
     )
     
@@ -362,14 +362,14 @@ def main() -> None:
     """, unsafe_allow_html=True)
     
     st.title("🏉 Rugby Predictions")
-    st.caption("🤖 AI-powered predictions that update automatically")
+    st.caption("Professional AI predictions for major rugby competitions")
 
     # Initialize model manager
     model_manager = load_model_manager()
     
     if model_manager is None:
-        st.error("❌ **Critical Error**: Unable to load model manager!")
-        st.error("The artifacts directory or models could not be found.")
+        st.error("⚠️ Unable to load prediction models")
+        st.info("Please refresh the page or try again later.")
         st.stop()
     
     # Check if we have compatible models
@@ -380,77 +380,37 @@ def main() -> None:
             compatible_leagues.append((league_id, league_name))
     
     if not compatible_leagues:
-        st.error("⚠️ **Model Compatibility Issue**")
-        st.error("None of the trained models are compatible with the current scikit-learn version.")
-        st.info("🔄 **Solution**: This will be automatically resolved when Streamlit Cloud redeploys with the correct scikit-learn version.")
-        st.info("📋 **Available Leagues**: All leagues are trained but require scikit-learn 1.5.2")
+        st.error("⚠️ Models not available")
+        st.info("Please try again later.")
         return
     
-    # Debug information (hidden by default)  
-    debug_info = st.expander("🔍 Debug Information", expanded=False)
-    with debug_info:
-        registry_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, 'artifacts', 'model_registry.json')
-        st.write(f"**Model Manager Status:** ✅ Loaded successfully")
-        st.write(f"**Registry Path:** `{registry_path}`")
-        st.write(f"**Current Directory:** `{os.getcwd()}`")
-        st.write(f"**App Directory:** `{os.path.dirname(os.path.abspath(__file__))}`")
-        
-        # Model availability debugging
-        st.write("**Model Availability Check:**")
-        league_names = model_manager.get_league_names()
-        for league_id, league_name in league_names.items():
-            is_available = model_manager.is_model_available(league_id)
-            model_file = f"/mount/src/rugby-ai-pedictor/artifacts/league_{league_id}_model.pkl"
-            st.write(f"- **{league_name}** (ID: {league_id}): {'✅ Available' if is_available else '❌ Not Found'}")
-            if not is_available:
-                st.write(f"  Expected file: `{model_file}`")
-        
-        # Registry content
-        registry_summary = model_manager.get_registry_summary()
-        st.write(f"**Total Leagues in Registry:** {len(registry_summary.get('leagues', {}))}")
-        
-        # Environment information
-        try:
-            import sklearn
-            st.write(f"**Scikit-learn Version:** {sklearn.__version__}")
-        except ImportError:
-            st.write("**Scikit-learn:** Not available")
-        
-        try:
-            import numpy as np
-            st.write(f"**NumPy Version:** {np.__version__}")
-        except ImportError:
-            st.write("**NumPy:** Not available")
     
-    # Mobile-optimized sidebar
+    # Clean sidebar
     with st.sidebar:
-        st.subheader("📊 Model Status")
+        st.subheader("🏆 Model Performance")
         registry_summary = model_manager.get_registry_summary()
         
         if "error" not in registry_summary:
             leagues_data = registry_summary.get("leagues", {})
-            with st.expander("System Status", expanded=False):
-                st.write(f"**Last Updated:** {registry_summary.get('last_updated', 'Unknown')}")
-                st.write(f"**Total Leagues:** {len(leagues_data)}")
-                
-                # Show league-specific status in a more compact format
-                for league_id_key, info in leagues_data.items():
-                    league_name = info.get("name", f"League {league_id_key}")
-                    performance = info.get("performance", {})
-                    accuracy = performance.get("winner_accuracy", 0)
-                    mae = performance.get("overall_mae", 0)
-                    st.metric(
-                        label=league_name,
-                        value=f"{accuracy:.1%}",
-                        delta=f"MAE: {mae:.1f}"
-                    )
+            
+            # Show league performance metrics
+            for league_id_key, info in leagues_data.items():
+                league_name = info.get("name", f"League {league_id_key}")
+                performance = info.get("performance", {})
+                accuracy = performance.get("winner_accuracy", 0)
+                mae = performance.get("overall_mae", 0)
+                st.metric(
+                    label=league_name,
+                    value=f"{accuracy:.1%}",
+                    delta=f"MAE: {mae:.2f}"
+                )
         else:
             st.error("⚠️ Model registry unavailable")
 
-        st.divider()
+        st.markdown("---")
         
-        # League selection with better mobile UX
-        st.subheader("🏉 League Selection")
+        # League selection
+        st.subheader("🏉 Select League")
         league_name_to_id = {
             "Rugby Championship": 4986,
             "United Rugby Championship": 4446,
@@ -458,57 +418,20 @@ def main() -> None:
             "Rugby World Cup": 4574,
         }
         
-        # Use radio buttons for better mobile experience
         league = st.radio(
             "Choose League",
             options=list(league_name_to_id.keys()),
-            index=1,
-            help="Select the league you want to see predictions for"
+            index=1
         )
         league_id = league_name_to_id[league]
     
-    # Check if model is available
-    if not model_manager.is_model_available(league_id):
-        st.error(f"No trained model available for {league}. Please train models first.")
-        st.info("Run `python scripts/train_models.py` to train models.")
-        return
-
     # Load the trained model
-    try:
-        model_package = model_manager.load_model(league_id)
-        if not model_package:
-            st.error(f"❌ **Model Loading Failed** for {league}")
-            st.error("This usually indicates a scikit-learn version compatibility issue.")
-            st.info("💡 **Solution:** The models may have been trained with a different version of scikit-learn.")
-            return
-    except Exception as e:
-        st.error(f"❌ **Critical Error** loading model for {league}: {str(e)}")
-        st.error("Check the debug information for more details.")
+    model_package = model_manager.load_model(league_id)
+    if not model_package:
+        st.error(f"⚠️ Unable to load model for {league}")
+        st.info("Please try refreshing the page or selecting a different league.")
         return
 
-        # Show current model info in a more mobile-friendly format
-        st.divider()
-        st.subheader("🤖 Current Model")
-        
-        with st.expander(f"Model Details - {league}", expanded=False):
-            st.metric(
-                label="Training Date",
-                value=model_package.get('trained_at', 'Unknown')
-            )
-            st.metric(
-                label="Training Games",
-                value=model_package.get('training_games', 0)
-            )
-            
-            performance = model_package.get("performance", {})
-            st.metric(
-                label="Winner Accuracy",
-                value=f"{performance.get('winner_accuracy', 0):.1%}"
-            )
-            st.metric(
-                label="Score MAE",
-                value=f"{performance.get('overall_mae', 0):.1f}"
-            )
 
     # Neutral mode handled automatically by league
     neutral_mode = (league_id in {4574})
@@ -560,7 +483,6 @@ def main() -> None:
             team_name[tid] = nm or f"Team {tid}"
         
     except Exception as e:
-        debug_info.error(f"Error loading team names: {e}")
         pass
 
     # Prepare upcoming rows with the same features as training
@@ -700,28 +622,6 @@ def main() -> None:
         </div>
         """, unsafe_allow_html=True)
 
-        # Show retraining info
-        st.divider()
-        st.subheader("🔄 Auto-Retraining")
-        st.info("Models automatically retrain after each completed match and push updates to GitHub.")
-        
-        # Console warning notice
-        st.divider()
-        with st.expander("ℹ️ About Console Warnings", expanded=False):
-            st.markdown("""
-            **If you see browser console warnings:**
-            
-            🔍 **What you're seeing**: Browser warnings from iframe embedding on Streamlit Cloud
-            
-            ✅ **Is this normal?** Yes! These are cosmetic warnings that don't affect app functionality
-            
-            🛠️ **How to hide them**: 
-            - Press F12 → Console tab → Filter icon → Add "-iframe", "-sandbox", "-ambient", etc.
-            - Or simply ignore them - they're harmless!
-            
-            📚 **More info**: See `CONSOLE_WARNINGS_GUIDE.md` for detailed explanations
-            """)
-            st.info("💡 **Tip**: These warnings only appear in development/professional environments. End users rarely notice affected applications.")
 
     conn.close()
 
