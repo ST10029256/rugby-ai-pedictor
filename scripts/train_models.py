@@ -125,16 +125,17 @@ def get_league_specific_models(league_id: int) -> Tuple[Any, Any, Any]:
     hgb_clf = HistGradientBoostingClassifier(random_state=42, max_iter=100, learning_rate=0.1)
     rf_clf = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=10)
     
-    # Create ensemble based on XGBoost availability
-    if XGBOOST_AVAILABLE:
-        xgb_clf = xgb.XGBClassifier(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
+    # Create ensemble based on XGBoost availability (runtime check)
+    try:
+        import xgboost
+        xgb_clf = xgboost.XGBClassifier(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
         gbdt_clf = VotingClassifier([
             ('hgb', hgb_clf),
             ('rf', rf_clf),
             ('xgb', xgb_clf)
         ], voting='soft')
         print("Using XGBoost ensemble")
-    else:
+    except ImportError:
         # Fallback to simpler ensemble if XGBoost not available
         gbdt_clf = VotingClassifier([
             ('hgb', hgb_clf),
@@ -151,13 +152,14 @@ def get_league_specific_models(league_id: int) -> Tuple[Any, Any, Any]:
         rf_away = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
         hgb_away = HistGradientBoostingRegressor(random_state=42, max_iter=100, learning_rate=0.1)
         
-        if XGBOOST_AVAILABLE:
-            xgb_home = xgb.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
-            xgb_away = xgb.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
+        try:
+            import xgboost
+            xgb_home = xgboost.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
+            xgb_away = xgboost.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
             
             reg_home = VotingRegressor([('rf', rf_home), ('hgb', hgb_home), ('xgb', xgb_home)])
             reg_away = VotingRegressor([('rf', rf_away), ('hgb', hgb_away), ('xgb', xgb_away)])
-        else:
+        except ImportError:
             reg_home = VotingRegressor([('rf', rf_home), ('hgb', hgb_home)])
             reg_away = VotingRegressor([('rf', rf_away), ('hgb', hgb_away)])
         

@@ -1,9 +1,9 @@
 {
-  "last_updated": "2025-09-29T17:55:48.188018",
+  "last_updated": "2025-09-29T18:11:58.193662",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2025-09-29T17:55:40.911465",
+      "trained_at": "2025-09-29T18:11:50.890678",
       "training_games": 140,
       "performance": {
         "winner_accuracy": 0.6071428571428571,
@@ -14,7 +14,7 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2025-09-29T17:55:43.915407",
+      "trained_at": "2025-09-29T18:11:53.972788",
       "training_games": 254,
       "performance": {
         "winner_accuracy": 0.6470588235294118,
@@ -25,7 +25,7 @@
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2025-09-29T17:55:46.732255",
+      "trained_at": "2025-09-29T18:11:56.725481",
       "training_games": 229,
       "performance": {
         "winner_accuracy": 0.6521739130434783,
@@ -36,7 +36,7 @@
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2025-09-29T17:55:48.092544",
+      "trained_at": "2025-09-29T18:11:58.098469",
       "training_games": 151,
       "performance": {
         "winner_accuracy": 0.8709677419354839,
