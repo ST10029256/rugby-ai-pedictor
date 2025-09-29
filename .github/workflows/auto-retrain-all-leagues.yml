@@ -47,7 +47,7 @@ jobs:
       if: steps.check-retrain.outputs.retrain_needed == 'true'
       run: |
         echo "🤖 Retraining AI models..."
-        python scripts/train_models.py --db data.sqlite --verbose
+        python scripts/train_models.py
         
     - name: Clean up retraining flag
       if: always()
