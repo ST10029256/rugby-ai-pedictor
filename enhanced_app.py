@@ -41,7 +41,8 @@ def load_model(league_id):
     try:
         with open(f'artifacts/league_{league_id}_model.pkl', 'rb') as f:
             return pickle.load(f)
-    except:
+    except Exception as e:
+        print(f"Error loading model for league {league_id}: {e}")
         return None
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -537,6 +538,15 @@ def main():
             model_path = f"artifacts/league_{selected_league}_model.pkl"
             if os.path.exists(model_path):
                 st.info(f"Model file exists: {model_path}")
+                st.warning("Model file exists but failed to load. Check console for error details.")
+                # Try to load manually to show the error
+                try:
+                    import pickle
+                    with open(model_path, 'rb') as f:
+                        test_data = pickle.load(f)
+                    st.success("Model loads successfully in manual test")
+                except Exception as e:
+                    st.error(f"Manual load error: {e}")
             else:
                 st.info(f"Model file missing: {model_path}")
             return
