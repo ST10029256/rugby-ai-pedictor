@@ -55,9 +55,9 @@ def load_model_manager():
     return ModelManager()
 
 def main() -> None:
-    st.set_page_config(page_title="Rugby Predictions", layout="wide")
-    st.title("Rugby Predictions Dashboard")
-    st.caption("🤖 Powered by AI models that retrain automatically after each match")
+    st.set_page_config(page_title="Rugby Predictions", layout="centered", initial_sidebar_state="collapsed")
+    st.title("🏉 Rugby Predictions")
+    st.caption("🤖 AI-powered predictions that update automatically")
 
     # Initialize model manager
     model_manager = load_model_manager()
