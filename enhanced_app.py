@@ -604,26 +604,6 @@ def main():
                         if i < len(predictions) - 1:
                             st.divider()
                 
-                # Clean summary
-                st.subheader("📈 Summary")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    home_wins = len([p for p in predictions if p['winner'] == p['home_team']])
-                    away_wins = len([p for p in predictions if p['winner'] == p['away_team']])
-                    draws = len([p for p in predictions if p['winner'] == 'Draw'])
-                    st.metric("Predictions", f"{len(predictions)} matches")
-                
-                with col2:
-                    avg_confidence = np.mean([float(p['confidence'].rstrip('%')) for p in predictions])
-                    st.metric("Avg Confidence", f"{avg_confidence:.1f}%")
-                
-                with col3:
-                    avg_home = np.mean([p['home_score'] for p in predictions])
-                    avg_away = np.mean([p['away_score'] for p in predictions])
-                    st.metric("Avg Score", f"{avg_home:.1f} - {avg_away:.1f}")
-                
                 # Download button
                 csv_data = pd.DataFrame(predictions).to_csv(index=False)
                 st.download_button(
