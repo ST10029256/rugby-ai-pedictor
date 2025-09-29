@@ -26,24 +26,27 @@ if script_dir not in sys.path:
 # Check if automation scripts are available
 AUTOMATION_AVAILABLE = os.path.exists(os.path.join(script_dir, 'scripts', 'complete_automation.py'))
 
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
 def load_registry():
-    """Load model registry"""
+    """Load model registry with caching"""
     try:
         with open('artifacts/model_registry.json', 'r') as f:
             return json.load(f)
     except:
         return {}
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def load_model(league_id):
-    """Load model for league"""
+    """Load model for league with caching"""
     try:
         with open(f'artifacts/league_{league_id}_model.pkl', 'rb') as f:
             return pickle.load(f)
     except:
         return None
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_teams():
-    """Get team names"""
+    """Get team names with caching"""
     try:
         conn = sqlite3.connect('data.sqlite')
         cursor = conn.cursor()
@@ -436,13 +439,13 @@ def main():
         st.error("No leagues found. Please train models first.")
         return
     
-    # Silent automation check (no UI feedback)
+    # Reduced automation frequency for faster loading
     if st.session_state.auto_update_enabled:
         time_since_check = datetime.now() - st.session_state.last_automation_check
-        if time_since_check.total_seconds() > 300:  # Check every 5 minutes
+        if time_since_check.total_seconds() > 1800:  # Check every 30 minutes instead of 5
             freshness = check_data_freshness()
             if freshness['needs_update']:
-                # Silent background update
+                # Silent background update (async)
                 auto_update_data()
                 auto_retrain_models()
                 st.session_state.last_automation_check = datetime.now()
@@ -512,150 +515,155 @@ def main():
         feature_count = len(model_data.get('feature_columns', []))
         st.caption(f"AI model with {feature_count} advanced features")
         
-        # Get upcoming games
-        try:
-            # Try to import feature building
-            sys.path.insert(0, script_dir)
-            from prediction.features import build_feature_table, FeatureConfig
-            
-            conn = sqlite3.connect('data.sqlite')
-            config = FeatureConfig(elo_k=24.0, neutral_mode=False)
-            feature_df = build_feature_table(conn, config)
-            conn.close()
-            
-            # Filter upcoming games
-            upcoming = feature_df[
-                (feature_df["league_id"] == int(selected_league)) &
-                pd.isna(feature_df["home_win"])
-            ].copy()
-            
-            # Filter to future only
-            if "date_event" in upcoming.columns:
-                today = pd.Timestamp.today().date()
-                upcoming["date_event"] = pd.to_datetime(upcoming["date_event"], errors="coerce")
-                # Ensure we're working with a DataFrame before accessing .dt
-                if isinstance(upcoming, pd.DataFrame):
-                    upcoming = upcoming[upcoming["date_event"].dt.date >= today]
-            
-            if len(upcoming) == 0:
-                st.info("No upcoming games found")
-                return
-            
-            # Load teams and make predictions
-            team_names = get_teams()
-            feature_cols = model_data.get('feature_columns', [])
-            
-            with st.spinner("Generating AI predictions..."):
-                predictions = []
-                # Ensure we're working with a DataFrame before calling .head()
-                if isinstance(upcoming, pd.DataFrame):
-                    upcoming_subset = upcoming.head(12)
-                    # Iterate through the DataFrame
-                    for _, game in upcoming_subset.iterrows():  # Show up to 12 games
-                        pred = make_prediction(model_data, game, team_names, feature_cols)
-                        if pred:
-                            predictions.append(pred)
-                else:
-                    # Fallback for non-DataFrame objects
-                    st.warning("Unable to process upcoming games data")
-            
-            if predictions:
-                st.subheader(f"Upcoming Matches ({len(predictions)})")
-                
-                # Main predictions table
-                display_df = pd.DataFrame(predictions)[['date', 'home_team', 'away_team', 'home_score', 'away_score', 'winner', 'confidence', 'intensity']]
-                display_df.columns = ['Date', 'Home Team', 'Away Team', 'Home Score', 'Away Score', 'Predicted Winner', 'Confidence', 'Match Intensity']
-                
-                # Format the dataframe better
-                st.dataframe(
-                    display_df, 
-                    use_container_width=True,
-                    hide_index=True
-                )
-                
-                # Clean match analysis
-                st.subheader("📊 Match Predictions")
-                
-                for i, prediction in enumerate(predictions):
-                    with st.container():
-                        col1, col2, col3 = st.columns([2, 1, 2])
-                        
-                        with col1:
-                            st.markdown(f"**{prediction['home_team']}**")
-                            st.caption("Home Team")
-                        
-                        with col2:
-                            st.markdown(f"**{prediction['home_score']} - {prediction['away_score']}**")
-                            st.caption("Predicted Score")
-                        
-                        with col3:
-                            st.markdown(f"**{prediction['away_team']}**")
-                            st.caption("Away Team")
-                        
-                        # Winner and confidence
-                        col4, col5 = st.columns([2, 1])
-                        with col4:
-                            if prediction['winner'] != 'Draw':
-                                st.success(f"🏆 Winner: {prediction['winner']}")
-                            else:
-                                st.info("🤝 Predicted Draw")
-                        with col5:
-                            st.metric("Confidence", prediction['confidence'])
-                        
-                        if i < len(predictions) - 1:
-                            st.divider()
-                
-                # Download button
-                csv_data = pd.DataFrame(predictions).to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Predictions",
-                    data=csv_data,
-                    file_name=f"{league_name}_predictions_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-                
-            else:
-                st.warning("No predictions generated")
+        # Load predictions button for faster initial load
+        if st.button("📊 Load Predictions", type="primary"):
+            st.session_state.load_predictions = True
         
-        except Exception as e:
-            st.error(f"Error loading games: {e}")
-            
-            # Enhanced fallback
-            st.subheader("Fallback: Basic Game Schedule")
+        # Only load predictions when button is clicked
+        if st.session_state.get('load_predictions', False):
+            # Get upcoming games
             try:
+                # Try to import feature building
+                sys.path.insert(0, script_dir)
+                from prediction.features import build_feature_table, FeatureConfig
+            
                 conn = sqlite3.connect('data.sqlite')
-                cursor = conn.cursor()
-                query = """
-                SELECT e.date_event, e.home_team_id, e.away_team_id,
-                       ht.name as home_name, at.name as away_name
-                FROM event e
-                LEFT JOIN team ht ON e.home_team_id = ht.id
-                LEFT JOIN team at ON e.away_team_id = at.id
-                WHERE e.league_id = ? AND e.home_score IS NULL
-                ORDER BY e.date_event ASC
-                LIMIT 10
-                """
-                cursor.execute(query, (selected_league,))
-                games = cursor.fetchall()
+                config = FeatureConfig(elo_k=24.0, neutral_mode=False)
+                feature_df = build_feature_table(conn, config)
                 conn.close()
+            
+                # Filter upcoming games
+                upcoming = feature_df[
+                    (feature_df["league_id"] == int(selected_league)) &
+                    pd.isna(feature_df["home_win"])
+                ].copy()
                 
-                if games:
-                    game_data = []
-                    for game in games:
-                        game_data.append({
-                            'Date': str(game[0])[:10],
-                            'Home Team': game[3] or f"Team {game[1]}",
-                            'Away Team': game[4] or f"Team {game[2]}"
-                        })
-                    
-                    games_df = pd.DataFrame(game_data)
-                    st.dataframe(games_df, use_container_width=True)
-                    st.info("Scheduled games shown above. AI predictions require feature engineering setup.")
+                # Filter to future only
+                if "date_event" in upcoming.columns:
+                    today = pd.Timestamp.today().date()
+                    upcoming["date_event"] = pd.to_datetime(upcoming["date_event"], errors="coerce")
+                    # Ensure we're working with a DataFrame before accessing .dt
+                    if isinstance(upcoming, pd.DataFrame):
+                        upcoming = upcoming[upcoming["date_event"].dt.date >= today]
+                
+                if len(upcoming) == 0:
+                    st.info("No upcoming games found")
                 else:
-                    st.info("No scheduled games found")
+                    # Load teams and make predictions
+                    team_names = get_teams()
+                    feature_cols = model_data.get('feature_columns', [])
                     
-            except Exception as db_e:
-                st.error(f"Database error: {db_e}")
+                    with st.spinner("Generating AI predictions..."):
+                        predictions = []
+                        # Ensure we're working with a DataFrame before calling .head()
+                        if isinstance(upcoming, pd.DataFrame):
+                            upcoming_subset = upcoming.head(12)
+                            # Iterate through the DataFrame
+                            for _, game in upcoming_subset.iterrows():  # Show up to 12 games
+                                pred = make_prediction(model_data, game, team_names, feature_cols)
+                                if pred:
+                                    predictions.append(pred)
+                        else:
+                            # Fallback for non-DataFrame objects
+                            st.warning("Unable to process upcoming games data")
+                            predictions = []
+            
+                    if predictions:
+                        st.subheader(f"Upcoming Matches ({len(predictions)})")
+                        
+                        # Main predictions table
+                        display_df = pd.DataFrame(predictions)[['date', 'home_team', 'away_team', 'home_score', 'away_score', 'winner', 'confidence', 'intensity']]
+                        display_df.columns = ['Date', 'Home Team', 'Away Team', 'Home Score', 'Away Score', 'Predicted Winner', 'Confidence', 'Match Intensity']
+                        
+                        # Format the dataframe better
+                        st.dataframe(
+                            display_df, 
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                
+                        # Clean match analysis
+                        st.subheader("📊 Match Predictions")
+                        
+                        for i, prediction in enumerate(predictions):
+                            with st.container():
+                                col1, col2, col3 = st.columns([2, 1, 2])
+                                
+                                with col1:
+                                    st.markdown(f"**{prediction['home_team']}**")
+                                    st.caption("Home Team")
+                                
+                                with col2:
+                                    st.markdown(f"**{prediction['home_score']} - {prediction['away_score']}**")
+                                    st.caption("Predicted Score")
+                                
+                                with col3:
+                                    st.markdown(f"**{prediction['away_team']}**")
+                                    st.caption("Away Team")
+                                
+                                # Winner and confidence
+                                col4, col5 = st.columns([2, 1])
+                                with col4:
+                                    if prediction['winner'] != 'Draw':
+                                        st.success(f"🏆 Winner: {prediction['winner']}")
+                                    else:
+                                        st.info("🤝 Predicted Draw")
+                                with col5:
+                                    st.metric("Confidence", prediction['confidence'])
+                                
+                                if i < len(predictions) - 1:
+                                    st.divider()
+                        
+                        # Download button
+                        csv_data = pd.DataFrame(predictions).to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Predictions",
+                            data=csv_data,
+                            file_name=f"{league_name}_predictions_{datetime.now().strftime('%Y%m%d')}.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.warning("No predictions generated")
+        
+            except Exception as e:
+                st.error(f"Error loading games: {e}")
+                
+                # Enhanced fallback
+                st.subheader("Fallback: Basic Game Schedule")
+                try:
+                    conn = sqlite3.connect('data.sqlite')
+                    cursor = conn.cursor()
+                    query = """
+                    SELECT e.date_event, e.home_team_id, e.away_team_id,
+                           ht.name as home_name, at.name as away_name
+                    FROM event e
+                    LEFT JOIN team ht ON e.home_team_id = ht.id
+                    LEFT JOIN team at ON e.away_team_id = at.id
+                    WHERE e.league_id = ? AND e.home_score IS NULL
+                    ORDER BY e.date_event ASC
+                    LIMIT 10
+                    """
+                    cursor.execute(query, (selected_league,))
+                    games = cursor.fetchall()
+                    conn.close()
+                    
+                    if games:
+                        game_data = []
+                        for game in games:
+                            game_data.append({
+                                'Date': str(game[0])[:10],
+                                'Home Team': game[3] or f"Team {game[1]}",
+                                'Away Team': game[4] or f"Team {game[2]}"
+                            })
+                        
+                        games_df = pd.DataFrame(game_data)
+                        st.dataframe(games_df, use_container_width=True)
+                        st.info("Scheduled games shown above. Click 'Load Predictions' for AI analysis.")
+                    else:
+                        st.info("No scheduled games found")
+                        
+                except Exception as db_e:
+                    st.error(f"Database error: {db_e}")
     else:
         # Clean overview when no league selected
         st.header("🏉 Select a League")
