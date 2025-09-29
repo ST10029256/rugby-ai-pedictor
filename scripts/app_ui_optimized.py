@@ -740,38 +740,32 @@ def main() -> None:
         col_index = i % len(cols)
         
         with cols[col_index]:
-            # Create professional match summary card
-            st.markdown(f"""
-            <div class="match-card">
-                <div class="match-header">
-                    <h3 class="match-teams">{home_team} vs {away_team}</h3>
-                    <p class="match-date">📅 {match_date}</p>
-                </div>
+            # Professional match summary using Streamlit components
+            with st.container():
+                # Header
+                st.markdown(f"### {home_team} vs {away_team}")
+                st.markdown(f"📅 **{match_date}**")
                 
+                # Score in prominent display
+                st.markdown(f"""
                 <div class="score-display">
                     <p class="score-text">{home_team} {home_score:.1f} - {away_score:.1f} {away_team}</p>
                 </div>
+                """, unsafe_allow_html=True)
                 
-                <div class="prediction-grid">
-                    <div class="prediction-item alt">
-                        <div class="prediction-label">Predicted Winner</div>
-                        <div class="prediction-value">{winner}</div>
-                    </div>
-                    <div class="prediction-item">
-                        <div class="prediction-label">Home Win Chance</div>
-                        <div class="prediction-value">{home_win_prob:.1f}%</div>
-                    </div>
-                    <div class="prediction-item {'warning' if confidence == 'Medium' else ''}">
-                        <div class="prediction-label">Confidence</div>
-                        <div class="prediction-value">{confidence}</div>
-                    </div>
-                    <div class="prediction-item">
-                        <div class="prediction-label">Expected Margin</div>
-                        <div class="prediction-value">{margin:+.1f}</div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                # Metrics in columns
+                metric_col1, metric_col2 = st.columns(2)
+                
+                with metric_col1:
+                    st.metric("🏆 Predicted Winner", winner)
+                    confidence_color = "🟢" if confidence == "High" else "🟡" if confidence == "Medium" else "🔴"
+                    st.metric(f"{confidence_color} Confidence", confidence)
+                
+                with metric_col2:
+                    st.metric("🏠 Home Win Chance", f"{home_win_prob:.1f}%")
+                    st.metric("📊 Expected Margin", f"{margin:+.1f}")
+                
+                st.divider()
 
 
     conn.close()
