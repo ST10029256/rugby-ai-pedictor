@@ -1,6 +1,6 @@
 [server]
-# Configure CORS for iframe security
-enableCORS = false
+# Configure CORS for iframe security (disabled due to XSRF protection conflict)
+# enableCORS = true  # Required by XSRF protection
 
 # Browser security settings
 runOnSave = false
@@ -10,39 +10,13 @@ maxUploadSize = 200
 
 # Disable unnecessary features
 enableWebsocketCompression = false
-maxRequestSize = 50
 
-# Frame options to reduce iframe warnings
-frameOptions = "DENY"
-
-# Additional security headers to prevent feature warnings
-clientScripts = []
-
-# Disable feature detection warnings
-customCss = """
-<style>
-    /* Hide browser feature warnings and improve security */
-    console {
-        display: none !important;
-    }
-</style>
-"""
-
-# Additional security headers
-headless = false
-serverPort = 8501
-
-# Disable feature detection entirely
-serverHeadless = false
+# Security headers (removed invalid options)
+enableXsrfProtection = true
 
 [browser]
 # Disable unnecessary features to reduce console warnings
 gatherUsageStats = false
-
-# Additional browser security settings
-serverHeadless = false
-serverRunOnSave = false
-serverEnableWebsocketCompression = false
 
 [theme]
 # Optimize default theme
