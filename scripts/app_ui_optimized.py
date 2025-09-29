@@ -182,12 +182,34 @@ def main() -> None:
         max-width: 100%;
     }
     
-    /* Mobile-first responsive design */
-    @media (max-width: 768px) {
-        .main .block-container {
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }
+        /* Mobile-first responsive design */
+        @media (max-width: 768px) {
+            .main .block-container {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+            
+            .match-card {
+                margin: 1rem 0;
+                padding: 1rem;
+            }
+            
+            .match-teams {
+                font-size: 1.1rem;
+            }
+            
+            .prediction-grid {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+            }
+            
+            .score-text {
+                font-size: 1.2rem;
+            }
+            
+            .prediction-value {
+                font-size: 1.25rem;
+            }
         
         /* Typography adjustments */
         .stSelectbox > div > div,
@@ -227,36 +249,126 @@ def main() -> None:
             text-overflow: ellipsis;
         }
         
-        /* Mobile-friendly fixture cards */
-        .fixture-card {
-            background-color: #f8f9fa;
+        /* Professional match summary cards */
+        .match-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border-radius: 1rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border: 1px solid #e3e8ed;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .match-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+        
+        .match-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .match-teams {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #2c3e50;
+            text-align: center;
+            margin: 0;
+        }
+        
+        .match-date {
+            font-size: 0.9rem;
+            color: #6c757d;
+            font-weight: 500;
+            margin: 0;
+        }
+        
+        .prediction-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .prediction-item {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
             padding: 1rem;
             border-radius: 0.75rem;
-            margin: 1rem 0;
-            border-left: 4px solid #1f77b4;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
         }
         
-        .fixture-card h4 {
-            margin: 0 0 0.75rem 0;
-            color: #1f77b4;
-            font-size: 1.1rem;
+        .prediction-item.alt {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+        }
+        
+        .prediction-item.warning {
+            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+            box-shadow: 0 2px 8px rgba(217, 119, 6, 0.3);
+        }
+        
+        .prediction-label {
+            font-size: 0.8rem;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+            opacity: 0.9;
         }
         
-        .fixture-card p {
-            margin: 0.5rem 0;
-            font-size: 0.9rem;
-            line-height: 1.4;
+        .prediction-value {
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin: 0;
         }
         
-        .prediction-highlight {
-            background: linear-gradient(135deg, #e8f4fd 0%, #f0f8ff 100%);
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            margin: 0.75rem 0;
-            border: 1px solid #1f77b4;
-            box-shadow: 0 1px 3px rgba(31, 119, 180, 0.2);
+        .score-display {
+            background: linear-gradient(135deg, #1e40af 0%, #3730a3 100%);
+            color: white;
+            padding: 1.25rem;
+            border-radius: 1rem;
+            text-align: center;
+            margin: 1rem 0;
+            box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+        }
+        
+        .score-text {
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin: 0;
+        }
+        
+        .confidence-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-top: 0.5rem;
+        }
+        
+        .confidence-badge.high {
+            background-color: #22c55e;
+            color: white;
+        }
+        
+        .confidence-badge.medium {
+            background-color: #f59e0b;
+            color: white;
+        }
+        
+        .confidence-badge.low {
+            background-color: #ef4444;
+            color: white;
         }
         
         /* Metric cards in sidebar */
@@ -592,35 +704,74 @@ def main() -> None:
         hide_index=True
     )
 
-    # Per-fixture cards - mobile optimized
-    st.subheader("Match Summaries")
+    # Professional match summaries
+    st.subheader("📊 Match Predictions")
+    
+    # Create columns for better layout on larger screens
+    if len(disp) > 1:
+        cols = st.columns(2)
+    else:
+        cols = [st.container()]
     
     for i in range(len(disp)):
         row = disp.iloc[i]
         winner = row["Pick"]
+        home_team = row['Home']
+        away_team = row['Away']
+        match_date = row['Date']
         home_win_prob = float(row["Home Win %"])
         home_score = float(row["Home Score"])
         away_score = float(row["Away Score"])
         margin = float(row["Margin"])
         
-        # Determine confidence level
-        confidence = "High" if abs(home_win_prob - 50) > 15 else "Medium" if abs(home_win_prob - 50) > 5 else "Low"
-        confidence_color = "#28a745" if confidence == "High" else "#ffc107" if confidence == "Medium" else "#dc3545"
+        # Determine confidence level and styling
+        confidence_diff = abs(home_win_prob - 50)
+        if confidence_diff > 15:
+            confidence = "High"
+            confidence_class = "high"
+        elif confidence_diff > 5:
+            confidence = "Medium"
+            confidence_class = "medium"
+        else:
+            confidence = "Low"
+            confidence_class = "low"
         
-        # Create mobile-friendly card
-        st.markdown(f"""
-        <div class="fixture-card">
-            <h4>{row['Home']} vs {row['Away']}</h4>
-            <p><strong>Date:</strong> {row['Date']}</p>
-            <div class="prediction-highlight">
-                <p><strong>Predicted Winner:</strong> <span style="color: {confidence_color};">{winner}</span></p>
-                <p><strong>Predicted Score:</strong> {row['Home']} {home_score:.1f} - {away_score:.1f} {row['Away']}</p>
-                <p><strong>Home Win Probability:</strong> {home_win_prob:.1f}%</p>
-                <p><strong>Confidence:</strong> <span style="color: {confidence_color};">{confidence}</span></p>
-                <p><strong>Expected Margin:</strong> {margin:+.1f}</p>
+        # Choose column for layout
+        col_index = i % len(cols)
+        
+        with cols[col_index]:
+            # Create professional match summary card
+            st.markdown(f"""
+            <div class="match-card">
+                <div class="match-header">
+                    <h3 class="match-teams">{home_team} vs {away_team}</h3>
+                    <p class="match-date">📅 {match_date}</p>
+                </div>
+                
+                <div class="score-display">
+                    <p class="score-text">{home_team} {home_score:.1f} - {away_score:.1f} {away_team}</p>
+                </div>
+                
+                <div class="prediction-grid">
+                    <div class="prediction-item alt">
+                        <div class="prediction-label">Predicted Winner</div>
+                        <div class="prediction-value">{winner}</div>
+                    </div>
+                    <div class="prediction-item">
+                        <div class="prediction-label">Home Win Chance</div>
+                        <div class="prediction-value">{home_win_prob:.1f}%</div>
+                    </div>
+                    <div class="prediction-item {'warning' if confidence == 'Medium' else ''}">
+                        <div class="prediction-label">Confidence</div>
+                        <div class="prediction-value">{confidence}</div>
+                    </div>
+                    <div class="prediction-item">
+                        <div class="prediction-label">Expected Margin</div>
+                        <div class="prediction-value">{margin:+.1f}</div>
+                    </div>
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
 
     conn.close()
