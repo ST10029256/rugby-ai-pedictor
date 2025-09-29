@@ -571,6 +571,24 @@ def main() -> None:
         st.divider()
         st.subheader("🔄 Auto-Retraining")
         st.info("Models automatically retrain after each completed match and push updates to GitHub.")
+        
+        # Console warning notice
+        st.divider()
+        with st.expander("ℹ️ About Console Warnings", expanded=False):
+            st.markdown("""
+            **If you see browser console warnings:**
+            
+            🔍 **What you're seeing**: Browser warnings from iframe embedding on Streamlit Cloud
+            
+            ✅ **Is this normal?** Yes! These are cosmetic warnings that don't affect app functionality
+            
+            🛠️ **How to hide them**: 
+            - Press F12 → Console tab → Filter icon → Add "-iframe", "-sandbox", "-ambient", etc.
+            - Or simply ignore them - they're harmless!
+            
+            📚 **More info**: See `CONSOLE_WARNINGS_GUIDE.md` for detailed explanations
+            """)
+            st.info("💡 **Tip**: These warnings only appear in development/professional environments. End users rarely notice affected applications.")
 
     conn.close()
 
