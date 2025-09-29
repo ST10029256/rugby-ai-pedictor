@@ -15,28 +15,65 @@ if project_root not in sys.path:
 
 # Import and run the optimized app
 def main():
+    import streamlit as st
+    
     try:
-        # Import the optimized app's main function
-        from scripts.app_ui_optimized import main as optimized_main
-        return optimized_main()
-    except ImportError as e:
-        # Fallback: copy the optimized app code directly
-        import streamlit as st
-        
+        # Set page config first
         st.set_page_config(
-            page_title="Rugby Predictions", 
+            page_title="Rugby AI Predictions", 
             layout="wide", 
             initial_sidebar_state="expanded"
         )
         
+        # Test basic imports first
+        try:
+            import pandas as pd
+            import numpy as np
+            import sqlite3
+            import pickle
+        except ImportError as ie:
+            st.error(f"❌ **Critical Import Error**: {ie}")
+            st.stop()
+        
+        # Import the optimized app's main function
+        from scripts.app_ui_optimized import main as optimized_main
+        return optimized_main()
+        
+    except Exception as e:
+        # Graceful fallback with detailed error info
         st.title("🏈 Enhanced Rugby AI Prediction System")
         st.write("---")
         
-        st.error(f"🚨 **Import Error**: {e}")
-        st.info("**Troubleshooting:**")
-        st.write("1. Check that scripts/app_ui_optimized.py exists")
-        st.write("2. Verify all dependencies are installed")
-        st.write("3. Check Python path configuration")
+        st.error(f"🚨 **Deployment Error**: {e}")
+        
+        # Show debug information
+        with st.expander("🔧 Debug Information"):
+            st.write(f"**Error Type**: {type(e).__name__}")
+            st.write(f"**Error Details**: {str(e)}")
+            
+            # Check key files
+            import os
+            key_files = [
+                'data.sqlite',
+                'artifacts/model_registry.json', 
+                'scripts/app_ui_optimized.py',
+                'prediction/features.py',
+                'scripts/model_manager.py'
+            ]
+            
+            st.write("**File Check:**")
+            for file in key_files:
+                exists = "✅" if os.path.exists(file) else "❌"
+                st.write(f"{exists} {file}")
+            
+            # Check Python path
+            import sys
+            st.write(f"**Python Path**: {sys.path[:3]}")
+        
+        st.info("**Next Steps:**")
+        st.write("1. Check that all files exist")
+        st.write("2. Verify Streamlit Cloud has all dependencies")
+        st.write("3. Check console logs for more details")
         
         return None
 
