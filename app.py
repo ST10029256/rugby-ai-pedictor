@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Main Entry Point for Streamlit Cloud Deployment
-Redirects to the optimized rugby prediction app
+Directly runs the optimized rugby prediction app
 """
 
 import os
@@ -19,14 +19,28 @@ try:
     if __name__ == "__main__":
         main()
         
-except ImportError as e:
-    print(f"Error importing optimized app: {e}")
-    print("Falling back to basic app...")
-    
-    # Fallback - run a simple error message
+except Exception as e:
     import streamlit as st
     
-    st.set_page_config(page_title="Rugby Predictions", layout="wide")
-    st.error("🚨 Application Error")
-    st.write("Please check the deployment configuration.")
-    st.write(f"Import error: {e}")
+    st.set_page_config(page_title="Rugby Predictions", layout="wide", initial_sidebar_state="expanded")
+    
+    st.title("🏈 Enhanced Rugby AI Prediction System")
+    st.write("---")
+    
+    st.error(f"🚨 **Deployment Error**: {e}")
+    st.info("**Troubleshooting Steps:**")
+    st.write("1. Check that all dependencies are installed")
+    st.write("2. Verify the database file exists (`data.sqlite`)")  
+    st.write("3. Ensure trained models are in the `artifacts/` folder")
+    st.write("4. Check console for additional error details")
+    
+    # Show helpful debug info
+    with st.expander("🔧 Debug Information"):
+        st.write(f"**Project Root**: `{project_root}`")
+        st.write(f"**Python Path**: `{sys.path[:3]}`")
+        
+        # Check if key files exist
+        key_files = ['data.sqlite', 'artifacts/model_registry.json']
+        for file in key_files:
+            exists = "✅" if os.path.exists(file) else "❌"
+            st.write(f"{exists} {file}")
