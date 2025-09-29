@@ -372,6 +372,20 @@ def main() -> None:
         st.error("The artifacts directory or models could not be found.")
         st.stop()
     
+    # Check if we have compatible models
+    league_names = model_manager.get_league_names()
+    compatible_leagues = []
+    for league_id, league_name in league_names.items():
+        if model_manager.is_model_available(league_id):
+            compatible_leagues.append((league_id, league_name))
+    
+    if not compatible_leagues:
+        st.error("⚠️ **Model Compatibility Issue**")
+        st.error("None of the trained models are compatible with the current scikit-learn version.")
+        st.info("🔄 **Solution**: This will be automatically resolved when Streamlit Cloud redeploys with the correct scikit-learn version.")
+        st.info("📋 **Available Leagues**: All leagues are trained but require scikit-learn 1.5.2")
+        return
+    
     # Debug information (hidden by default)  
     debug_info = st.expander("🔍 Debug Information", expanded=False)
     with debug_info:
