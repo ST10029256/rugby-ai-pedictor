@@ -1,15 +1,22 @@
 {
-  "last_updated": "2025-09-29T18:28:01.119771",
+  "last_updated": "2025-09-29T18:48:38.749157",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
       "trained_at": "2025-09-29T18:25:22.554771",
       "training_games": 140,
       "performance": {
-        "winner_accuracy": 0.750,
+        "winner_accuracy": 0.7593984962406015,
         "home_mae": 8.18,
         "away_mae": 8.14,
         "overall_mae": 8.16
+      },
+      "live_performance": {
+        "accuracy": 0.7593984962406015,
+        "total_games": 133,
+        "correct_predictions": 101,
+        "avg_confidence": 0.7364033150581738,
+        "last_updated": "2025-09-29T18:46:44.481227"
       }
     },
     "4446": {
@@ -17,10 +24,17 @@
       "trained_at": "2025-09-29T18:26:28.305057",
       "training_games": 254,
       "performance": {
-        "winner_accuracy": 0.701,
+        "winner_accuracy": 0.6975806451612904,
         "home_mae": 8.67,
         "away_mae": 6.44,
         "overall_mae": 7.56
+      },
+      "live_performance": {
+        "accuracy": 0.6975806451612904,
+        "total_games": 248,
+        "correct_predictions": 173,
+        "avg_confidence": 0.6437147775118944,
+        "last_updated": "2025-09-29T18:44:12.705834"
       }
     },
     "5069": {
@@ -28,10 +42,17 @@
       "trained_at": "2025-09-29T18:27:25.462610",
       "training_games": 229,
       "performance": {
-        "winner_accuracy": 0.607,
+        "winner_accuracy": 0.6266666666666667,
         "home_mae": 9.94,
         "away_mae": 10.47,
-        "overall_mae": 10.20
+        "overall_mae": 10.2
+      },
+      "live_performance": {
+        "accuracy": 0.6266666666666667,
+        "total_games": 225,
+        "correct_predictions": 141,
+        "avg_confidence": 0.6718701184061927,
+        "last_updated": "2025-09-29T18:48:38.721531"
       }
     },
     "4574": {
@@ -39,10 +60,17 @@
       "trained_at": "2025-09-29T18:28:00.137318",
       "training_games": 151,
       "performance": {
-        "winner_accuracy": 0.921,
+        "winner_accuracy": 0.9266666666666666,
         "home_mae": 13.73,
         "away_mae": 5.22,
         "overall_mae": 9.47
+      },
+      "live_performance": {
+        "accuracy": 0.9266666666666666,
+        "total_games": 150,
+        "correct_predictions": 139,
+        "avg_confidence": 0.9325090930093493,
+        "last_updated": "2025-09-29T18:45:30.489903"
       }
     }
   }
