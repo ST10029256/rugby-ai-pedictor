@@ -614,14 +614,6 @@ def main():
                                 if i < len(predictions) - 1:
                                     st.divider()
                         
-                        # Download button
-                        csv_data = pd.DataFrame(predictions).to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Predictions",
-                            data=csv_data,
-                            file_name=f"{league_name}_predictions_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv"
-                        )
                     else:
                         st.warning("No predictions generated")
         
