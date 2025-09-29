@@ -151,15 +151,11 @@ def main() -> None:
     </script>
     """, unsafe_allow_html=True)
     
-    # Add comprehensive security headers after script
-    st.markdown("""
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-        <meta http-equiv="Permissions-Policy" content="ambient-light-sensor=(), battery=(), document-domain=(), layout-animations=(self), legacy-image-formats=(self), oversized-images=(self), vr=(self), wake-lock=()">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
-        <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    </head>
-    """, unsafe_allow_html=True)
+    # Add mobile optimization styles (removed problematic meta tags)
+    st.markdown("""<style>
+        .main-header { text-align: center; margin-bottom: 2rem; }
+        .feature-card { border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
+    </style>""", unsafe_allow_html=True)
     
     # Add enhanced CSS for mobile responsiveness
     st.markdown("""
