@@ -26,8 +26,13 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.linear_model import LogisticRegression, ElasticNet
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestRegressor, GradientBoostingRegressor, RandomForestClassifier, VotingClassifier, VotingRegressor
-from sklearn.linear_model import Ridge, Lasso
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestRegressor, GradientBoostingRegressor, RandomForestClassifier, VotingClassifier, VotingRegressor, StackingClassifier, StackingRegressor, ExtraTreesClassifier, ExtraTreesRegressor, AdaBoostClassifier, AdaBoostRegressor
+from sklearn.linear_model import Ridge, Lasso, LogisticRegression, ElasticNet
+from sklearn.svm import SVC, SVR
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.model_selection import cross_val_score, StratifiedKFold, KFold
+from sklearn.metrics import accuracy_score, mean_absolute_error
+import numpy as np
 
 # Try to import XGBoost, but make it optional
 try:
@@ -125,71 +130,73 @@ def get_league_specific_models(league_id: int) -> Tuple[Any, Any, Any]:
     hgb_clf = HistGradientBoostingClassifier(random_state=42, max_iter=100, learning_rate=0.1)
     rf_clf = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=10)
     
-    # Create ensemble based on XGBoost availability (runtime check)
+    # WORLD-CLASS ENSEMBLE: Multiple powerful models with stacking
+    base_models = [
+        ('hgb', HistGradientBoostingClassifier(random_state=42, max_iter=200, learning_rate=0.05)),
+        ('rf', RandomForestClassifier(n_estimators=200, random_state=42, max_depth=15, min_samples_split=5)),
+        ('et', ExtraTreesClassifier(n_estimators=200, random_state=42, max_depth=15, min_samples_split=5)),
+        ('ada', AdaBoostClassifier(n_estimators=100, random_state=42, learning_rate=0.8)),
+        ('svm', SVC(probability=True, random_state=42, C=1.0, gamma='scale')),
+        ('mlp', MLPClassifier(random_state=42, max_iter=500, hidden_layer_sizes=(100, 50), alpha=0.01))
+    ]
+    
+    # Add XGBoost if available
     try:
         import xgboost  # type: ignore
-        xgb_clf = xgboost.XGBClassifier(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
-        gbdt_clf = VotingClassifier([
-            ('hgb', hgb_clf),
-            ('rf', rf_clf),
-            ('xgb', xgb_clf)
-        ], voting='soft')
-        print("Using XGBoost ensemble")
+        base_models.append(('xgb', xgboost.XGBClassifier(n_estimators=200, random_state=42, max_depth=8, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8)))
+        print("Using WORLD-CLASS ensemble with XGBoost")
     except ImportError:
-        # Fallback to simpler ensemble if XGBoost not available
-        gbdt_clf = VotingClassifier([
-            ('hgb', hgb_clf),
-            ('rf', rf_clf)
-        ], voting='soft')
-        print("Using fallback ensemble (no XGBoost)")
+        print("Using WORLD-CLASS ensemble (no XGBoost)")
     
-    # ENHANCED REGRESSION: Ensemble methods for better score prediction
-    if league_id == 4446:  # United Rugby Championship
-        # Ensemble for better score prediction
-        rf_home = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
-        hgb_home = HistGradientBoostingRegressor(random_state=42, max_iter=100, learning_rate=0.1)
-        
-        rf_away = RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42)
-        hgb_away = HistGradientBoostingRegressor(random_state=42, max_iter=100, learning_rate=0.1)
-        
-        try:
-            import xgboost  # type: ignore
-            xgb_home = xgboost.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
-            xgb_away = xgboost.XGBRegressor(n_estimators=100, random_state=42, max_depth=6, learning_rate=0.1)
-            
-            reg_home = VotingRegressor([('rf', rf_home), ('hgb', hgb_home), ('xgb', xgb_home)])
-            reg_away = VotingRegressor([('rf', rf_away), ('hgb', hgb_away), ('xgb', xgb_away)])
-        except ImportError:
-            reg_home = VotingRegressor([('rf', rf_home), ('hgb', hgb_home)])
-            reg_away = VotingRegressor([('rf', rf_away), ('hgb', hgb_away)])
-        
-        scaler = None
-    elif league_id == 4574:  # Rugby World Cup
-        reg_home = HistGradientBoostingRegressor(
-            learning_rate=0.05, max_iter=300, max_depth=8, 
-            min_samples_leaf=3, max_features=0.9, random_state=42
-        )
-        reg_away = HistGradientBoostingRegressor(
-            learning_rate=0.05, max_iter=300, max_depth=8, 
-            min_samples_leaf=3, max_features=0.9, random_state=42
-        )
-        scaler = None
-    elif league_id == 4986:  # Rugby Championship
-        reg_home = ElasticNet(alpha=0.05, l1_ratio=0.3)
-        reg_away = ElasticNet(alpha=0.05, l1_ratio=0.3)
-        scaler = RobustScaler()
-    elif league_id == 5069:  # Currie Cup
-        reg_home = GradientBoostingRegressor(
-            n_estimators=200, learning_rate=0.05, max_depth=8, random_state=42
-        )
-        reg_away = GradientBoostingRegressor(
-            n_estimators=200, learning_rate=0.05, max_depth=8, random_state=42
-        )
-        scaler = None
-    else:  # Default fallback
-        reg_home = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
-        reg_away = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
-        scaler = None
+    # Meta-learner for stacking
+    meta_learner = LogisticRegression(random_state=42, max_iter=1000, C=10.0)
+    
+    # Create stacking ensemble (most powerful method)
+    gbdt_clf = StackingClassifier(
+        estimators=base_models,
+        final_estimator=meta_learner,
+        cv=5,
+        stack_method='predict_proba',
+        n_jobs=-1
+    )
+    
+    # WORLD-CLASS REGRESSION: Advanced stacking ensemble for score prediction
+    base_reg_models = [
+        ('hgb', HistGradientBoostingRegressor(random_state=42, max_iter=300, learning_rate=0.03)),
+        ('rf', RandomForestRegressor(n_estimators=300, random_state=42, max_depth=20, min_samples_split=3)),
+        ('et', ExtraTreesRegressor(n_estimators=300, random_state=42, max_depth=20, min_samples_split=3)),
+        ('ada', AdaBoostRegressor(n_estimators=150, random_state=42, learning_rate=0.5)),
+        ('svr', SVR(C=10.0, gamma='scale', epsilon=0.1)),
+        ('mlp', MLPRegressor(random_state=42, max_iter=1000, hidden_layer_sizes=(150, 100, 50), alpha=0.001))
+    ]
+    
+    # Add XGBoost if available
+    try:
+        import xgboost  # type: ignore
+        base_reg_models.append(('xgb', xgboost.XGBRegressor(n_estimators=300, random_state=42, max_depth=10, learning_rate=0.03, subsample=0.8, colsample_bytree=0.8)))
+    except ImportError:
+        pass
+    
+    # Meta-learners for stacking
+    meta_learner_home = ElasticNet(random_state=42, alpha=0.1, l1_ratio=0.5, max_iter=2000)
+    meta_learner_away = ElasticNet(random_state=42, alpha=0.1, l1_ratio=0.5, max_iter=2000)
+    
+    # Create stacking regressors (most powerful method)
+    reg_home = StackingRegressor(
+        estimators=base_reg_models,
+        final_estimator=meta_learner_home,
+        cv=5,
+        n_jobs=-1
+    )
+    
+    reg_away = StackingRegressor(
+        estimators=base_reg_models,
+        final_estimator=meta_learner_away,
+        cv=5,
+        n_jobs=-1
+    )
+    
+    scaler = None
     
     return (clf, gbdt_clf), (reg_home, reg_away), scaler
 
