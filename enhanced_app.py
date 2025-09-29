@@ -478,6 +478,10 @@ def main():
             format_func=lambda x: league_options[x]
         )
         
+        # Initialize default values
+        league_data = {}
+        perf = {}
+        
         if selected_league:
             league_data = leagues[selected_league]
             perf = league_data.get('performance', {})
