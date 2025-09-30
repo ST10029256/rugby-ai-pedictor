@@ -1,0 +1,171 @@
+2025-09-30 08:17:13,521 - INFO - ================================================================================
+2025-09-30 08:17:13,522 - INFO - OPTIMIZED MODEL TRAINING
+2025-09-30 08:17:13,522 - INFO - Improvements: Feature selection, Walk-forward validation, Model comparison
+2025-09-30 08:17:13,522 - INFO - ================================================================================
+2025-09-30 08:17:13,522 - INFO - 
+================================================================================
+2025-09-30 08:17:13,522 - INFO - Training optimized models for league 4986 (Rugby Championship)
+2025-09-30 08:17:13,522 - INFO - ================================================================================
+2025-09-30 08:17:13,628 - INFO - Total games: 140
+2025-09-30 08:17:13,628 - INFO - Total features before selection: 57
+2025-09-30 08:17:13,631 - INFO - Selecting top 50 features from 57 total
+2025-09-30 08:17:17,869 - INFO - Top 10 features: ['elo_momentum_interaction', 'elo_form_interaction', 'goal_diff_form_diff', 'elo_home_pre', 'form_momentum_interaction', 'away_wr_away', 'away_momentum_trend', 'away_form', 'away_form_10', 'home_goal_diff_form']
+2025-09-30 08:17:17,870 - INFO - Features after selection: 50
+2025-09-30 08:17:17,870 - INFO - Created 5 time-based splits
+2025-09-30 08:17:17,870 - INFO - 
+Split 1/5: Train=70, Test=14
+2025-09-30 08:17:20,845 - INFO -   Simple - Acc: 0.500, Home MAE: 10.61, Away MAE: 7.85
+2025-09-30 08:17:20,845 - INFO -   Stack  - Acc: 0.714, Home MAE: 9.86, Away MAE: 7.62
+2025-09-30 08:17:20,845 - INFO - 
+Split 2/5: Train=84, Test=14
+2025-09-30 08:17:24,106 - INFO -   Simple - Acc: 0.500, Home MAE: 12.19, Away MAE: 10.04
+2025-09-30 08:17:24,106 - INFO -   Stack  - Acc: 0.500, Home MAE: 11.17, Away MAE: 8.70
+2025-09-30 08:17:24,106 - INFO - 
+Split 3/5: Train=98, Test=14
+2025-09-30 08:17:27,743 - INFO -   Simple - Acc: 0.429, Home MAE: 14.20, Away MAE: 10.61
+2025-09-30 08:17:27,743 - INFO -   Stack  - Acc: 0.571, Home MAE: 10.44, Away MAE: 8.57
+2025-09-30 08:17:27,743 - INFO - 
+Split 4/5: Train=112, Test=14
+2025-09-30 08:17:31,659 - INFO -   Simple - Acc: 0.643, Home MAE: 11.28, Away MAE: 10.57
+2025-09-30 08:17:31,660 - INFO -   Stack  - Acc: 0.571, Home MAE: 11.08, Away MAE: 7.70
+2025-09-30 08:17:31,660 - INFO - 
+Split 5/5: Train=126, Test=14
+2025-09-30 08:17:35,766 - INFO -   Simple - Acc: 0.643, Home MAE: 10.35, Away MAE: 9.76
+2025-09-30 08:17:35,766 - INFO -   Stack  - Acc: 0.643, Home MAE: 9.48, Away MAE: 8.25
+2025-09-30 08:17:35,766 - INFO - 
+================================================================================
+2025-09-30 08:17:35,767 - INFO - COMPARISON RESULTS - Rugby Championship
+2025-09-30 08:17:35,767 - INFO - ================================================================================
+2025-09-30 08:17:35,767 - INFO - Simple Model:
+2025-09-30 08:17:35,767 - INFO -   Accuracy: 0.543 ± 0.086
+2025-09-30 08:17:35,767 - INFO -   Overall MAE: 10.75
+2025-09-30 08:17:35,767 - INFO - 
+Stacking Model:
+2025-09-30 08:17:35,767 - INFO -   Accuracy: 0.600 ± 0.073
+2025-09-30 08:17:35,767 - INFO -   Overall MAE: 9.29
+2025-09-30 08:17:35,808 - INFO - ================================================================================
+2025-09-30 08:17:39,573 - INFO - 
+================================================================================
+2025-09-30 08:17:39,574 - INFO - Training optimized models for league 4446 (United Rugby Championship)
+2025-09-30 08:17:39,574 - INFO - ================================================================================
+2025-09-30 08:17:39,644 - INFO - Total games: 254
+2025-09-30 08:17:39,645 - INFO - Total features before selection: 57
+2025-09-30 08:17:39,646 - INFO - Selecting top 50 features from 57 total
+2025-09-30 08:17:40,427 - INFO - Top 10 features: ['away_wr_away', 'home_wr_home', 'strength_ratio_advanced', 'elo_away_pre', 'momentum_diff', 'elo_diff_squared', 'home_goal_diff_form', 'home_momentum', 'elo_diff', 'rest_diff']
+2025-09-30 08:17:40,428 - INFO - Features after selection: 50
+2025-09-30 08:17:40,428 - INFO - Created 5 time-based splits
+2025-09-30 08:17:40,429 - INFO - 
+Split 1/5: Train=127, Test=25
+2025-09-30 08:17:44,806 - INFO -   Simple - Acc: 0.720, Home MAE: 12.23, Away MAE: 8.68
+2025-09-30 08:17:44,806 - INFO -   Stack  - Acc: 0.640, Home MAE: 9.80, Away MAE: 8.09
+2025-09-30 08:17:44,806 - INFO - 
+Split 2/5: Train=152, Test=25
+2025-09-30 08:17:49,602 - INFO -   Simple - Acc: 0.520, Home MAE: 13.42, Away MAE: 8.80
+2025-09-30 08:17:49,603 - INFO -   Stack  - Acc: 0.640, Home MAE: 12.20, Away MAE: 7.33
+2025-09-30 08:17:49,603 - INFO - 
+Split 3/5: Train=177, Test=25
+2025-09-30 08:17:55,056 - INFO -   Simple - Acc: 0.720, Home MAE: 9.39, Away MAE: 7.90
+2025-09-30 08:17:55,056 - INFO -   Stack  - Acc: 0.760, Home MAE: 8.36, Away MAE: 6.81
+2025-09-30 08:17:55,057 - INFO - 
+Split 4/5: Train=202, Test=25
+2025-09-30 08:18:00,865 - INFO -   Simple - Acc: 0.680, Home MAE: 13.32, Away MAE: 9.02
+2025-09-30 08:18:00,865 - INFO -   Stack  - Acc: 0.640, Home MAE: 11.83, Away MAE: 8.65
+2025-09-30 08:18:00,865 - INFO - 
+Split 5/5: Train=227, Test=25
+2025-09-30 08:18:07,125 - INFO -   Simple - Acc: 0.560, Home MAE: 9.50, Away MAE: 7.24
+2025-09-30 08:18:07,125 - INFO -   Stack  - Acc: 0.640, Home MAE: 9.40, Away MAE: 6.41
+2025-09-30 08:18:07,125 - INFO - 
+================================================================================
+2025-09-30 08:18:07,125 - INFO - COMPARISON RESULTS - United Rugby Championship
+2025-09-30 08:18:07,125 - INFO - ================================================================================
+2025-09-30 08:18:07,125 - INFO - Simple Model:
+2025-09-30 08:18:07,125 - INFO -   Accuracy: 0.640 ± 0.084
+2025-09-30 08:18:07,125 - INFO -   Overall MAE: 9.95
+2025-09-30 08:18:07,126 - INFO - 
+Stacking Model:
+2025-09-30 08:18:07,126 - INFO -   Accuracy: 0.664 ± 0.048
+2025-09-30 08:18:07,126 - INFO -   Overall MAE: 8.89
+2025-09-30 08:18:07,127 - INFO - ================================================================================
+2025-09-30 08:18:13,016 - INFO - 
+================================================================================
+2025-09-30 08:18:13,016 - INFO - Training optimized models for league 5069 (Currie Cup)
+2025-09-30 08:18:13,016 - INFO - ================================================================================
+2025-09-30 08:18:13,094 - INFO - Total games: 229
+2025-09-30 08:18:13,094 - INFO - Total features before selection: 57
+2025-09-30 08:18:13,096 - INFO - Selecting top 50 features from 57 total
+2025-09-30 08:18:13,841 - INFO - Top 10 features: ['home_wr_home', 'away_wr_away', 'away_rest_impact', 'elo_diff_squared', 'momentum_squared', 'home_strength_composite', 'rest_impact_diff', 'away_form', 'form_diff_squared', 'goal_diff_form_diff']
+2025-09-30 08:18:13,841 - INFO - Features after selection: 50
+2025-09-30 08:18:13,841 - INFO - Created 5 time-based splits
+2025-09-30 08:18:13,841 - INFO - 
+Split 1/5: Train=114, Test=23
+2025-09-30 08:18:17,712 - INFO -   Simple - Acc: 0.478, Home MAE: 11.23, Away MAE: 13.99
+2025-09-30 08:18:17,712 - INFO -   Stack  - Acc: 0.565, Home MAE: 10.51, Away MAE: 13.87
+2025-09-30 08:18:17,712 - INFO - 
+Split 2/5: Train=137, Test=23
+2025-09-30 08:18:22,156 - INFO -   Simple - Acc: 0.609, Home MAE: 10.47, Away MAE: 8.42
+2025-09-30 08:18:22,156 - INFO -   Stack  - Acc: 0.565, Home MAE: 8.13, Away MAE: 7.12
+2025-09-30 08:18:22,156 - INFO - 
+Split 3/5: Train=160, Test=23
+2025-09-30 08:18:27,056 - INFO -   Simple - Acc: 0.609, Home MAE: 12.33, Away MAE: 8.06
+2025-09-30 08:18:27,056 - INFO -   Stack  - Acc: 0.522, Home MAE: 10.00, Away MAE: 10.46
+2025-09-30 08:18:27,056 - INFO - 
+Split 4/5: Train=183, Test=23
+2025-09-30 08:18:32,599 - INFO -   Simple - Acc: 0.435, Home MAE: 13.02, Away MAE: 14.63
+2025-09-30 08:18:32,599 - INFO -   Stack  - Acc: 0.478, Home MAE: 10.49, Away MAE: 13.31
+2025-09-30 08:18:32,599 - INFO - 
+Split 5/5: Train=206, Test=23
+2025-09-30 08:18:38,515 - INFO -   Simple - Acc: 0.652, Home MAE: 12.74, Away MAE: 13.10
+2025-09-30 08:18:38,515 - INFO -   Stack  - Acc: 0.783, Home MAE: 14.71, Away MAE: 12.30
+2025-09-30 08:18:38,515 - INFO - 
+================================================================================
+2025-09-30 08:18:38,515 - INFO - COMPARISON RESULTS - Currie Cup
+2025-09-30 08:18:38,516 - INFO - ================================================================================
+2025-09-30 08:18:38,516 - INFO - Simple Model:
+2025-09-30 08:18:38,516 - INFO -   Accuracy: 0.557 ± 0.084
+2025-09-30 08:18:38,516 - INFO -   Overall MAE: 11.80
+2025-09-30 08:18:38,516 - INFO - 
+Stacking Model:
+2025-09-30 08:18:38,516 - INFO -   Accuracy: 0.583 ± 0.105
+2025-09-30 08:18:38,516 - INFO -   Overall MAE: 11.09
+2025-09-30 08:18:38,517 - INFO - ================================================================================
+2025-09-30 08:18:43,993 - INFO - 
+================================================================================
+2025-09-30 08:18:43,994 - INFO - Training optimized models for league 4574 (Rugby World Cup)
+2025-09-30 08:18:43,994 - INFO - ================================================================================
+2025-09-30 08:18:44,058 - INFO - Total games: 151
+2025-09-30 08:18:44,058 - INFO - Total features before selection: 57
+2025-09-30 08:18:44,059 - INFO - Selecting top 50 features from 57 total
+2025-09-30 08:18:44,744 - INFO - Top 10 features: ['home_wr_home', 'away_wr_away', 'away_rest_days', 'elo_diff_squared', 'momentum_squared', 'elo_diff', 'form_diff', 'elo_away_pre', 'elo_home_pre', 'home_goal_diff_form']
+2025-09-30 08:18:44,744 - INFO - Features after selection: 50
+2025-09-30 08:18:44,745 - INFO - Created 5 time-based splits
+2025-09-30 08:18:44,745 - INFO - 
+Split 1/5: Train=75, Test=15
+2025-09-30 08:18:44,856 - ERROR - Failed to train models for league 4574: y_true contains only one label (1). Please provide the true labels explicitly through the labels argument.
+Traceback (most recent call last):
+  File "C:\Users\Dylan\Desktop\Prediction\scripts\train_models_optimized.py", line 425, in main
+    model_package = train_league_optimized(league_id, db_path)
+  File "C:\Users\Dylan\Desktop\Prediction\scripts\train_models_optimized.py", line 270, in train_league_optimized
+    clf_results = train_and_evaluate(X_train, y_clf_train, X_test, y_clf_test,
+                                    model_type, 'classification')
+  File "C:\Users\Dylan\Desktop\Prediction\scripts\train_models_optimized.py", line 181, in train_and_evaluate
+    logloss = log_loss(y_test, y_proba)
+  File "C:\Users\Dylan\AppData\Roaming\Python\Python313\site-packages\sklearn\utils\_param_validation.py", line 213, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\Dylan\AppData\Roaming\Python\Python313\site-packages\sklearn\metrics\_classification.py", line 2925, in log_loss
+    raise ValueError(
+    ...<3 lines>...
+    )
+ValueError: y_true contains only one label (1). Please provide the true labels explicitly through the labels argument.
+2025-09-30 08:18:44,957 - INFO - Saved optimized model for league 4986 to artifacts_optimized\league_4986_model_optimized.pkl
+2025-09-30 08:18:44,976 - INFO - Saved optimized model for league 4446 to artifacts_optimized\league_4446_model_optimized.pkl
+2025-09-30 08:18:44,996 - INFO - Saved optimized model for league 5069 to artifacts_optimized\league_5069_model_optimized.pkl
+2025-09-30 08:18:44,997 - INFO - Saved optimized model registry to artifacts_optimized\model_registry_optimized.json
+2025-09-30 08:18:44,997 - INFO - 
+================================================================================
+2025-09-30 08:18:44,997 - INFO - Successfully trained optimized models for 3 leagues
+2025-09-30 08:18:44,997 - INFO - ================================================================================
+2025-09-30 08:18:44,997 - INFO - Rugby Championship: STACKING (Acc: 60.0%, MAE: 9.29)
+2025-09-30 08:18:44,997 - INFO - United Rugby Championship: STACKING (Acc: 66.4%, MAE: 8.89)
+2025-09-30 08:18:44,997 - INFO - Currie Cup: STACKING (Acc: 58.3%, MAE: 11.09)
+2025-09-30 08:18:44,997 - INFO - 
+Optimized model training completed successfully
