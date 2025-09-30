@@ -1,12 +1,16 @@
 {
   "leagues_to_retrain": [
+    4986,
+    4446,
+    5069,
+    4574,
     4551,
     4430,
     4414
   ],
-  "games_updated": 333,
-  "timestamp": "2025-09-30T16:31:57.306297",
-  "reason": "historical_data_fetch",
-  "trigger": "missing_years_data",
-  "description": "Fetched 333 historical games from missing years"
+  "games_updated": 2,
+  "timestamp": "2025-09-30T15:20:29.364264",
+  "reason": "new_games_fetched",
+  "trigger": "comprehensive_data_update",
+  "description": "Found 2 new/updated games from TheSportsDB - retraining all models to capture latest data"
 }
