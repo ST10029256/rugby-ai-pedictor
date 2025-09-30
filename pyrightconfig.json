@@ -5,5 +5,8 @@
   "reportMissingImports": "warning",
   "pythonVersion": "3.13",
   "exclude": [".venv"],
-  "pythonPlatform": "Windows"
+  "pythonPlatform": "Windows",
+  "extraPaths": [
+    "C:/Program Files/Python313/Lib/site-packages"
+  ]
 }
