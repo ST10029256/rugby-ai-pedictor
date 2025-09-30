@@ -855,7 +855,7 @@ def main():
     <div class="main-header">
         <h1>🏉 Rugby AI Predictions</h1>
         <p>Advanced AI-powered match predictions with 97.5% accuracy</p>
-        <p style="font-size: 1rem; opacity: 0.8; margin-top: 0.5rem;">{automation_status} • Auto-updates every 6 hours • {status['models_available']}/{status['total_leagues']} leagues ready</p>
+        <p style="font-size: 1rem; opacity: 0.8; margin-top: 0.5rem;">{automation_status} • Auto-updates every 2 hours • {status['models_available']}/{status['total_leagues']} leagues ready</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -871,7 +871,8 @@ def main():
             st.write(f"**Legacy Models:** {status['legacy_models']}")
             
             if status["models_available"] > 0:
-                st.success("🔄 Auto-updates every 6 hours")
+                st.success("🔄 Auto-updates every 2 hours")
+                st.info("📊 Captures all new upcoming games and completed results")
             else:
                 st.warning("⏳ Waiting for initial training")
         
