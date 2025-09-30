@@ -60,7 +60,7 @@ Your app includes full automation:
 
 2. **Automatic Retraining** (`auto-retrain-all-leagues.yml`):
    - Triggers when new data is available
-   - Retrains AI models for all 4 leagues
+   - Retrains AI models for all 7 leagues
    - Commits and pushes updated models
    - Ensures AI captures all latest game data
 
@@ -76,6 +76,9 @@ Your app includes full automation:
 - **United Rugby Championship** (URC) - League ID: 4446  
 - **Currie Cup** (CC) - League ID: 5069
 - **Rugby World Cup** (RWC) - League ID: 4574
+- **Super Rugby** - League ID: 4551
+- **French Top 14** - League ID: 4430
+- **English Premiership Rugby** - League ID: 4414
 
 ## 🔧 Troubleshooting
 

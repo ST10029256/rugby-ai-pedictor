@@ -23,12 +23,15 @@ if project_root not in sys.path:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# All 4 leagues configuration
+# All 7 leagues configuration
 ALL_LEAGUES = {
     4986: {"name": "Rugby Championship", "sportsdb_id": 4986},
     4446: {"name": "United Rugby Championship", "sportsdb_id": 4446}, 
     5069: {"name": "Currie Cup", "sportsdb_id": 5069},
-    4574: {"name": "Rugby World Cup", "sportsdb_id": 4574}
+    4574: {"name": "Rugby World Cup", "sportsdb_id": 4574},
+    4551: {"name": "Super Rugby", "sportsdb_id": 4551},
+    4430: {"name": "French Top 14", "sportsdb_id": 4430},
+    4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414}
 }
 
 def run_script(script_name: str, description: str) -> bool:
@@ -113,8 +116,8 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    logger.info("🚀 Starting complete automation for ALL 4 rugby leagues")
-    logger.info("🏉 Leagues: Rugby Championship, URC, Currie Cup, Rugby World Cup")
+    logger.info("🚀 Starting complete automation for ALL 7 rugby leagues")
+    logger.info("🏉 Leagues: Rugby Championship, URC, Currie Cup, Rugby World Cup, Super Rugby, Top 14, Premiership")
     
     # Check initial database status
     logger.info("\n📊 INITIAL DATABASE STATUS:")

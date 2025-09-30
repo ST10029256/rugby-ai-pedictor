@@ -51,7 +51,7 @@ except Exception as e:
         
         # Check for model files
         st.write("**Model Files:**")
-        for league_id in [4986, 4446, 5069, 4574]:
+        for league_id in [4986, 4446, 5069, 4574, 4551, 4430, 4414]:
             optimized_path = f'artifacts_optimized/league_{league_id}_model_optimized.pkl'
             legacy_path = f'artifacts/league_{league_id}_model.pkl'
             optimized_exists = "✅" if os.path.exists(optimized_path) else "❌"

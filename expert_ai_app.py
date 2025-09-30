@@ -35,6 +35,9 @@ LEAGUE_CONFIGS = {
     4446: {"name": "URC", "neutral_mode": False},
     5069: {"name": "CC", "neutral_mode": False},
     4574: {"name": "RWC", "neutral_mode": True},
+    4551: {"name": "Super Rugby", "neutral_mode": False},
+    4430: {"name": "Top 14", "neutral_mode": False},
+    4414: {"name": "Premiership", "neutral_mode": False},
 }
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
