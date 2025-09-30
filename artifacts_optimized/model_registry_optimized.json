@@ -1,10 +1,10 @@
 {
-  "last_updated": "2025-09-30T08:18:44.996785",
+  "last_updated": "2025-09-30T14:25:31.792136",
   "optimization_enabled": true,
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2025-09-30T08:17:39.573632",
+      "trained_at": "2025-09-30T14:24:11.794499",
       "training_games": 140,
       "model_type": "stacking",
       "performance": {
@@ -20,14 +20,14 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2025-09-30T08:18:13.016324",
-      "training_games": 254,
+      "trained_at": "2025-09-30T14:24:43.592496",
+      "training_games": 260,
       "model_type": "stacking",
       "performance": {
-        "winner_accuracy": 0.664,
-        "home_mae": 10.3202099896692,
-        "away_mae": 7.456204626840405,
-        "overall_mae": 8.888207308254803
+        "winner_accuracy": 0.6538461538461539,
+        "home_mae": 10.299471959943073,
+        "away_mae": 7.341360234458476,
+        "overall_mae": 8.820416097200773
       },
       "feature_selection": {
         "original": 57,
@@ -36,14 +36,30 @@
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2025-09-30T08:18:43.993580",
+      "trained_at": "2025-09-30T14:25:12.643565",
       "training_games": 229,
       "model_type": "stacking",
       "performance": {
         "winner_accuracy": 0.5826086956521739,
-        "home_mae": 10.768796004649907,
-        "away_mae": 11.411744749003384,
-        "overall_mae": 11.090270376826645
+        "home_mae": 10.804153259266066,
+        "away_mae": 11.415552770425583,
+        "overall_mae": 11.109853014845825
+      },
+      "feature_selection": {
+        "original": 57,
+        "selected": 50
+      }
+    },
+    "4551": {
+      "name": "Super Rugby",
+      "trained_at": "2025-09-30T14:25:31.578941",
+      "training_games": 104,
+      "model_type": "stacking",
+      "performance": {
+        "winner_accuracy": 0.7,
+        "home_mae": 11.1961648752573,
+        "away_mae": 10.979037784991096,
+        "overall_mae": 11.087601330124198
       },
       "feature_selection": {
         "original": 57,

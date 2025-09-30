@@ -1,13 +1,254 @@
 {
   "leagues_to_retrain": [
     4986,
-    4446,
-    5069,
-    4574
+    4446
   ],
-  "games_updated": 9,
-  "timestamp": "2025-09-30T11:23:27.020565",
-  "reason": "new_games_fetched",
-  "trigger": "comprehensive_data_update",
-  "description": "Found 9 new/updated games from TheSportsDB - retraining all models to capture latest data"
+  "completed_matches": [
+    {
+      "id": 2290689,
+      "league_id": 4446,
+      "date_event": "2025-09-27",
+      "home_team_id": 147345,
+      "away_team_id": 135603,
+      "home_score": 53,
+      "away_score": 40,
+      "home_team_name": "Bulls",
+      "away_team_name": "Ospreys"
+    },
+    {
+      "id": 2290684,
+      "league_id": 4446,
+      "date_event": "2025-09-27",
+      "home_team_id": 147339,
+      "away_team_id": 147342,
+      "home_score": 33,
+      "away_score": 20,
+      "home_team_name": "Cardiff Rugby",
+      "away_team_name": "Lions"
+    },
+    {
+      "id": 2282737,
+      "league_id": 4446,
+      "date_event": "2025-09-27",
+      "home_team_id": 142062,
+      "away_team_id": 135603,
+      "home_score": 53,
+      "away_score": 40,
+      "home_team_name": "Blue Bulls",
+      "away_team_name": "Ospreys"
+    },
+    {
+      "id": 2268015,
+      "league_id": 4446,
+      "date_event": "2025-09-27",
+      "home_team_id": 135597,
+      "away_team_id": 135595,
+      "home_score": 26,
+      "away_score": 15,
+      "home_team_name": "Connacht",
+      "away_team_name": "Benetton"
+    },
+    {
+      "id": 2268013,
+      "league_id": 4446,
+      "date_event": "2025-09-27",
+      "home_team_id": 135604,
+      "away_team_id": 135601,
+      "home_score": 21,
+      "away_score": 34,
+      "home_team_name": "Scarlets",
+      "away_team_name": "Munster"
+    },
+    {
+      "id": 2268012,
+      "league_id": 4446,
+      "date_event": "2025-09-27",
+      "home_team_id": 135606,
+      "away_team_id": 135598,
+      "home_score": 31,
+      "away_score": 28,
+      "home_team_name": "Zebre",
+      "away_team_name": "Edinburgh"
+    },
+    {
+      "id": 2264959,
+      "league_id": 4986,
+      "date_event": "2025-09-27",
+      "home_team_id": 137137,
+      "away_team_id": 137124,
+      "home_score": 67,
+      "away_score": 30,
+      "home_team_name": "South Africa Rugby",
+      "away_team_name": "Argentina Rugby"
+    },
+    {
+      "id": 2264958,
+      "league_id": 4986,
+      "date_event": "2025-09-27",
+      "home_team_id": 137133,
+      "away_team_id": 137125,
+      "home_score": 33,
+      "away_score": 24,
+      "home_team_name": "New Zealand Rugby",
+      "away_team_name": "Australia Rugby"
+    },
+    {
+      "id": 2268010,
+      "league_id": 4446,
+      "date_event": "2025-09-26",
+      "home_team_id": 135605,
+      "away_team_id": 135602,
+      "home_score": 42,
+      "away_score": 21,
+      "home_team_name": "Ulster",
+      "away_team_name": "Dragons"
+    },
+    {
+      "id": 2268009,
+      "league_id": 4446,
+      "date_event": "2025-09-26",
+      "home_team_id": 135600,
+      "away_team_id": 136669,
+      "home_score": 35,
+      "away_score": 19,
+      "home_team_name": "Glasgow",
+      "away_team_name": "The Sharks"
+    },
+    {
+      "id": 2268008,
+      "league_id": 4446,
+      "date_event": "2025-09-26",
+      "home_team_id": 136670,
+      "away_team_id": 135599,
+      "home_score": 35,
+      "away_score": 0,
+      "home_team_name": "Stormers",
+      "away_team_name": "Leinster"
+    },
+    {
+      "id": 2264957,
+      "league_id": 4986,
+      "date_event": "2025-09-13",
+      "home_team_id": 137133,
+      "away_team_id": 137137,
+      "home_score": 10,
+      "away_score": 43,
+      "home_team_name": "New Zealand Rugby",
+      "away_team_name": "South Africa Rugby"
+    },
+    {
+      "id": 2264956,
+      "league_id": 4986,
+      "date_event": "2025-09-13",
+      "home_team_id": 137125,
+      "away_team_id": 137124,
+      "home_score": 26,
+      "away_score": 28,
+      "home_team_name": "Australia Rugby",
+      "away_team_name": "Argentina Rugby"
+    },
+    {
+      "id": 2264955,
+      "league_id": 4986,
+      "date_event": "2025-09-06",
+      "home_team_id": 137133,
+      "away_team_id": 137137,
+      "home_score": 24,
+      "away_score": 17,
+      "home_team_name": "New Zealand Rugby",
+      "away_team_name": "South Africa Rugby"
+    },
+    {
+      "id": 2264954,
+      "league_id": 4986,
+      "date_event": "2025-09-06",
+      "home_team_id": 137125,
+      "away_team_id": 137124,
+      "home_score": 28,
+      "away_score": 24,
+      "home_team_name": "Australia Rugby",
+      "away_team_name": "Argentina Rugby"
+    }
+  ],
+  "timestamp": "2025-09-30T14:01:44.356415",
+  "reason": "completed_matches",
+  "trigger": "match_completion_detection",
+  "description": "Found 15 completed matches - retraining models to capture latest results",
+  "match_details": [
+    {
+      "league": "United Rugby Championship",
+      "match": "Bulls 53-40 Ospreys",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Cardiff Rugby 33-20 Lions",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Blue Bulls 53-40 Ospreys",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Connacht 26-15 Benetton",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Scarlets 21-34 Munster",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Zebre 31-28 Edinburgh",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "Rugby Championship",
+      "match": "South Africa Rugby 67-30 Argentina Rugby",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "Rugby Championship",
+      "match": "New Zealand Rugby 33-24 Australia Rugby",
+      "date": "2025-09-27"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Ulster 42-21 Dragons",
+      "date": "2025-09-26"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Glasgow 35-19 The Sharks",
+      "date": "2025-09-26"
+    },
+    {
+      "league": "United Rugby Championship",
+      "match": "Stormers 35-0 Leinster",
+      "date": "2025-09-26"
+    },
+    {
+      "league": "Rugby Championship",
+      "match": "New Zealand Rugby 10-43 South Africa Rugby",
+      "date": "2025-09-13"
+    },
+    {
+      "league": "Rugby Championship",
+      "match": "Australia Rugby 26-28 Argentina Rugby",
+      "date": "2025-09-13"
+    },
+    {
+      "league": "Rugby Championship",
+      "match": "New Zealand Rugby 24-17 South Africa Rugby",
+      "date": "2025-09-06"
+    },
+    {
+      "league": "Rugby Championship",
+      "match": "Australia Rugby 28-24 Argentina Rugby",
+      "date": "2025-09-06"
+    }
+  ]
 }

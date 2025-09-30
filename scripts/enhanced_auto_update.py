@@ -72,47 +72,30 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
     games = []
     
     try:
-        # Try multiple API endpoints with comprehensive coverage for ALL games
-        urls_to_try = [
-            # Current and upcoming season endpoints (most important for new games)
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024-2025",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025-2026",
-            
-            # Past and future endpoints (capture completed results and upcoming games)
+        # League-specific season formats based on TheSportsDB calendar data
+        if sportsdb_id == 4551:  # Super Rugby - uses single year format
+            season_formats = ['2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015', '2014', '2013', '2012', '2011', '2010']
+        elif sportsdb_id in [4430, 4414]:  # French Top 14 and English Premiership - use year-year format
+            season_formats = ['2025-2026', '2024-2025', '2023-2024', '2022-2023', '2021-2022', '2020-2021', '2019-2020', '2018-2019', '2017-2018', '2016-2017', '2015-2016', '2014-2015', '2013-2014', '2012-2013', '2011-2012', '2010-2011', '2009-2010', '2008-2009']
+        else:  # Other leagues - try both formats
+            season_formats = ['2025', '2024-2025', '2024', '2023-2024', '2023', '2022-2023', '2022', '2021-2022', '2021', '2020-2021', '2020', '2019-2020', '2019', '2018-2019', '2018', '2017-2018', '2017', '2016-2017', '2016', '2015-2016', '2015', '2014-2015', '2014', '2013-2014', '2013', '2012-2013', '2012', '2011-2012', '2011', '2010-2011', '2010']
+        
+        # Build URLs based on league-specific season formats
+        urls_to_try = []
+        for season in season_formats:
+            urls_to_try.extend([
+                f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
+                f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
+            ])
+        
+        # Add general endpoints
+        urls_to_try.extend([
             f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
             f"https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsupcomingleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventslastleague.php?id={sportsdb_id}",
-            
-            # Additional season endpoints for comprehensive coverage
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2023-2024",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2023",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2022-2023",
-            
-            # Try without season parameter for some leagues (captures all available games)
             f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}",
-            
-            # Try with different season formats (various naming conventions)
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024/25",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025/26",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024-25",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025-26",
-            
-            # Try with different API versions (fallback endpoints)
-            f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s=2024-2025",
-            f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}",
             f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}",
-            
-            # Additional comprehensive endpoints
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=38&s=2024-2025",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=38&s=2025",
-            
-            # Try with different date ranges to capture recent games
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=2024-12-31&l={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=2025-01-01&l={sportsdb_id}",
-        ]
+            f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}"
+        ])
         
         for url in urls_to_try:
             try:
