@@ -1,0 +1,20 @@
+2025-09-30 14:01:44,354 - INFO - Starting match completion detection and retraining
+2025-09-30 14:01:44,355 - INFO - Found 15 completed matches
+2025-09-30 14:01:44,355 - INFO - Completed: Bulls 53-40 Ospreys (United Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: Cardiff Rugby 33-20 Lions (United Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: Blue Bulls 53-40 Ospreys (United Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: Connacht 26-15 Benetton (United Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: Scarlets 21-34 Munster (United Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: Zebre 31-28 Edinburgh (United Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: South Africa Rugby 67-30 Argentina Rugby (Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: New Zealand Rugby 33-24 Australia Rugby (Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: Ulster 42-21 Dragons (United Rugby Championship)
+2025-09-30 14:01:44,355 - INFO - Completed: Glasgow 35-19 The Sharks (United Rugby Championship)
+2025-09-30 14:01:44,356 - INFO - Completed: Stormers 35-0 Leinster (United Rugby Championship)
+2025-09-30 14:01:44,356 - INFO - Completed: New Zealand Rugby 10-43 South Africa Rugby (Rugby Championship)
+2025-09-30 14:01:44,356 - INFO - Completed: Australia Rugby 26-28 Argentina Rugby (Rugby Championship)
+2025-09-30 14:01:44,356 - INFO - Completed: New Zealand Rugby 24-17 South Africa Rugby (Rugby Championship)
+2025-09-30 14:01:44,356 - INFO - Completed: Australia Rugby 28-24 Argentina Rugby (Rugby Championship)
+2025-09-30 14:01:44,357 - INFO - Created retraining flag file: C:\Users\Dylan\Desktop\Prediction\retrain_needed.flag
+2025-09-30 14:01:44,357 - INFO - Leagues to retrain: [4986, 4446]
+2025-09-30 14:01:44,364 - INFO - Saved checkpoint: 2025-09-30T14:01:44.364221
