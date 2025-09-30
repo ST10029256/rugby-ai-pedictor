@@ -47,7 +47,14 @@ def load_events_dataframe(conn: sqlite3.Connection) -> pd.DataFrame:
     WHERE e.home_team_id IS NOT NULL AND e.away_team_id IS NOT NULL AND e.date_event IS NOT NULL
     ORDER BY e.date_event ASC, e.timestamp ASC, e.id ASC;
     """
-    df = pd.read_sql_query(query, conn, parse_dates=["date_event"])  # type: ignore[arg-type]
+    df = pd.read_sql_query(query, conn)  # type: ignore[arg-type]
+    # Parse dates manually to handle different formats
+    # First try with format specification, then fallback to general parsing
+    df["date_event"] = pd.to_datetime(df["date_event"], format="%Y-%m-%d %H:%M:%S", errors="coerce")
+    # Fill any remaining NaT values with general parsing
+    nat_mask = df["date_event"].isna()
+    if nat_mask.any():  # type: ignore[misc]
+        df.loc[nat_mask, "date_event"] = pd.to_datetime(df.loc[nat_mask, "date_event"], errors="coerce")
     # Normalize target - only compute for rows with both scores
     df["home_win"] = None
     mask = df["home_score"].notna() & df["away_score"].notna()
