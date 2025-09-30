@@ -304,6 +304,47 @@ def main():
     # Custom CSS for modern styling
     st.markdown("""
     <style>
+    /* Global dark theme */
+    .stApp {
+        background-color: #0e1117;
+        color: #fafafa;
+    }
+    
+    .stApp > header {
+        background-color: #0e1117;
+    }
+    
+    .stSidebar {
+        background-color: #262730;
+    }
+    
+    .stSidebar .stSelectbox > div > div {
+        background-color: #262730;
+        color: #fafafa;
+    }
+    
+    .stButton > button {
+        background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+        color: white;
+        border: none;
+        border-radius: 25px;
+        padding: 1rem 2rem;
+        font-size: 1.2rem;
+        font-weight: 600;
+        box-shadow: 0 8px 32px rgba(44, 62, 80, 0.3);
+        transition: all 0.3s ease;
+        width: 100%;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 40px rgba(44, 62, 80, 0.4);
+    }
+    
+    .stButton > button:active {
+        transform: translateY(0);
+    }
+    
     /* Main styling */
     .main-header {
         background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
