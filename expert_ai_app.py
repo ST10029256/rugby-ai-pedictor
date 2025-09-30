@@ -28,6 +28,8 @@ from prediction.sportdevs_client import SportDevsClient
 
 # Configuration
 SPORTDEVS_API_KEY = os.getenv("SPORTDEVS_API_KEY", "qwh9orOkZESulf4QBhf0IQ")  # Your API key
+THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY", "123")  # TheSportsDB API key
+APISPORTS_API_KEY = os.getenv("APISPORTS_API_KEY", "")  # APISports API key
 LEAGUE_CONFIGS = {
     4986: {"name": "RC", "neutral_mode": False},
     4446: {"name": "URC", "neutral_mode": False},
@@ -293,6 +295,30 @@ def make_expert_prediction(game_row, model_data, team_names, use_hybrid=True):
         return None
 
 
+def check_deployment_status():
+    """Check deployment status and show helpful information"""
+    status_info = {
+        "models_available": 0,
+        "total_leagues": len(LEAGUE_CONFIGS),
+        "database_exists": os.path.exists("data.sqlite"),
+        "optimized_models": 0,
+        "legacy_models": 0
+    }
+    
+    # Check model availability
+    for league_id in LEAGUE_CONFIGS.keys():
+        optimized_path = f'artifacts_optimized/league_{league_id}_model_optimized.pkl'
+        legacy_path = f'artifacts/league_{league_id}_model.pkl'
+        
+        if os.path.exists(optimized_path):
+            status_info["optimized_models"] += 1
+            status_info["models_available"] += 1
+        elif os.path.exists(legacy_path):
+            status_info["legacy_models"] += 1
+            status_info["models_available"] += 1
+    
+    return status_info
+
 def main():
     st.set_page_config(
         page_title="Rugby AI Predictions",
@@ -300,6 +326,18 @@ def main():
         initial_sidebar_state="expanded",
         page_icon="🏉"
     )
+    
+    # Check deployment status
+    status = check_deployment_status()
+    
+    # Show status warning if needed
+    if status["models_available"] == 0:
+        st.error("⚠️ **No AI models found!** The app is waiting for GitHub Actions to train and deploy models.")
+        st.info("🔧 **Next Steps:**\n1. Check GitHub Actions are running\n2. Wait for model training to complete\n3. Refresh this page")
+        return
+    elif status["models_available"] < status["total_leagues"]:
+        st.warning(f"⚠️ **Partial Model Availability:** {status['models_available']}/{status['total_leagues']} leagues have trained models")
+        st.info("🔄 Models are being trained automatically. Check back soon!")
     
     # Custom CSS for modern styling
     st.markdown("""
@@ -811,17 +849,31 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Modern header
-    st.markdown("""
+    # Modern header with automation status
+    automation_status = "🔄 Fully Automated" if status["models_available"] > 0 else "⏳ Initializing"
+    st.markdown(f"""
     <div class="main-header">
         <h1>🏉 Rugby AI Predictions</h1>
         <p>Advanced AI-powered match predictions with 97.5% accuracy</p>
+        <p style="font-size: 1rem; opacity: 0.8; margin-top: 0.5rem;">{automation_status} • Auto-updates every 6 hours • {status['models_available']}/{status['total_leagues']} leagues ready</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Clean sidebar
     with st.sidebar:
         st.header("🎯 Control Panel")
+        
+        # Show automation status
+        with st.expander("🤖 Automation Status", expanded=True):
+            st.write(f"**Models Ready:** {status['models_available']}/{status['total_leagues']}")
+            st.write(f"**Database:** {'✅' if status['database_exists'] else '❌'}")
+            st.write(f"**Optimized Models:** {status['optimized_models']}")
+            st.write(f"**Legacy Models:** {status['legacy_models']}")
+            
+            if status["models_available"] > 0:
+                st.success("🔄 Auto-updates every 6 hours")
+            else:
+                st.warning("⏳ Waiting for initial training")
         
         # League selection
         available_leagues = {}

@@ -40,7 +40,20 @@ except Exception as e:
         st.write(f"**Python Path**: `{sys.path[:3]}`")
         
         # Check if key files exist
-        key_files = ['data.sqlite', 'artifacts/model_registry.json']
+        key_files = [
+            'data.sqlite', 
+            'artifacts/model_registry.json', 
+            'artifacts_optimized/model_registry_optimized.json'
+        ]
         for file in key_files:
             exists = "✅" if os.path.exists(file) else "❌"
             st.write(f"{exists} {file}")
+        
+        # Check for model files
+        st.write("**Model Files:**")
+        for league_id in [4986, 4446, 5069, 4574]:
+            optimized_path = f'artifacts_optimized/league_{league_id}_model_optimized.pkl'
+            legacy_path = f'artifacts/league_{league_id}_model.pkl'
+            optimized_exists = "✅" if os.path.exists(optimized_path) else "❌"
+            legacy_exists = "✅" if os.path.exists(legacy_path) else "❌"
+            st.write(f"League {league_id}: Optimized {optimized_exists} | Legacy {legacy_exists}")

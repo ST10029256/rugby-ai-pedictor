@@ -62,7 +62,7 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add data.sqlite artifacts/ last_checkpoint.json
+        git add data.sqlite artifacts/ artifacts_optimized/ last_checkpoint.json
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
