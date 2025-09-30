@@ -1,9 +1,9 @@
 name: Check for Game Updates
 
 on:
-  schedule:
-    # Run every 2 hours to check for completed matches and new games (more frequent for better coverage)
-    - cron: '0 */2 * * *'
+  # Only run when pushing to GitHub - no scheduled runs
+  push:
+    branches: [ main ]
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
