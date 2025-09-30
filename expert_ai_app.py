@@ -849,13 +849,11 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Modern header with automation status
-    automation_status = "🔄 Fully Automated" if status["models_available"] > 0 else "⏳ Initializing"
-    st.markdown(f"""
+    # Modern header
+    st.markdown("""
     <div class="main-header">
         <h1>🏉 Rugby AI Predictions</h1>
         <p>Advanced AI-powered match predictions with 97.5% accuracy</p>
-        <p style="font-size: 1rem; opacity: 0.8; margin-top: 0.5rem;">{automation_status} • Updates on GitHub push • {status['models_available']}/{status['total_leagues']} leagues ready</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -863,18 +861,6 @@ def main():
     with st.sidebar:
         st.header("🎯 Control Panel")
         
-        # Show automation status
-        with st.expander("🤖 Automation Status", expanded=True):
-            st.write(f"**Models Ready:** {status['models_available']}/{status['total_leagues']}")
-            st.write(f"**Database:** {'✅' if status['database_exists'] else '❌'}")
-            st.write(f"**Optimized Models:** {status['optimized_models']}")
-            st.write(f"**Legacy Models:** {status['legacy_models']}")
-            
-            if status["models_available"] > 0:
-                st.success("🔄 Updates on GitHub push")
-                st.info("📊 Captures all new upcoming games and completed results")
-            else:
-                st.warning("⏳ Waiting for initial training")
         
         # League selection
         available_leagues = {}
