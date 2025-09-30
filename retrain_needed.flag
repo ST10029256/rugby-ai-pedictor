@@ -12,5 +12,5 @@
   "timestamp": "2025-09-30T12:39:48.287656",
   "reason": "new_games_fetched",
   "trigger": "comprehensive_data_update",
-  "description": "Found 2 new/updated games from TheSportsDB - retraining all models to capture latest data"
+  "description": "Trigger data fetch for missing leagues - French Top 14 and English Premiership"
 }
