@@ -52,8 +52,8 @@ Your app includes full automation:
 
 ### GitHub Actions Workflows
 
-1. **Scheduled Updates** (`check-for-updates.yml`):
-   - Runs every 2 hours for comprehensive coverage
+1. **Event-Driven Updates** (`check-for-updates.yml`):
+   - Runs only when pushing to GitHub (no scheduled runs)
    - Checks for completed matches and new games
    - Captures ALL upcoming games and completed results from TheSportsDB
    - Creates retraining flags when needed
@@ -68,7 +68,7 @@ Your app includes full automation:
 
 - **Optimized Models**: Stored in `artifacts_optimized/`
 - **Legacy Models**: Stored in `artifacts/` (fallback)
-- **Automatic Updates**: Models are updated every 2 hours when new games are completed or upcoming games are added
+- **Automatic Updates**: Models are updated when pushing to GitHub and new games are found
 
 ## 🏉 Supported Leagues
 
@@ -119,7 +119,7 @@ The app includes built-in debug information:
 ## 🔄 Update Process
 
 The system automatically:
-1. **Every 2 hours**: Checks for new games and completed matches
+1. **On GitHub push**: Checks for new games and completed matches
 2. **When new data found**: Retrains AI models to capture all latest data
 3. **After retraining**: Commits and pushes updated models
 4. **Streamlit Cloud**: Automatically redeploys with new models
@@ -127,7 +127,7 @@ The system automatically:
 ## 📈 Performance
 
 - **Model Loading**: Cached for 1 hour
-- **Data Updates**: Every 2 hours
+- **Data Updates**: On GitHub push
 - **Prediction Accuracy**: 97.5% (as tested)
 - **Response Time**: < 2 seconds for predictions
 
