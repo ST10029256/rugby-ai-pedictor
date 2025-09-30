@@ -27,7 +27,7 @@ from prediction.hybrid_predictor import HybridPredictor
 from prediction.sportdevs_client import SportDevsClient
 
 # Configuration
-SPORTDEVS_API_KEY = "qwh9orOkZESulf4QBhf0IQ"  # Your API key
+SPORTDEVS_API_KEY = os.getenv("SPORTDEVS_API_KEY", "qwh9orOkZESulf4QBhf0IQ")  # Your API key
 LEAGUE_CONFIGS = {
     4986: {"name": "RC", "neutral_mode": False},
     4446: {"name": "URC", "neutral_mode": False},
