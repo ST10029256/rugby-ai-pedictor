@@ -3,10 +3,13 @@
     4986,
     4446,
     5069,
-    4574
+    4574,
+    4551,
+    4430,
+    4414
   ],
   "games_updated": 9,
-  "timestamp": "2025-09-30T11:23:27.020565",
+  "timestamp": "2025-09-30T11:58:24.951961",
   "reason": "new_games_fetched",
   "trigger": "comprehensive_data_update",
   "description": "Found 9 new/updated games from TheSportsDB - retraining all models to capture latest data"
