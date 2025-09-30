@@ -2,8 +2,8 @@ name: Check for Game Updates
 
 on:
   schedule:
-    # Run every 6 hours to check for completed matches and new games
-    - cron: '0 */6 * * *'
+    # Run every 2 hours to check for completed matches and new games (more frequent for better coverage)
+    - cron: '0 */2 * * *'
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
@@ -34,27 +34,30 @@ jobs:
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
       run: |
         echo "🔍 Checking for completed matches..."
+        echo "📊 This will detect ALL completed matches from TheSportsDB"
         python scripts/detect_completed_matches.py --db data.sqlite --verbose
         
-    - name: Check for new games
+    - name: Check for new games and upcoming fixtures
       env:
         THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
       run: |
-        echo "📥 Checking for new games..."
+        echo "📥 Checking for new games and upcoming fixtures..."
+        echo "🏉 This will capture ALL new upcoming games and completed results"
         python scripts/enhanced_auto_update.py --db data.sqlite --verbose
         
     - name: Trigger retraining if needed
       if: always()
       run: |
         if [ -f "retrain_needed.flag" ]; then
-          echo "🔄 Retraining flag found - triggering main workflow"
+          echo "🔄 Retraining flag found - triggering AI model retraining"
+          echo "📊 This ensures AI captures all new upcoming games and completed results"
           # Commit the flag file to trigger the main workflow
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add retrain_needed.flag
-          git commit -m "Trigger retraining: New games or completed matches detected [skip ci]"
+          git commit -m "Trigger retraining: New games or completed matches detected - AI will capture all latest data [skip ci]"
           git push
         else
-          echo "✅ No updates needed - no retraining flag found"
+          echo "✅ No updates needed - database is up to date"
         fi

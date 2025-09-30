@@ -69,39 +69,46 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
     games = []
     
     try:
-        # Try multiple API endpoints with comprehensive coverage
+        # Try multiple API endpoints with comprehensive coverage for ALL games
         urls_to_try = [
-            # Current season endpoints
+            # Current and upcoming season endpoints (most important for new games)
             f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024-2025",
             f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025",
             f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025-2026",
             
-            # Past and future endpoints
+            # Past and future endpoints (capture completed results and upcoming games)
             f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
             f"https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id={sportsdb_id}",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsupcomingleague.php?id={sportsdb_id}",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventslastleague.php?id={sportsdb_id}",
             
             # Additional season endpoints for comprehensive coverage
             f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2023-2024",
             f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2023",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2022-2023",
             
-            # Try without season parameter for some leagues
+            # Try without season parameter for some leagues (captures all available games)
             f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}",
             
-            # Try with different season formats
+            # Try with different season formats (various naming conventions)
             f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024/25",
             f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025/26",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024-25",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025-26",
             
-            # Try specific upcoming and past endpoints
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsupcomingleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventslastleague.php?id={sportsdb_id}",
-            
-            # Try with different API versions
+            # Try with different API versions (fallback endpoints)
             f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s=2024-2025",
             f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}",
+            f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}",
             
-            # Try with different season naming conventions
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2024-25",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s=2025-26"
+            # Additional comprehensive endpoints
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=38&s=2024-2025",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=38&s=2025",
+            
+            # Try with different date ranges to capture recent games
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=2024-12-31&l={sportsdb_id}",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=2025-01-01&l={sportsdb_id}",
         ]
         
         for url in urls_to_try:
@@ -400,7 +407,7 @@ def main():
     logger.info(f"🎉 Update complete! Total games updated: {total_updated}")
     
     if total_updated > 0:
-        # Create retraining flag file for new games
+        # Create retraining flag file for new games - ALWAYS retrain when new data is found
         retrain_flag_file = "retrain_needed.flag"
         try:
             with open(retrain_flag_file, 'w') as f:
@@ -408,12 +415,17 @@ def main():
                     "leagues_to_retrain": list(LEAGUE_MAPPINGS.keys()),
                     "games_updated": total_updated,
                     "timestamp": datetime.now().isoformat(),
-                    "reason": "new_games_fetched"
+                    "reason": "new_games_fetched",
+                    "trigger": "comprehensive_data_update",
+                    "description": f"Found {total_updated} new/updated games from TheSportsDB - retraining all models to capture latest data"
                 }, f, indent=2)
             logger.info(f"🔄 Created retraining flag file: {retrain_flag_file}")
             logger.info("🤖 Models will be retrained with new game data")
+            logger.info("📊 This ensures AI captures all new upcoming games and completed results")
         except Exception as e:
             logger.error(f"Failed to create retraining flag file: {e}")
+    else:
+        logger.info("✅ No new games found - database is up to date")
 
 if __name__ == "__main__":
     main()

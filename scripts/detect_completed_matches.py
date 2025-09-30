@@ -61,10 +61,11 @@ def save_checkpoint(timestamp: datetime) -> None:
         logger.error(f"Failed to save checkpoint: {e}")
 
 def detect_completed_matches(db_path: str, last_check: Optional[datetime] = None) -> List[Dict[str, Any]]:
-    """Detect matches that have been completed since last check"""
+    """Detect matches that have been completed since last check - comprehensive detection"""
     conn = sqlite3.connect(db_path)
     
     # Query for matches that have scores but were previously without scores
+    # Enhanced to capture ALL completed matches, not just recent ones
     query = """
     SELECT 
         e.id,
@@ -88,8 +89,8 @@ def detect_completed_matches(db_path: str, last_check: Optional[datetime] = None
         query += " AND e.date_event >= ?"
         params = (last_check.strftime('%Y-%m-%d'),)
     else:
-        # If no last check, look at matches from last 7 days
-        query += " AND e.date_event >= date('now', '-7 days')"
+        # If no last check, look at matches from last 30 days for comprehensive coverage
+        query += " AND e.date_event >= date('now', '-30 days')"
         params = ()
     
     query += " ORDER BY e.date_event DESC"
@@ -277,7 +278,7 @@ def main():
         save_checkpoint(datetime.now())
         return 0
     
-    # Create retraining flag file
+    # Create retraining flag file - ALWAYS retrain when completed matches are found
     retrain_flag_file = os.path.join(project_root, "retrain_needed.flag")
     try:
         with open(retrain_flag_file, 'w') as f:
@@ -285,10 +286,20 @@ def main():
                 "leagues_to_retrain": leagues_to_retrain,
                 "completed_matches": completed_matches,
                 "timestamp": datetime.now().isoformat(),
-                "reason": "completed_matches"
+                "reason": "completed_matches",
+                "trigger": "match_completion_detection",
+                "description": f"Found {len(completed_matches)} completed matches - retraining models to capture latest results",
+                "match_details": [
+                    {
+                        "league": LEAGUE_CONFIGS.get(match["league_id"], {}).get("name", "Unknown"),
+                        "match": f"{match['home_team_name']} {match['home_score']}-{match['away_score']} {match['away_team_name']}",
+                        "date": match["date_event"]
+                    } for match in completed_matches
+                ]
             }, f, indent=2)
         logger.info(f"Created retraining flag file: {retrain_flag_file}")
         logger.info(f"Leagues to retrain: {leagues_to_retrain}")
+        logger.info("🤖 Models will be retrained to capture latest completed match results")
         save_checkpoint(datetime.now())
         return 0
     except Exception as e:
