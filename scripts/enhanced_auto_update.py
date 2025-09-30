@@ -22,7 +22,10 @@ LEAGUE_MAPPINGS = {
     4986: {"name": "Rugby Championship", "sportsdb_id": 4986},
     4446: {"name": "United Rugby Championship", "sportsdb_id": 4446}, 
     5069: {"name": "Currie Cup", "sportsdb_id": 5069},
-    4574: {"name": "Rugby World Cup", "sportsdb_id": 4574}
+    4574: {"name": "Rugby World Cup", "sportsdb_id": 4574},
+    4551: {"name": "Super Rugby", "sportsdb_id": 4551},
+    4430: {"name": "French Top 14", "sportsdb_id": 4430},
+    4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414}
 }
 
 def safe_to_int(value: Any, default: int = 0) -> int:
@@ -206,7 +209,10 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
         ],
         4986: [],  # Rugby Championship
         5069: [],  # Currie Cup
-        4574: []   # Rugby World Cup
+        4574: [],  # Rugby World Cup
+        4551: [],  # Super Rugby
+        4430: [],  # French Top 14
+        4414: []   # English Premiership Rugby
     }
     
     missing_games = missing_games_map.get(league_id, [])
