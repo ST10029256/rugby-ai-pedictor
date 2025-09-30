@@ -1,48 +1,48 @@
 {
-  "last_updated": "2025-09-30T14:02:32.668625",
+  "last_updated": "2025-09-30T15:32:31.369774",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2025-09-30T14:01:57.108048",
-      "training_games": 140,
+      "trained_at": "2025-09-30T15:31:40.779468",
+      "training_games": 142,
       "performance": {
-        "winner_accuracy": 0.5714285714285714,
-        "home_mae": 9.202543846054267,
-        "away_mae": 8.323756042197695,
-        "overall_mae": 8.763149944125981
+        "winner_accuracy": 0.6551724137931034,
+        "home_mae": 9.517557392784594,
+        "away_mae": 8.793360664205727,
+        "overall_mae": 9.15545902849516
       }
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2025-09-30T14:02:09.176581",
+      "trained_at": "2025-09-30T15:31:59.911801",
       "training_games": 260,
       "performance": {
-        "winner_accuracy": 0.6923076923076923,
-        "home_mae": 11.618505064308376,
-        "away_mae": 7.4405563191425905,
-        "overall_mae": 9.529530691725483
+        "winner_accuracy": 0.7115384615384616,
+        "home_mae": 11.296147254437962,
+        "away_mae": 7.399323169601231,
+        "overall_mae": 9.347735212019597
       }
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2025-09-30T14:02:22.410933",
+      "trained_at": "2025-09-30T15:32:18.323501",
       "training_games": 229,
       "performance": {
-        "winner_accuracy": 0.6304347826086957,
-        "home_mae": 12.774988837117757,
-        "away_mae": 14.126144181474192,
-        "overall_mae": 13.450566509295975
+        "winner_accuracy": 0.6739130434782609,
+        "home_mae": 12.597141252364331,
+        "away_mae": 14.516169869703093,
+        "overall_mae": 13.556655561033711
       }
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2025-09-30T14:02:32.015955",
+      "trained_at": "2025-09-30T15:32:30.950550",
       "training_games": 151,
       "performance": {
         "winner_accuracy": 0.8709677419354839,
-        "home_mae": 13.846032997490878,
-        "away_mae": 5.852234405791705,
-        "overall_mae": 9.849133701641293
+        "home_mae": 15.113886600545962,
+        "away_mae": 5.768592110487983,
+        "overall_mae": 10.441239355516974
       }
     }
   }
