@@ -49,12 +49,28 @@ def load_events_dataframe(conn: sqlite3.Connection) -> pd.DataFrame:
     """
     df = pd.read_sql_query(query, conn)  # type: ignore[arg-type]
     # Parse dates manually to handle different formats
-    # First try with format specification, then fallback to general parsing
-    df["date_event"] = pd.to_datetime(df["date_event"], format="%Y-%m-%d %H:%M:%S", errors="coerce")
-    # Fill any remaining NaT values with general parsing
-    nat_mask = df["date_event"].isna()
-    if nat_mask.any():  # type: ignore[misc]
-        df.loc[nat_mask, "date_event"] = pd.to_datetime(df.loc[nat_mask, "date_event"], errors="coerce")
+    # Convert to string first to ensure consistent handling
+    df["date_event"] = df["date_event"].astype(str)
+    
+    # Use manual parsing to avoid pandas issues with certain datetime strings
+    from datetime import datetime
+    
+    def parse_date_manual(date_str):
+        try:
+            # Try datetime format first
+            return datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            try:
+                # Try date-only format
+                return datetime.strptime(date_str, '%Y-%m-%d')
+            except ValueError:
+                return None
+    
+    # Apply manual parsing
+    df["date_event"] = df["date_event"].apply(parse_date_manual)
+    
+    # Convert to pandas datetime
+    df["date_event"] = pd.to_datetime(df["date_event"])
     # Normalize target - only compute for rows with both scores
     df["home_win"] = None
     mask = df["home_score"].notna() & df["away_score"].notna()
