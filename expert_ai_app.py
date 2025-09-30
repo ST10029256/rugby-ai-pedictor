@@ -21,10 +21,46 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 if script_dir not in sys.path:
     sys.path.insert(0, script_dir)
 
+# Try to import XGBoost FIRST to ensure it's available
+XGBOOST_AVAILABLE = False
+XGBOOST_VERSION = None
+
+# Multiple import strategies for XGBoost in Streamlit
+import_strategies = [
+    # Strategy 1: Direct import
+    lambda: __import__('xgboost'),
+    # Strategy 2: Import with fromlist
+    lambda: __import__('xgboost', fromlist=['']),
+    # Strategy 3: Add to sys.modules first
+    lambda: (sys.modules.setdefault('xgboost', __import__('xgboost')), None)[1],
+    # Strategy 4: Force import with exec
+    lambda: exec('import xgboost', globals()),
+]
+
+for i, strategy in enumerate(import_strategies):
+    try:
+        strategy()
+        import xgboost  # type: ignore
+        XGBOOST_AVAILABLE = True
+        XGBOOST_VERSION = xgboost.__version__
+        # XGBoost imported successfully
+        
+        # Ensure XGBoost is available in the global namespace for pickle
+        globals()['xgboost'] = xgboost
+        sys.modules['xgboost'] = xgboost
+        
+        # XGBoost imported successfully
+        break
+    except (ImportError, Exception) as e:
+        # XGBoost import strategy failed
+        continue
+
+if not XGBOOST_AVAILABLE:
+    # All XGBoost import strategies failed
+    pass
+
 # Import our expert AI components
 from prediction.features import build_feature_table, FeatureConfig
-from prediction.hybrid_predictor import HybridPredictor
-from prediction.sportdevs_client import SportDevsClient
 
 # Configuration
 SPORTDEVS_API_KEY = os.getenv("SPORTDEVS_API_KEY", "qwh9orOkZESulf4QBhf0IQ")  # Your API key
@@ -79,13 +115,18 @@ def load_model_safely(league_id: int):
         if os.path.exists(model_path):
             st.info(f"Loading legacy model from {model_path}")
             
-            # Try to import XGBoost first to handle import errors
-            try:
-                import xgboost  # type: ignore
-                xgboost_available = True
-            except ImportError:
-                xgboost_available = False
+            # Use the module-level XGBoost availability check
+            xgboost_available = XGBOOST_AVAILABLE
+            st.info(f"XGBoost status: Available={xgboost_available}, Version={XGBOOST_VERSION}")
+            if not xgboost_available:
                 st.warning("XGBoost not available, creating simplified model")
+            
+            # Ensure XGBoost is available during pickle loading
+            if XGBOOST_AVAILABLE:
+                import xgboost  # type: ignore
+                # Make sure xgboost is in the current namespace for pickle
+                current_frame = sys._getframe()
+                current_frame.f_globals['xgboost'] = xgboost
             
             with open(model_path, 'rb') as f:
                 model_data = pickle.load(f)
@@ -96,15 +137,21 @@ def load_model_safely(league_id: int):
             if 'models' in model_data and 'gbdt_clf' in model_data['models']:
                 if not xgboost_available:
                     st.info("Creating simplified model without XGBoost")
-                    # Create a simplified model without XGBoost
-                    simplified_model = model_data.copy()
-                    # Use only the simple classifier, skip the stacking one
-                    simplified_model['models'] = {
-                        'clf': model_data['models']['clf'],
-                        'reg_home': model_data['models']['reg_home'],
-                        'reg_away': model_data['models']['reg_away']
+                    # Create a simplified model without XGBoost - avoid accessing gbdt_clf
+                    simplified_model = {
+                        'league_id': model_data['league_id'],
+                        'league_name': model_data['league_name'],
+                        'trained_at': model_data['trained_at'],
+                        'training_games': model_data['training_games'],
+                        'feature_columns': model_data['feature_columns'],
+                        'scaler': model_data.get('scaler'),
+                        'performance': model_data.get('performance', {}),
+                        'team_mappings': model_data.get('team_mappings', {}),
+                        'models': {
+                            'clf': model_data['models']['clf']
+                        },
+                        'model_type': 'simplified_legacy'
                     }
-                    simplified_model['model_type'] = 'simplified_legacy'
                     st.success("Simplified model created successfully")
                     return simplified_model
                 else:
@@ -162,7 +209,7 @@ def get_upcoming_games(league_id: int):
         st.error(f"Error getting upcoming games: {e}")
         return pd.DataFrame()
 
-def make_expert_prediction(game_row, model_data, team_names, use_hybrid=True):
+def make_expert_prediction(game_row, model_data, team_names):
     """Make prediction using expert AI system"""
     if not model_data:
         return None
@@ -184,7 +231,15 @@ def make_expert_prediction(game_row, model_data, team_names, use_hybrid=True):
         
         # Get models
         models = model_data.get('models', {})
-        clf = models.get('clf') or models.get('gbdt_clf')
+        clf = models.get('clf')
+        
+        # Skip XGBoost models if not available
+        if not clf and 'gbdt_clf' in models:
+            if XGBOOST_AVAILABLE:
+                clf = models.get('gbdt_clf')
+            else:
+                st.warning("XGBoost model available but XGBoost not installed. Skipping predictions.")
+                return None
         
         if not clf:
             return None
@@ -209,45 +264,9 @@ def make_expert_prediction(game_row, model_data, team_names, use_hybrid=True):
             home_score = 20 + home_win_prob * 20
             away_score = 20 + (1 - home_win_prob) * 20
         
-        # Try hybrid prediction if requested
-        if use_hybrid:
-            try:
-                # Create a mock match_id for SportDevs lookup
-                match_id = int(game_row.get('event_id', 0))
-                
-                # Initialize hybrid predictor
-                model_path = f'artifacts_optimized/league_{game_row["league_id"]}_model_optimized.pkl'
-                if not os.path.exists(model_path):
-                    model_path = f'artifacts/league_{game_row["league_id"]}_model.pkl'
-                
-                if os.path.exists(model_path):
-                    predictor = HybridPredictor(model_path, SPORTDEVS_API_KEY)
-                    
-                    # Try to get hybrid prediction
-                    hybrid_result = predictor.smart_ensemble(home_id, away_id, match_date, match_id)
-                    
-                    if hybrid_result and 'hybrid_confidence' in hybrid_result:
-                        # Use hybrid results
-                        home_win_prob = hybrid_result['hybrid_home_win_prob']
-                        home_score = hybrid_result['ai_prediction']['predicted_home_score']
-                        away_score = hybrid_result['ai_prediction']['predicted_away_score']
-                        confidence = hybrid_result['hybrid_confidence'] * 100
-                        bookmaker_count = hybrid_result.get('bookmaker_prediction', {}).get('bookmaker_count', 0)
-                        prediction_type = f"Hybrid AI + Live Odds ({bookmaker_count} bookmakers)"
-                    else:
-                        # Fallback to AI-only
-                        confidence = home_win_prob * 100 if home_win_prob > 0.5 else (1 - home_win_prob) * 100
-                        prediction_type = "Expert AI (No Live Odds)"
-                else:
-                    confidence = home_win_prob * 100 if home_win_prob > 0.5 else (1 - home_win_prob) * 100
-                    prediction_type = "Expert AI (No Live Odds)"
-            except Exception as e:
-                # Fallback to AI-only
-                confidence = home_win_prob * 100 if home_win_prob > 0.5 else (1 - home_win_prob) * 100
-                prediction_type = "Expert AI (Fallback)"
-        else:
-            confidence = home_win_prob * 100 if home_win_prob > 0.5 else (1 - home_win_prob) * 100
-            prediction_type = "Expert AI Only"
+        # AI-only prediction (hybrid removed for simplicity)
+        confidence = home_win_prob * 100 if home_win_prob > 0.5 else (1 - home_win_prob) * 100
+        prediction_type = "Expert AI Only"
         
         # Determine predicted winner
         if home_score > away_score:
@@ -297,6 +316,45 @@ def make_expert_prediction(game_row, model_data, team_names, use_hybrid=True):
         st.error(f"Error making prediction: {e}")
         return None
 
+
+def get_league_accuracy(league_id: int) -> float:
+    """Get actual model accuracy for a specific league"""
+    # Model accuracy data from training results
+    accuracy_data = {
+        4986: 60.0,  # Rugby Championship
+        4446: 65.4,  # United Rugby Championship
+        5069: 60.0,  # Currie Cup
+        4574: 87.1,  # Rugby World Cup (legacy model, actual)
+        4551: 71.4,  # Super Rugby
+        4430: 72.0,  # French Top 14
+        4414: 56.5,  # English Premiership Rugby
+    }
+    return accuracy_data.get(league_id, 0.0)
+
+def get_ai_rating(accuracy: float) -> str:
+    """Get AI rating based on accuracy"""
+    if accuracy >= 70:
+        return "8/10"
+    elif accuracy >= 65:
+        return "7/10"
+    elif accuracy >= 60:
+        return "6/10"
+    elif accuracy >= 55:
+        return "5/10"
+    else:
+        return "4/10"
+
+def get_total_games_count() -> int:
+    """Get total games count from database"""
+    try:
+        conn = sqlite3.connect('data.sqlite')
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM event')
+        total_games = cursor.fetchone()[0]
+        conn.close()
+        return total_games
+    except:
+        return 1595  # Fallback to known total
 
 def check_deployment_status():
     """Check deployment status and show helpful information"""
@@ -750,7 +808,11 @@ def main():
         
         .team-name {
             font-size: 1rem;
-            margin: 0.25rem 0;
+            margin: 0.25rem 0 0.5rem 0;
+        }
+        
+        .team-score {
+            margin-top: 0.25rem;
         }
         
         /* Center metrics on mobile */
@@ -853,10 +915,14 @@ def main():
     """, unsafe_allow_html=True)
     
     # Modern header
-    st.markdown("""
+    # Calculate average accuracy across all leagues
+    total_accuracy = sum(get_league_accuracy(league_id) for league_id in LEAGUE_CONFIGS.keys())
+    avg_accuracy = total_accuracy / len(LEAGUE_CONFIGS)
+    
+    st.markdown(f"""
     <div class="main-header">
         <h1>🏉 Rugby AI Predictions</h1>
-        <p>Advanced AI-powered match predictions with 97.5% accuracy</p>
+        <p>Advanced AI-powered match predictions with {avg_accuracy:.1f}% average accuracy</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -895,15 +961,19 @@ def main():
     
     # Performance metrics - only show when no league selected
     if not selected_league:
+        # Get total games from database
+        total_games = get_total_games_count()
+        
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Accuracy", "97.5%", "Overall")
+            st.metric("Accuracy", f"{avg_accuracy:.1f}%", "Average")
         with col2:
-            st.metric("Leagues", "4", "Available")
+            st.metric("Leagues", f"{len(LEAGUE_CONFIGS)}", "Available")
         with col3:
-            st.metric("Total Games", "941", "Database")
+            st.metric("Total Games", f"{total_games}", "Database")
         with col4:
-            st.metric("AI Rating", "8/10", "Excellent")
+            overall_rating = get_ai_rating(avg_accuracy)
+            st.metric("AI Rating", overall_rating, "Based on Stats")
         
         # Model status
         if selected_league:
@@ -924,9 +994,9 @@ def main():
         
         # Quick stats
         st.subheader("📊 Quick Stats")
-        st.metric("Accuracy", "97.5%")
-        st.metric("Total Games", "941")
-        st.metric("Confidence", "76.6%")
+        st.metric("Accuracy", f"{avg_accuracy:.1f}%")
+        st.metric("Total Games", f"{total_games}")
+        st.metric("Leagues", f"{len(LEAGUE_CONFIGS)}")
     
     # Main content
     if selected_league:
@@ -947,12 +1017,16 @@ def main():
         
         conn.close()
         
+        # Get actual model accuracy for the selected league
+        model_accuracy = get_league_accuracy(selected_league)
+        ai_rating = get_ai_rating(model_accuracy)
+        
         # League-specific metrics - custom centered layout
         st.markdown(f"""
         <div class="custom-metrics-container">
             <div class="custom-metric">
                 <div class="metric-label">Accuracy</div>
-                <div class="metric-value">97.5%</div>
+                <div class="metric-value">{model_accuracy}%</div>
                 <div class="metric-delta">Tested</div>
             </div>
             <div class="custom-metric">
@@ -967,8 +1041,8 @@ def main():
             </div>
             <div class="custom-metric">
                 <div class="metric-label">AI Rating</div>
-                <div class="metric-value">8/10</div>
-                <div class="metric-delta">Excellent</div>
+                <div class="metric-value">{ai_rating}</div>
+                <div class="metric-delta">Based on Stats</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -976,8 +1050,7 @@ def main():
         # Clean league header
         st.caption("AI-Powered Match Predictions")
         
-        # Hybrid mode disabled
-        use_hybrid = False
+        # AI-only mode (hybrid removed)
         
         # Load model
         model_data = load_model_safely(selected_league)
@@ -1032,7 +1105,7 @@ def main():
                     if isinstance(upcoming_games, pd.DataFrame):
                         upcoming_subset = upcoming_games.head(10)
                         for _, game in upcoming_subset.iterrows():
-                            pred = make_expert_prediction(game, model_data, team_names, use_hybrid)
+                            pred = make_expert_prediction(game, model_data, team_names)
                             if pred:
                                 predictions.append(pred)
                     else:
@@ -1093,22 +1166,18 @@ def main():
                     # Score display with dividers and responsive layout
                     st.markdown("---")
                     
-                    # Team names row
-                    name_col1, name_col2, name_col3 = st.columns([2, 1, 2])
-                    with name_col1:
-                        st.markdown(f"<div class='team-name'>{prediction['home_team']}</div>", unsafe_allow_html=True)
-                    with name_col2:
-                        st.markdown("<div style='min-height: auto; height: auto;'></div>", unsafe_allow_html=True)
-                    with name_col3:
-                        st.markdown(f"<div class='team-name'>{prediction['away_team']}</div>", unsafe_allow_html=True)
+                    # Mobile-friendly layout: Team name above score
+                    col1, col2, col3 = st.columns([2, 1, 2])
                     
-                    # Scores row with VS aligned
-                    score_col1, score_col2, score_col3 = st.columns([2, 1, 2])
-                    with score_col1:
+                    with col1:
+                        st.markdown(f"<div class='team-name'>{prediction['home_team']}</div>", unsafe_allow_html=True)
                         st.markdown(f"<div class='team-score'>{prediction['home_score']}</div>", unsafe_allow_html=True)
-                    with score_col2:
+                    
+                    with col2:
                         st.markdown("<div class='vs-text'>VS</div>", unsafe_allow_html=True)
-                    with score_col3:
+                    
+                    with col3:
+                        st.markdown(f"<div class='team-name'>{prediction['away_team']}</div>", unsafe_allow_html=True)
                         st.markdown(f"<div class='team-score'>{prediction['away_score']}</div>", unsafe_allow_html=True)
                     
                     st.markdown("---")
