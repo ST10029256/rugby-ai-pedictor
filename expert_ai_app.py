@@ -425,6 +425,7 @@ def main():
         align-items: center;
         justify-content: center;
         min-height: 120px;
+        height: 100%;
     }
     
     /* Winner display */
@@ -478,15 +479,15 @@ def main():
     }
     
     .confidence-high {
-        background: linear-gradient(90deg, #27ae60, #2ecc71);
+        background: linear-gradient(90deg, #059669, #10b981);
     }
     
     .confidence-medium {
-        background: linear-gradient(90deg, #f39c12, #e67e22);
+        background: linear-gradient(90deg, #d97706, #f59e0b);
     }
     
     .confidence-low {
-        background: linear-gradient(90deg, #e74c3c, #c0392b);
+        background: linear-gradient(90deg, #dc2626, #ef4444);
     }
     
     .confidence-text {
@@ -511,22 +512,22 @@ def main():
     }
     
     .intensity-close {
-        background: linear-gradient(135deg, #e74c3c, #c0392b);
+        background: linear-gradient(135deg, #dc2626, #ef4444);
         color: white;
     }
     
     .intensity-competitive {
-        background: linear-gradient(135deg, #f39c12, #e67e22);
+        background: linear-gradient(135deg, #d97706, #f59e0b);
         color: white;
     }
     
     .intensity-moderate {
-        background: linear-gradient(135deg, #3498db, #2980b9);
+        background: linear-gradient(135deg, #2563eb, #3b82f6);
         color: white;
     }
     
     .intensity-decisive {
-        background: linear-gradient(135deg, #8e44ad, #9b59b6);
+        background: linear-gradient(135deg, #059669, #10b981);
         color: white;
     }
     
@@ -606,6 +607,45 @@ def main():
         animation: fadeInUp 0.6s ease-out;
     }
     
+    /* Custom metrics styling - available on all screen sizes */
+    .custom-metrics-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 1rem;
+        margin: 1rem 0;
+        padding: 1rem;
+        width: 100%;
+    }
+    
+    .custom-metric {
+        background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+        border-radius: 15px;
+        padding: 1.5rem;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        border: 1px solid rgba(74, 85, 104, 0.3);
+    }
+    
+    .metric-label {
+        font-size: 0.9rem;
+        color: #a0aec0;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 800;
+        color: #ffffff;
+        margin-bottom: 0.5rem;
+    }
+    
+    .metric-delta {
+        font-size: 0.8rem;
+        color: #68d391;
+        font-weight: 600;
+    }
+    
     /* Responsive design */
     @media (max-width: 768px) {
         .main-header h1 {
@@ -629,6 +669,102 @@ def main():
         .team-name {
             font-size: 1rem;
             margin: 0.25rem 0;
+        }
+        
+        /* Center metrics on mobile */
+        .stMetric {
+            text-align: center;
+        }
+        
+        .stMetric > div {
+            text-align: center;
+        }
+        
+        .stMetric > div > div {
+            text-align: center;
+        }
+        
+        .stMetric > div > div > div {
+            text-align: center;
+        }
+        
+        .stMetric > div > div > div > div {
+            text-align: center;
+        }
+        
+        /* Center all metric text */
+        .stMetric * {
+            text-align: center !important;
+        }
+        
+        /* Center metric labels and arrows */
+        .stMetric > div > div > div > div {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        
+        .stMetric > div > div > div > div > div {
+            text-align: center;
+        }
+        
+        /* Center metric arrows */
+        .stMetric > div > div > div > div > div > div {
+            text-align: center;
+        }
+        
+        /* Force center alignment for all metric content */
+        .stMetric > div > div > div > div > div > div > div {
+            text-align: center;
+        }
+        
+        /* Center metric delta arrows */
+        .stMetric > div > div > div > div > div > div > div > div {
+            text-align: center;
+        }
+        
+        /* Custom metric centering */
+        .metric-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        
+        .metric-container * {
+            text-align: center !important;
+        }
+        
+        /* Mobile-specific custom metrics adjustments */
+        .custom-metrics-container {
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            padding: 0.5rem;
+        }
+        
+        .custom-metric {
+            padding: 1rem;
+        }
+        
+        .metric-value {
+            font-size: 1.5rem;
+        }
+    }
+    
+    @media (min-width: 769px) {
+        .custom-metrics-container {
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 1rem;
+            padding: 1rem;
+        }
+        
+        .custom-metric {
+            padding: 1.5rem;
+        }
+        
+        .metric-value {
+            font-size: 2rem;
         }
     }
     </style>
@@ -728,19 +864,33 @@ def main():
         
         conn.close()
         
-        # League-specific metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Accuracy", "97.5%", "Tested")
-        with col2:
-            st.metric("League", league_name, "Selected")
-        with col3:
-            st.metric("Games Trained", str(league_total_games), "Total")
-        with col4:
-            st.metric("AI Rating", "8/10", "Excellent")
+        # League-specific metrics - custom centered layout
+        st.markdown(f"""
+        <div class="custom-metrics-container">
+            <div class="custom-metric">
+                <div class="metric-label">Accuracy</div>
+                <div class="metric-value">97.5%</div>
+                <div class="metric-delta">Tested</div>
+            </div>
+            <div class="custom-metric">
+                <div class="metric-label">League</div>
+                <div class="metric-value">{league_name}</div>
+                <div class="metric-delta">Selected</div>
+            </div>
+            <div class="custom-metric">
+                <div class="metric-label">Games Trained</div>
+                <div class="metric-value">{league_total_games}</div>
+                <div class="metric-delta">Total</div>
+            </div>
+            <div class="custom-metric">
+                <div class="metric-label">AI Rating</div>
+                <div class="metric-value">8/10</div>
+                <div class="metric-delta">Excellent</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Clean league header
-        st.markdown(f"## {league_name}")
         st.caption("AI-Powered Match Predictions")
         
         # Hybrid mode disabled
@@ -857,18 +1007,25 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Score display with dividers and mobile-friendly layout
+                    # Score display with dividers and responsive layout
                     st.markdown("---")
                     
-                    # Mobile layout: team name above score
-                    mobile_col1, mobile_col2, mobile_col3 = st.columns([1, 1, 1])
-                    with mobile_col1:
+                    # Team names row
+                    name_col1, name_col2, name_col3 = st.columns([2, 1, 2])
+                    with name_col1:
                         st.markdown(f"<div class='team-name'>{prediction['home_team']}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='team-score'>{prediction['home_score']}</div>", unsafe_allow_html=True)
-                    with mobile_col2:
-                        st.markdown("<div class='vs-text'>VS</div>", unsafe_allow_html=True)
-                    with mobile_col3:
+                    with name_col2:
+                        st.markdown("<div style='min-height: auto; height: auto;'></div>", unsafe_allow_html=True)
+                    with name_col3:
                         st.markdown(f"<div class='team-name'>{prediction['away_team']}</div>", unsafe_allow_html=True)
+                    
+                    # Scores row with VS aligned
+                    score_col1, score_col2, score_col3 = st.columns([2, 1, 2])
+                    with score_col1:
+                        st.markdown(f"<div class='team-score'>{prediction['home_score']}</div>", unsafe_allow_html=True)
+                    with score_col2:
+                        st.markdown("<div class='vs-text'>VS</div>", unsafe_allow_html=True)
+                    with score_col3:
                         st.markdown(f"<div class='team-score'>{prediction['away_score']}</div>", unsafe_allow_html=True)
                     
                     st.markdown("---")
