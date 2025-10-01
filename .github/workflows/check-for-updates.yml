@@ -1,10 +1,10 @@
 name: Check for Game Updates
 
 on:
-  # Only run when pushing to GitHub - no scheduled runs
-  push:
-    branches: [ main ]
-  workflow_dispatch:  # Allow manual triggering
+  # Temporarily disabled to fix duplicate issues
+  # push:
+  #   branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering only
 
 jobs:
   check-for-updates:

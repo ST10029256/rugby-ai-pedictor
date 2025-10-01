@@ -315,17 +315,18 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
             if not home_team_id or not away_team_id:
                 continue
             
-            # Check if event exists
+            # Check if event exists (check by DATE only, ignoring time)
             cursor.execute("""
-                SELECT id, home_score, away_score 
+                SELECT id, home_score, away_score, date_event
                 FROM event 
-                WHERE home_team_id = ? AND away_team_id = ? AND date_event = ?
+                WHERE home_team_id = ? AND away_team_id = ? 
+                AND DATE(date_event) = DATE(?)
             """, (home_team_id, away_team_id, game['date_event']))
             
             existing = cursor.fetchone()
             
             if existing:
-                event_id, existing_home_score, existing_away_score = existing
+                event_id, existing_home_score, existing_away_score, existing_date = existing
                 
                 # Update scores if they're available and different
                 if (game['home_score'] is not None and game['away_score'] is not None and
@@ -339,6 +340,9 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                     
                     updated_count += 1
                     logger.info(f"Updated: {game['home_team']} {game['home_score']}-{game['away_score']} {game['away_team']} ({game['date_event']})")
+                
+                # Skip adding - game already exists
+                logger.debug(f"Skipped duplicate: {game['home_team']} vs {game['away_team']} on {game['date_event']}")
             else:
                 # Insert new event
                 cursor.execute("""
