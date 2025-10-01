@@ -10,6 +10,7 @@ import os
 import logging
 import requests
 import json
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
@@ -100,7 +101,14 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
         for url in urls_to_try:
             try:
                 logger.debug(f"Trying URL: {url}")
+                # Add rate limiting delay to avoid 429 errors
+                time.sleep(0.5)  # 500ms delay between requests
+                
                 response = requests.get(url, timeout=30)
+                
+                if response.status_code == 429:
+                    logger.warning(f"Rate limited (429) - skipping URL: {url}")
+                    continue
                 
                 if response.status_code == 200:
                     data = response.json()
