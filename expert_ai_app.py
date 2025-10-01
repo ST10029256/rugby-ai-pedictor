@@ -67,13 +67,13 @@ SPORTDEVS_API_KEY = os.getenv("SPORTDEVS_API_KEY", "qwh9orOkZESulf4QBhf0IQ")  # 
 THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY", "123")  # TheSportsDB API key
 APISPORTS_API_KEY = os.getenv("APISPORTS_API_KEY", "")  # APISports API key
 LEAGUE_CONFIGS = {
-    4986: {"name": "RC", "neutral_mode": False},
-    4446: {"name": "URC", "neutral_mode": False},
-    5069: {"name": "CC", "neutral_mode": False},
-    4574: {"name": "RWC", "neutral_mode": True},
+    4986: {"name": "Rugby Championship", "neutral_mode": False},
+    4446: {"name": "United Rugby Championship", "neutral_mode": False},
+    5069: {"name": "Currie Cup", "neutral_mode": False},
+    4574: {"name": "Rugby World Cup", "neutral_mode": True},
     4551: {"name": "Super Rugby", "neutral_mode": False},
-    4430: {"name": "Top 14", "neutral_mode": False},
-    4414: {"name": "Premiership", "neutral_mode": False},
+    4430: {"name": "French Top 14", "neutral_mode": False},
+    4414: {"name": "English Premiership Rugby", "neutral_mode": False},
 }
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -308,22 +308,36 @@ def make_expert_prediction(game_row, model_data, team_names):
 
 
 def get_league_accuracy(league_id: int) -> float:
-    """Get actual model accuracy for a specific league"""
-    # Model accuracy data from training results
-    accuracy_data = {
-        4986: 60.0,  # Rugby Championship
-        4446: 65.4,  # United Rugby Championship
-        5069: 60.0,  # Currie Cup
-        4574: 87.1,  # Rugby World Cup (legacy model, actual)
-        4551: 71.4,  # Super Rugby
-        4430: 72.0,  # French Top 14
-        4414: 56.5,  # English Premiership Rugby
-    }
-    return accuracy_data.get(league_id, 0.0)
+    """Get actual model accuracy from trained models"""
+    try:
+        # Try optimized model registry first
+        if os.path.exists('artifacts_optimized/model_registry_optimized.json'):
+            with open('artifacts_optimized/model_registry_optimized.json', 'r') as f:
+                registry = json.load(f)
+                league_data = registry.get('leagues', {}).get(str(league_id))
+                if league_data:
+                    accuracy = league_data.get('performance', {}).get('winner_accuracy', 0.0)
+                    return accuracy * 100  # Convert to percentage
+        
+        # Fallback to legacy model registry
+        if os.path.exists('artifacts/model_registry.json'):
+            with open('artifacts/model_registry.json', 'r') as f:
+                registry = json.load(f)
+                league_data = registry.get('leagues', {}).get(str(league_id))
+                if league_data:
+                    accuracy = league_data.get('performance', {}).get('winner_accuracy', 0.0)
+                    return accuracy * 100  # Convert to percentage
+    except Exception:
+        pass
+    
+    # Fallback to default if no registry found
+    return 0.0
 
 def get_ai_rating(accuracy: float) -> str:
     """Get AI rating based on accuracy"""
-    if accuracy >= 70:
+    if accuracy >= 80:
+        return "9/10"
+    elif accuracy >= 70:
         return "8/10"
     elif accuracy >= 65:
         return "7/10"
@@ -333,6 +347,30 @@ def get_ai_rating(accuracy: float) -> str:
         return "5/10"
     else:
         return "4/10"
+
+def get_training_games(league_id: int) -> int:
+    """Get actual number of games used for training from model registry"""
+    try:
+        # Try optimized model registry first
+        if os.path.exists('artifacts_optimized/model_registry_optimized.json'):
+            with open('artifacts_optimized/model_registry_optimized.json', 'r') as f:
+                registry = json.load(f)
+                league_data = registry.get('leagues', {}).get(str(league_id))
+                if league_data:
+                    return league_data.get('training_games', 0)
+        
+        # Fallback to legacy model registry
+        if os.path.exists('artifacts/model_registry.json'):
+            with open('artifacts/model_registry.json', 'r') as f:
+                registry = json.load(f)
+                league_data = registry.get('leagues', {}).get(str(league_id))
+                if league_data:
+                    return league_data.get('training_games', 0)
+    except Exception:
+        pass
+    
+    # Fallback to 0
+    return 0
 
 def get_total_games_count() -> int:
     """Get total games count from database"""
@@ -1007,16 +1045,17 @@ def main():
         
         conn.close()
         
-        # Get actual model accuracy for the selected league
+        # Get actual model accuracy and training info for the selected league
         model_accuracy = get_league_accuracy(selected_league)
         ai_rating = get_ai_rating(model_accuracy)
+        training_games = get_training_games(selected_league)
         
         # League-specific metrics - custom centered layout
         st.markdown(f"""
         <div class="custom-metrics-container">
             <div class="custom-metric">
                 <div class="metric-label">Accuracy</div>
-                <div class="metric-value">{model_accuracy}%</div>
+                <div class="metric-value">{model_accuracy:.1f}%</div>
                 <div class="metric-delta">Tested</div>
             </div>
             <div class="custom-metric">
@@ -1026,8 +1065,8 @@ def main():
             </div>
             <div class="custom-metric">
                 <div class="metric-label">Games Trained</div>
-                <div class="metric-value">{league_total_games}</div>
-                <div class="metric-delta">Total</div>
+                <div class="metric-value">{training_games}</div>
+                <div class="metric-delta">Completed</div>
             </div>
             <div class="custom-metric">
                 <div class="metric-label">AI Rating</div>
