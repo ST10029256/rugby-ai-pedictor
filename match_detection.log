@@ -18,3 +18,6 @@
 2025-09-30 14:01:44,357 - INFO - Created retraining flag file: C:\Users\Dylan\Desktop\Prediction\retrain_needed.flag
 2025-09-30 14:01:44,357 - INFO - Leagues to retrain: [4986, 4446]
 2025-09-30 14:01:44,364 - INFO - Saved checkpoint: 2025-09-30T14:01:44.364221
+2025-10-01 08:52:44,941 - INFO - Starting match completion detection and retraining
+2025-10-01 08:52:44,942 - INFO - No new completed matches found
+2025-10-01 08:52:44,942 - INFO - Saved checkpoint: 2025-10-01T08:52:44.942155
