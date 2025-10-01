@@ -46,17 +46,30 @@ jobs:
         echo "🏉 This will capture ALL new upcoming games and completed results"
         python scripts/enhanced_auto_update.py --db data.sqlite --verbose
         
-    - name: Trigger retraining if needed
+    - name: Commit changes and trigger retraining if needed
       if: always()
       run: |
-        if [ -f "retrain_needed.flag" ]; then
-          echo "🔄 Retraining flag found - triggering AI model retraining"
-          echo "📊 This ensures AI captures all new upcoming games and completed results"
-          # Commit the flag file to trigger the main workflow
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add retrain_needed.flag
-          git commit -m "Trigger retraining: New games or completed matches detected - AI will capture all latest data [skip ci]"
+        # Configure git
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Check if there are any changes
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "📝 Changes detected - committing updates..."
+          
+          # Add all modified files (checkpoint, logs, data.sqlite if changed)
+          git add -A
+          
+          # Check if retrain flag exists
+          if [ -f "retrain_needed.flag" ]; then
+            echo "🔄 Retraining flag found - triggering AI model retraining"
+            echo "📊 This ensures AI captures all new upcoming games and completed results"
+            git commit -m "Trigger retraining: New games or completed matches detected [skip ci]"
+          else
+            echo "📊 Checkpoint/log updates only - no retraining needed"
+            git commit -m "Update checkpoints and logs [skip ci]"
+          fi
+          
           git push
         else
           echo "✅ No updates needed - database is up to date"
