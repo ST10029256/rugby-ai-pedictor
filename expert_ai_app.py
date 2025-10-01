@@ -1150,91 +1150,111 @@ def main():
             predictions = st.session_state.predictions
             league_name = st.session_state.league_name
             
+            # Group predictions by date
+            from collections import defaultdict
+            predictions_by_date = defaultdict(list)
+            for pred in predictions:
+                predictions_by_date[pred['date']].append(pred)
             
-            # Display predictions in modern cards
-            for i, prediction in enumerate(predictions):
-                # Determine confidence level and intensity class
-                confidence_val = float(prediction['confidence'].rstrip('%'))
-                if confidence_val >= 80:
-                    conf_class = "confidence-high"
-                elif confidence_val >= 65:
-                    conf_class = "confidence-medium"
-                else:
-                    conf_class = "confidence-low"
+            # Display predictions grouped by date
+            for date in sorted(predictions_by_date.keys()):
+                # Date header
+                st.markdown(f"""
+                <div style="
+                    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+                    padding: 1rem 2rem;
+                    border-radius: 15px;
+                    margin: 2rem 0 1rem 0;
+                    text-align: center;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                ">
+                    <h2 style="color: white; margin: 0; font-size: 1.5rem;">📅 {date}</h2>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                # Determine intensity class
-                intensity = prediction['intensity']
-                if "Close" in intensity:
-                    intensity_class = "intensity-close"
-                elif "Competitive" in intensity:
-                    intensity_class = "intensity-competitive"
-                elif "Moderate" in intensity:
-                    intensity_class = "intensity-moderate"
-                else:
-                    intensity_class = "intensity-decisive"
-                
-                # Determine winner class
-                if prediction['winner'] == prediction['home_team']:
-                    winner_class = "winner-home"
-                elif prediction['winner'] == prediction['away_team']:
-                    winner_class = "winner-away"
-                else:
-                    winner_class = "winner-draw"
-                
-                # Create prediction card using Streamlit components
-                with st.container():
-                    st.markdown(f"""
-                    <div class="prediction-card fade-in-up">
-                        <div class="match-header">
-                            <h2 class="match-title">{prediction['home_team']} vs {prediction['away_team']}</h2>
-                            <p class="match-date">📅 {prediction['date']}</p>
+                # Display predictions for this date
+                for i, prediction in enumerate(predictions_by_date[date]):
+                    # Determine confidence level and intensity class
+                    confidence_val = float(prediction['confidence'].rstrip('%'))
+                    if confidence_val >= 80:
+                        conf_class = "confidence-high"
+                    elif confidence_val >= 65:
+                        conf_class = "confidence-medium"
+                    else:
+                        conf_class = "confidence-low"
+                    
+                    # Determine intensity class
+                    intensity = prediction['intensity']
+                    if "Close" in intensity:
+                        intensity_class = "intensity-close"
+                    elif "Competitive" in intensity:
+                        intensity_class = "intensity-competitive"
+                    elif "Moderate" in intensity:
+                        intensity_class = "intensity-moderate"
+                    else:
+                        intensity_class = "intensity-decisive"
+                    
+                    # Determine winner class
+                    if prediction['winner'] == prediction['home_team']:
+                        winner_class = "winner-home"
+                    elif prediction['winner'] == prediction['away_team']:
+                        winner_class = "winner-away"
+                    else:
+                        winner_class = "winner-draw"
+                    
+                    # Create prediction card using Streamlit components
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="prediction-card fade-in-up">
+                            <div class="match-header">
+                                <h2 class="match-title">{prediction['home_team']} vs {prediction['away_team']}</h2>
+                            </div>
                         </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Score display with dividers and responsive layout
-                    st.markdown("---")
-                    
-                    # Mobile-friendly layout: Team name above score
-                    col1, col2, col3 = st.columns([2, 1, 2])
-                    
-                    with col1:
-                        st.markdown(f"<div class='team-name'>{prediction['home_team']}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='team-score'>{prediction['home_score']}</div>", unsafe_allow_html=True)
-                    
-                    with col2:
-                        st.markdown("<div class='vs-text'>VS</div>", unsafe_allow_html=True)
-                    
-                    with col3:
-                        st.markdown(f"<div class='team-name'>{prediction['away_team']}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='team-score'>{prediction['away_score']}</div>", unsafe_allow_html=True)
-                    
-                    st.markdown("---")
-                    
-                    # Winner display
-                    st.markdown(f"""
-                    <div class="winner-display">
-                        <div class="winner-text {winner_class}">
-                            🏆 {prediction['winner']} Wins
+                        """, unsafe_allow_html=True)
+                        
+                        # Score display with dividers and responsive layout
+                        st.markdown("---")
+                        
+                        # Mobile-friendly layout: Team name above score
+                        col1, col2, col3 = st.columns([2, 1, 2])
+                        
+                        with col1:
+                            st.markdown(f"<div class='team-name'>{prediction['home_team']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='team-score'>{prediction['home_score']}</div>", unsafe_allow_html=True)
+                        
+                        with col2:
+                            st.markdown("<div class='vs-text'>VS</div>", unsafe_allow_html=True)
+                        
+                        with col3:
+                            st.markdown(f"<div class='team-name'>{prediction['away_team']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='team-score'>{prediction['away_score']}</div>", unsafe_allow_html=True)
+                        
+                        st.markdown("---")
+                        
+                        # Winner display
+                        st.markdown(f"""
+                        <div class="winner-display">
+                            <div class="winner-text {winner_class}">
+                                🏆 {prediction['winner']} Wins
+                            </div>
                         </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Confidence bar
-                    st.markdown(f"""
-                    <div class="confidence-bar">
-                        <div class="confidence-fill {conf_class}" style="width: {confidence_val}%">
-                            <div class="confidence-text">{prediction['confidence']} Confidence</div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Confidence bar
+                        st.markdown(f"""
+                        <div class="confidence-bar">
+                            <div class="confidence-fill {conf_class}" style="width: {confidence_val}%">
+                                <div class="confidence-text">{prediction['confidence']} Confidence</div>
+                            </div>
                         </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Intensity badge
-                    st.markdown(f"""
-                    <div class="intensity-badge {intensity_class}">
-                        📊 {prediction['intensity']}
-                    </div>
-                    """, unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
+                        
+                        # Intensity badge
+                        st.markdown(f"""
+                        <div class="intensity-badge {intensity_class}">
+                            📊 {prediction['intensity']}
+                        </div>
+                        """, unsafe_allow_html=True)
                     
             
             # Modern summary section
