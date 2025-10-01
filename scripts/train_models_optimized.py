@@ -124,7 +124,8 @@ def select_top_features(X: np.ndarray, y: np.ndarray, feature_names: List[str],
     })
     importance_df = importance_df.sort_values('importance', ascending=False)
     
-    top_features = importance_df.head(n_features)['feature'].tolist()
+    top_features_series = importance_df.head(n_features)['feature']
+    top_features: List[str] = list(top_features_series)
     
     logger.info(f"Top 10 features: {top_features[:10]}")
     
@@ -166,27 +167,40 @@ def walk_forward_validation(X: np.ndarray, y: np.ndarray, dates: pd.Series,
 
 def train_and_evaluate(X_train: np.ndarray, y_train: np.ndarray,
                       X_test: np.ndarray, y_test: np.ndarray,
-                      model_type: str, task: str = 'classification') -> Dict[str, Any]:
+                      model_type: str, task: str = 'classification') -> Dict[str, Any] | None:
     """Train and evaluate a model"""
     
     if task == 'classification':
+        # Check if y_test has sufficient label variety
+        unique_test_labels = np.unique(y_test)
+        unique_train_labels = np.unique(y_train)
+        if len(unique_test_labels) < 2 or len(unique_train_labels) < 2:
+            # Skip this split - insufficient label variety
+            return None
+        
         # Classification task
         if model_type == 'simple':
             clf_model, _ = get_simple_model()
         else:  # stacking
             clf_model, _ = get_stacking_model()
         
-        clf_model.fit(X_train, y_train)
-        y_pred = clf_model.predict(X_test)
-        y_proba = clf_model.predict_proba(X_test)
-        
-        accuracy = accuracy_score(y_test, y_pred)
-        logloss = log_loss(y_test, y_proba)
-        
-        return {
-            'accuracy': float(accuracy),
-            'log_loss': float(logloss)
-        }
+        try:
+            clf_model.fit(X_train, y_train)
+            y_pred = clf_model.predict(X_test)
+            y_proba = clf_model.predict_proba(X_test)
+            
+            accuracy = accuracy_score(y_test, y_pred)
+            # Use explicit labels to handle edge cases
+            logloss = log_loss(y_test, y_proba, labels=[0, 1])
+            
+            return {
+                'accuracy': float(accuracy),
+                'log_loss': float(logloss)
+            }
+        except (ValueError, RuntimeError) as e:
+            # Handle sklearn errors with imbalanced data
+            logger.warning(f"  Skipping {model_type} model - sklearn error: {str(e)[:100]}")
+            return None
     else:
         # Regression task
         if model_type == 'simple':
@@ -267,29 +281,94 @@ def train_league_optimized(league_id: int, db_path: str) -> Dict[str, Any] | Non
         y_home_train, y_home_test = y_home[train_idx], y_home[test_idx]
         y_away_train, y_away_test = y_away[train_idx], y_away[test_idx]
         
+        # Check if test set has sufficient label variety
+        unique_test_labels = np.unique(y_clf_test)
+        if len(unique_test_labels) < 2:
+            logger.warning(f"  Skipping split {split_idx + 1} - insufficient label variety in test set (only {unique_test_labels})")
+            continue
+        
         # Test both model types
         for model_type in ['simple', 'stacking']:
             # Classification
             clf_results = train_and_evaluate(X_train, y_clf_train, X_test, y_clf_test,
                                             model_type, 'classification')
+            if clf_results is None:
+                continue
             results[model_type]['clf_acc'].append(clf_results['accuracy'])
             
             # Regression (home)
             home_results = train_and_evaluate(X_train, y_home_train, X_test, y_home_test,
                                              model_type, 'regression')
-            results[model_type]['home_mae'].append(home_results['mae'])
+            if home_results:
+                results[model_type]['home_mae'].append(home_results['mae'])
+            else:
+                continue
             
             # Regression (away)
             away_results = train_and_evaluate(X_train, y_away_train, X_test, y_away_test,
                                              model_type, 'regression')
-            results[model_type]['away_mae'].append(away_results['mae'])
+            if away_results:
+                results[model_type]['away_mae'].append(away_results['mae'])
+            else:
+                continue
         
-        logger.info(f"  Simple - Acc: {results['simple']['clf_acc'][-1]:.3f}, "
-                   f"Home MAE: {results['simple']['home_mae'][-1]:.2f}, "
-                   f"Away MAE: {results['simple']['away_mae'][-1]:.2f}")
-        logger.info(f"  Stack  - Acc: {results['stacking']['clf_acc'][-1]:.3f}, "
-                   f"Home MAE: {results['stacking']['home_mae'][-1]:.2f}, "
-                   f"Away MAE: {results['stacking']['away_mae'][-1]:.2f}")
+        # Only log if we have results for this split
+        if len(results['simple']['clf_acc']) > 0 and len(results['simple']['home_mae']) > 0:
+            logger.info(f"  Simple - Acc: {results['simple']['clf_acc'][-1]:.3f}, "
+                       f"Home MAE: {results['simple']['home_mae'][-1]:.2f}, "
+                       f"Away MAE: {results['simple']['away_mae'][-1]:.2f}")
+        if len(results['stacking']['clf_acc']) > 0 and len(results['stacking']['home_mae']) > 0:
+            logger.info(f"  Stack  - Acc: {results['stacking']['clf_acc'][-1]:.3f}, "
+                       f"Home MAE: {results['stacking']['home_mae'][-1]:.2f}, "
+                       f"Away MAE: {results['stacking']['away_mae'][-1]:.2f}")
+    
+    # Check if we have any valid results
+    if len(results['simple']['clf_acc']) == 0 and len(results['stacking']['clf_acc']) == 0:
+        logger.warning(f"No valid splits for league {league_id} - insufficient label variety across all splits")
+        logger.info("Using simple model with full dataset (no cross-validation)")
+        
+        # Train on full dataset without validation
+        clf_model, reg_home = get_simple_model()
+        _, reg_away = get_simple_model()
+        
+        clf_model.fit(X_selected, y_clf)
+        reg_home.fit(X_selected, y_home)
+        reg_away.fit(X_selected, y_away)
+        
+        # Estimate performance on full dataset
+        y_clf_pred = clf_model.predict(X_selected)
+        full_accuracy = accuracy_score(y_clf, y_clf_pred)
+        
+        y_home_pred = reg_home.predict(X_selected)
+        y_away_pred = reg_away.predict(X_selected)
+        full_home_mae = mean_absolute_error(y_home, y_home_pred)
+        full_away_mae = mean_absolute_error(y_away, y_away_pred)
+        
+        logger.info(f"Full dataset performance: Acc={full_accuracy:.3f}, Home MAE={full_home_mae:.2f}, Away MAE={full_away_mae:.2f}")
+        
+        # Create model package
+        model_package = {
+            'league_id': league_id,
+            'league_name': LEAGUE_CONFIGS[league_id]['name'],
+            'trained_at': datetime.now().isoformat(),
+            'training_games': len(hist),
+            'model_type': 'simple',
+            'feature_columns': top_features,
+            'scaler': None,
+            'performance': {
+                'winner_accuracy': float(full_accuracy),
+                'home_mae': float(full_home_mae),
+                'away_mae': float(full_away_mae),
+                'overall_mae': float((full_home_mae + full_away_mae) / 2)
+            },
+            'models': {
+                'clf': clf_model,
+                'reg_home': reg_home,
+                'reg_away': reg_away
+            }
+        }
+        conn.close()
+        return model_package
     
     # Calculate averages
     comparison = {}
