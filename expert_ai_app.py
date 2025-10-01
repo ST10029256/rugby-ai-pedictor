@@ -113,13 +113,8 @@ def load_model_safely(league_id: int):
     try:
         model_path = f'artifacts/league_{league_id}_model.pkl'
         if os.path.exists(model_path):
-            st.info(f"Loading legacy model from {model_path}")
-            
             # Use the module-level XGBoost availability check
             xgboost_available = XGBOOST_AVAILABLE
-            st.info(f"XGBoost status: Available={xgboost_available}, Version={XGBOOST_VERSION}")
-            if not xgboost_available:
-                st.warning("XGBoost not available, creating simplified model")
             
             # Ensure XGBoost is available during pickle loading
             if XGBOOST_AVAILABLE:
@@ -131,12 +126,9 @@ def load_model_safely(league_id: int):
             with open(model_path, 'rb') as f:
                 model_data = pickle.load(f)
             
-            st.success("Legacy model loaded successfully")
-            
             # Check if it's a legacy model with XGBoost
             if 'models' in model_data and 'gbdt_clf' in model_data['models']:
                 if not xgboost_available:
-                    st.info("Creating simplified model without XGBoost")
                     # Create a simplified model without XGBoost - avoid accessing gbdt_clf
                     simplified_model = {
                         'league_id': model_data['league_id'],
@@ -152,11 +144,9 @@ def load_model_safely(league_id: int):
                         },
                         'model_type': 'simplified_legacy'
                     }
-                    st.success("Simplified model created successfully")
                     return simplified_model
                 else:
                     # XGBoost is available, use the full model
-                    st.success("Full model with XGBoost loaded successfully")
                     return model_data
             
             return model_data
