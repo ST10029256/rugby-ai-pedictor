@@ -1,10 +1,10 @@
 {
-  "last_updated": "2025-10-01T11:13:09.503324",
+  "last_updated": "2025-10-01T11:31:06.611812",
   "optimization_enabled": true,
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2025-10-01T11:10:27.377857",
+      "trained_at": "2025-10-01T11:28:24.583396",
       "training_games": 142,
       "model_type": "stacking",
       "performance": {
@@ -20,7 +20,7 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2025-10-01T11:10:58.874797",
+      "trained_at": "2025-10-01T11:28:56.016876",
       "training_games": 298,
       "model_type": "stacking",
       "performance": {
@@ -36,7 +36,7 @@
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2025-10-01T11:11:34.948939",
+      "trained_at": "2025-10-01T11:29:31.980156",
       "training_games": 345,
       "model_type": "stacking",
       "performance": {
@@ -52,7 +52,7 @@
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2025-10-01T11:11:49.504315",
+      "trained_at": "2025-10-01T11:29:46.454358",
       "training_games": 152,
       "model_type": "stacking",
       "performance": {
@@ -68,7 +68,7 @@
     },
     "4551": {
       "name": "Super Rugby",
-      "trained_at": "2025-10-01T11:12:17.897264",
+      "trained_at": "2025-10-01T11:30:14.728771",
       "training_games": 259,
       "model_type": "stacking",
       "performance": {
@@ -84,7 +84,7 @@
     },
     "4430": {
       "name": "French Top 14",
-      "trained_at": "2025-10-01T11:12:47.783483",
+      "trained_at": "2025-10-01T11:30:44.370620",
       "training_games": 271,
       "model_type": "stacking",
       "performance": {
@@ -100,14 +100,14 @@
     },
     "4414": {
       "name": "English Premiership Rugby",
-      "trained_at": "2025-10-01T11:13:09.306055",
-      "training_games": 175,
+      "trained_at": "2025-10-01T11:31:06.424513",
+      "training_games": 181,
       "model_type": "stacking",
       "performance": {
-        "winner_accuracy": 0.5764705882352941,
-        "home_mae": 8.874157058057689,
-        "away_mae": 7.893780170761159,
-        "overall_mae": 8.383968614409424
+        "winner_accuracy": 0.611111111111111,
+        "home_mae": 9.285359612043598,
+        "away_mae": 7.8519554655418435,
+        "overall_mae": 8.56865753879272
       },
       "feature_selection": {
         "original": 57,
