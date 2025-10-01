@@ -46,8 +46,8 @@ jobs:
     - name: Retrain models
       if: steps.check-retrain.outputs.retrain_needed == 'true'
       run: |
-        echo "🤖 Retraining AI models..."
-        python scripts/train_models.py
+        echo "🤖 Retraining AI models with optimized training..."
+        python scripts/train_models_optimized.py
         
     - name: Clean up retraining flag
       if: always()
