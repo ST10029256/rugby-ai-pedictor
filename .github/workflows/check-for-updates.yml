@@ -1,10 +1,9 @@
 name: Check for Game Updates
 
 on:
-  # Temporarily disabled to fix duplicate issues
-  # push:
-  #   branches: [ main ]
-  workflow_dispatch:  # Allow manual triggering only
+  schedule:
+    - cron: '0 */6 * * *'  # Run every 6 hours (4 times per day)
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
   check-for-updates:

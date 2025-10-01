@@ -315,22 +315,24 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
             if not home_team_id or not away_team_id:
                 continue
             
-            # Check if event exists (check by DATE only, ignoring time)
+            # BULLETPROOF: Check by league, DATE (no time), and teams
             cursor.execute("""
                 SELECT id, home_score, away_score, date_event
                 FROM event 
-                WHERE home_team_id = ? AND away_team_id = ? 
+                WHERE league_id = ?
+                AND home_team_id = ? 
+                AND away_team_id = ? 
                 AND DATE(date_event) = DATE(?)
-            """, (home_team_id, away_team_id, game['date_event']))
+            """, (game['league_id'], home_team_id, away_team_id, game['date_event']))
             
             existing = cursor.fetchone()
             
             if existing:
                 event_id, existing_home_score, existing_away_score, existing_date = existing
                 
-                # Update scores if they're available and different
+                # Only update if we have NEW score data (game completed)
                 if (game['home_score'] is not None and game['away_score'] is not None and
-                    (existing_home_score != game['home_score'] or existing_away_score != game['away_score'])):
+                    existing_home_score is None):  # Only update if previously had no score
                     
                     cursor.execute("""
                         UPDATE event 
@@ -339,12 +341,25 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                     """, (game['home_score'], game['away_score'], event_id))
                     
                     updated_count += 1
-                    logger.info(f"Updated: {game['home_team']} {game['home_score']}-{game['away_score']} {game['away_team']} ({game['date_event']})")
-                
-                # Skip adding - game already exists
-                logger.debug(f"Skipped duplicate: {game['home_team']} vs {game['away_team']} on {game['date_event']}")
+                    logger.info(f"Score added: {game['home_team']} {game['home_score']}-{game['away_score']} {game['away_team']}")
+                else:
+                    # Game already exists - skip silently (prevent duplicates)
+                    logger.debug(f"Skipped existing: {game['home_team']} vs {game['away_team']} on {game['date_event']}")
             else:
-                # Insert new event
+                # DOUBLE-CHECK before inserting (extra safety)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM event
+                    WHERE league_id = ?
+                    AND home_team_id = ?
+                    AND away_team_id = ?
+                    AND DATE(date_event) = DATE(?)
+                """, (game['league_id'], home_team_id, away_team_id, game['date_event']))
+                
+                if cursor.fetchone()[0] > 0:
+                    logger.debug(f"Double-check prevented duplicate: {game['home_team']} vs {game['away_team']}")
+                    continue
+                
+                # Safe to insert
                 cursor.execute("""
                     INSERT INTO event (home_team_id, away_team_id, date_event, home_score, away_score, league_id)
                     VALUES (?, ?, ?, ?, ?, ?)
