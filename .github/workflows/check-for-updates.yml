@@ -45,6 +45,11 @@ jobs:
         echo "🏉 This will capture ALL new upcoming games and completed results"
         python scripts/enhanced_auto_update.py --db data.sqlite --verbose
         
+    - name: Post-update duplicate cleanup
+      run: |
+        echo "🧹 Running post-update cleanup..."
+        python cleanup_duplicates_post_update.py
+        
     - name: Commit changes and trigger retraining if needed
       if: always()
       run: |
