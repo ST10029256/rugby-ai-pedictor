@@ -70,6 +70,11 @@ jobs:
             git commit -m "Update checkpoints and logs [skip ci]"
           fi
           
+          # Pull before push to handle concurrent updates
+          echo "🔄 Pulling latest changes..."
+          git pull --rebase origin main || git pull origin main
+          
+          # Push changes
           git push
         else
           echo "✅ No updates needed - database is up to date"
