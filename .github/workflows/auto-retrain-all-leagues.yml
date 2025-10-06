@@ -70,6 +70,17 @@ jobs:
           git push
         fi
         
+    - name: Trigger Streamlit Cloud Redeploy
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      run: |
+        echo "🚀 Triggering Streamlit Cloud redeployment..."
+        # Create a timestamp file to force Streamlit redeploy
+        echo "# Auto-redeploy trigger: $(date)" > .streamlit_redeploy_trigger
+        git add .streamlit_redeploy_trigger
+        git commit -m "Trigger Streamlit redeploy: Models updated $(date) [skip ci]"
+        git push
+        echo "✅ Streamlit Cloud redeployment triggered successfully"
+        
     - name: Upload training logs
       if: steps.check-retrain.outputs.retrain_needed == 'true'
       uses: actions/upload-artifact@v4
