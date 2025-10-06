@@ -7,6 +7,11 @@ on:
     paths:
       - 'data.sqlite'  # Trigger when database is updated
       - 'retrain_needed.flag'  # Trigger when retraining flag is created
+      - 'artifacts_optimized/**'  # Trigger when models are updated
+  pull_request:
+    paths:
+      - 'data.sqlite'
+      - 'retrain_needed.flag'
 
 jobs:
   retrain-models:
