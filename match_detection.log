@@ -108,3 +108,6 @@
 2025-10-07 00:45:56,194 - INFO - Completed: None 0-0 None (Unknown)
 2025-10-07 00:45:56,195 - INFO - No leagues need retraining
 2025-10-07 00:45:56,196 - INFO - Saved checkpoint: 2025-10-07T00:45:56.195080
+2025-10-07 06:16:25,093 - INFO - Starting match completion detection and retraining
+2025-10-07 06:16:25,093 - INFO - No new completed matches found
+2025-10-07 06:16:25,094 - INFO - Saved checkpoint: 2025-10-07T06:16:25.093966
