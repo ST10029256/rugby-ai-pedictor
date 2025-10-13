@@ -8,9 +8,9 @@
     4430,
     4414
   ],
-  "games_updated": 1,
-  "timestamp": "2025-10-13T12:25:20.228856",
+  "games_updated": 2,
+  "timestamp": "2025-10-13T18:21:03.441017",
   "reason": "new_games_fetched",
   "trigger": "comprehensive_data_update",
-  "description": "Found 1 new/updated games from TheSportsDB - retraining all models to capture latest data"
+  "description": "Found 2 new/updated games from TheSportsDB - retraining all models to capture latest data"
 }
