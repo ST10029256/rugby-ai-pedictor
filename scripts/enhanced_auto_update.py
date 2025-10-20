@@ -11,6 +11,7 @@ import logging
 import requests
 import json
 import time
+import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
@@ -81,33 +82,45 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
         else:  # Other leagues - try both formats
             season_formats = ['2025', '2024-2025', '2024', '2023-2024', '2023', '2022-2023', '2022', '2021-2022', '2021', '2020-2021', '2020', '2019-2020', '2019', '2018-2019', '2018', '2017-2018', '2017', '2016-2017', '2016', '2015-2016', '2015', '2014-2015', '2014', '2013-2014', '2013', '2012-2013', '2012', '2011-2012', '2011', '2010-2011', '2010']
         
-        # Build URLs based on league-specific season formats
+        # OPTIMIZED: Only fetch upcoming games - historical data already exists!
         urls_to_try = []
-        for season in season_formats:
+        
+        # ONLY upcoming games endpoints (no historical data needed)
+        urls_to_try.extend([
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id={sportsdb_id}",
+            f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}"
+        ])
+        
+        # ONLY current season for upcoming games (2024-2025 or 2024)
+        current_seasons = ['2024-2025', '2024'] if sportsdb_id in [4430, 4414] else ['2024']
+        for season in current_seasons:
             urls_to_try.extend([
                 f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
                 f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
             ])
         
-        # Add general endpoints
+        # Add general upcoming games endpoint
         urls_to_try.extend([
-            f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}"
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}"
         ])
         
-        for url in urls_to_try:
+        for i, url in enumerate(urls_to_try):
             try:
                 logger.debug(f"Trying URL: {url}")
-                # Add rate limiting delay to avoid 429 errors
-                time.sleep(0.5)  # 500ms delay between requests
+                
+                # Add progressive delay to avoid rate limiting
+                if i > 0:
+                    delay = random.uniform(1.0, 2.5)  # Random delay between 1-2.5 seconds
+                    logger.debug(f"Waiting {delay:.1f}s to avoid rate limiting...")
+                    time.sleep(delay)
+                else:
+                    time.sleep(0.5)  # Short delay for first request
                 
                 response = requests.get(url, timeout=30)
                 
                 if response.status_code == 429:
-                    logger.warning(f"Rate limited (429) - skipping URL: {url}")
+                    logger.warning(f"Rate limited (429) - waiting longer before next request...")
+                    time.sleep(random.uniform(5.0, 10.0))  # Wait 5-10 seconds on rate limit
                     continue
                 
                 if response.status_code == 200:
@@ -392,31 +405,50 @@ def main():
     
     total_updated = 0
     
-    # Update each league
-    for league_id, league_info in LEAGUE_MAPPINGS.items():
-        league_name = league_info['name']
-        sportsdb_id = league_info['sportsdb_id']
-        
-        try:
-            # Fetch games from TheSportsDB
-            games = fetch_games_from_sportsdb(league_id, sportsdb_id, league_name)
+    # OPTIMIZED: Only update leagues currently in season - historical data already exists!
+    # Leagues currently in season (October 2024)
+    current_season_leagues = [4414, 4430, 4446]  # English Premiership, French Top 14, URC
+    
+    logger.info(f"🎯 OPTIMIZED MODE: Only fetching upcoming games for {len(current_season_leagues)} current season leagues")
+    logger.info("📚 Historical data already exists - AI models trained locally!")
+    
+    # Process ONLY current season leagues
+    for league_id in current_season_leagues:
+        if league_id in LEAGUE_MAPPINGS:
+            league_info = LEAGUE_MAPPINGS[league_id]
+            league_name = league_info['name']
+            sportsdb_id = league_info['sportsdb_id']
             
-            if games:
-                # Update database
-                updated = update_database_with_games(conn, games)
-                total_updated += updated
-                logger.info(f"✅ {league_name}: Updated {updated} games")
-            else:
-                logger.warning(f"⚠️ {league_name}: No games found from API")
+            logger.info(f"🔄 Fetching UPCOMING games for {league_name} (SportsDB ID: {sportsdb_id})")
             
-            # Check for and add any missing games
-            missing_added = detect_and_add_missing_games(conn, league_id, league_name)
-            if missing_added > 0:
-                total_updated += missing_added
-                logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing games")
+            try:
+                # Fetch ONLY upcoming games from TheSportsDB
+                games = fetch_games_from_sportsdb(league_id, sportsdb_id, league_name)
                 
-        except Exception as e:
-            logger.error(f"❌ {league_name}: Failed to update - {e}")
+                if games:
+                    # Update database
+                    updated = update_database_with_games(conn, games)
+                    total_updated += updated
+                    logger.info(f"✅ {league_name}: Updated {updated} upcoming games")
+                else:
+                    logger.warning(f"⚠️ {league_name}: No upcoming games found from API")
+                
+                # Check for and add any missing upcoming games
+                missing_added = detect_and_add_missing_games(conn, league_id, league_name)
+                if missing_added > 0:
+                    total_updated += missing_added
+                    logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error updating {league_name}: {e}")
+    
+    # Skip historical leagues - they don't need updates!
+    historical_leagues = [league_id for league_id in LEAGUE_MAPPINGS.keys() if league_id not in current_season_leagues]
+    if historical_leagues:
+        logger.info(f"⏭️ Skipping {len(historical_leagues)} historical leagues - data already exists!")
+        for league_id in historical_leagues:
+            league_name = LEAGUE_MAPPINGS[league_id]['name']
+            logger.info(f"   📚 {league_name} - historical data preserved")
     
     conn.close()
     
