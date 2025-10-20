@@ -50,6 +50,8 @@ jobs:
         
     - name: Retrain models
       if: steps.check-retrain.outputs.retrain_needed == 'true'
+      env:
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
       run: |
         echo "🤖 Retraining AI models with optimized training..."
         python scripts/train_models_optimized.py

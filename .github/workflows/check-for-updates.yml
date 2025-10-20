@@ -31,15 +31,17 @@ jobs:
       env:
         THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
       run: |
         echo "🔍 Checking for completed matches..."
         echo "📊 This will detect ALL completed matches from TheSportsDB"
         python scripts/detect_completed_matches.py --db data.sqlite --verbose
-        
+
     - name: Check for new games and upcoming fixtures
       env:
         THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
       run: |
         echo "📥 Checking for new games and upcoming fixtures..."
         echo "🏉 This will capture ALL new upcoming games and completed results"
