@@ -91,8 +91,8 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
             f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}"
         ])
         
-        # ONLY current season for upcoming games (2024-2025 or 2024)
-        current_seasons = ['2024-2025', '2024'] if sportsdb_id in [4430, 4414] else ['2024']
+        # ONLY current season for upcoming games (2025-2026 or 2025)
+        current_seasons = ['2025-2026', '2025'] if sportsdb_id in [4430, 4414] else ['2025']
         for season in current_seasons:
             urls_to_try.extend([
                 f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
@@ -102,6 +102,20 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
         # Add general upcoming games endpoint
         urls_to_try.extend([
             f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}"
+        ])
+        
+        # Add more specific endpoints for this week (October 2025) - check more rounds
+        urls_to_try.extend([
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=1&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=2&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=3&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=4&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=5&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=6&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=7&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=8&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=9&s=2025-2026",
+            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=10&s=2025-2026"
         ])
         
         for i, url in enumerate(urls_to_try):
@@ -204,19 +218,15 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
     """Detect and add missing games by checking TheSportsDB website data."""
     logger.info(f"Checking for missing games in {league_name}...")
     
-    # Known missing games that should be added automatically
+    # No manual games - only use real API data
     missing_games_map = {
-        4446: [  # URC
-            {"date": "2025-10-05", "home": "Zebre", "away": "Lions"},
-            {"date": "2025-10-10", "home": "Munster", "away": "Edinburgh"},
-            {"date": "2025-10-10", "home": "Scarlets", "away": "Stormers"},
-        ],
+        4446: [],  # URC
+        4414: [],  # English Premiership
+        4430: [],  # French Top 14
         4986: [],  # Rugby Championship
         5069: [],  # Currie Cup
         4574: [],  # Rugby World Cup
         4551: [],  # Super Rugby
-        4430: [],  # French Top 14
-        4414: []   # English Premiership Rugby
     }
     
     missing_games = missing_games_map.get(league_id, [])
