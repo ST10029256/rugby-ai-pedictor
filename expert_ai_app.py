@@ -2109,9 +2109,9 @@ def main():
                     existing_home = float(existing.get('home', 0.0) or 0.0)
                     existing_away = float(existing.get('away', 0.0) or 0.0)
                     with col_b:
-                        home_input = st.number_input("Home", min_value=0.0, step=0.01, format="%.2f", key=f"home_input::{manual_key}", value=existing_home)
+                        home_input = st.number_input(f"{home_name}", min_value=1.01, step=0.01, format="%.2f", key=f"home_input::{manual_key}", value=max(1.01, existing_home))
                     with col_c:
-                        away_input = st.number_input("Away", min_value=0.0, step=0.01, format="%.2f", key=f"away_input::{manual_key}", value=existing_away)
+                        away_input = st.number_input(f"{away_name}", min_value=1.01, step=0.01, format="%.2f", key=f"away_input::{manual_key}", value=max(1.01, existing_away))
                     # Persist if any provided
                     if home_input > 0 or away_input > 0:
                         st.session_state[id_key] = {"home": home_input, "away": away_input}
