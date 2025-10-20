@@ -730,8 +730,10 @@ def make_expert_prediction(game_row, model_data, team_names):
                 predicted_away_score = 18
         
         # HYBRID PREDICTION: Combine AI + Manual Odds (if provided in session)
+        # Prefer stable ID-based key, fallback to name-based
+        id_key_pred = f"manual_odds_by_ids::{home_id}::{away_id}::{match_date}"
         manual_key = f"manual_odds::{home_name}::{away_name}::{match_date}"
-        manual_odds = st.session_state.get(manual_key)
+        manual_odds = st.session_state.get(id_key_pred) or st.session_state.get(manual_key)
         if manual_odds and manual_odds.get('home') and manual_odds.get('away'):
             try:
                 home_decimal = float(manual_odds['home'])
@@ -817,8 +819,10 @@ def make_expert_prediction(game_row, model_data, team_names):
         }
         
         # Add indicators (odds now manual)
+        prediction['home_team_id'] = home_id
+        prediction['away_team_id'] = away_id
         prediction['has_live_data'] = bool(highlightly_data)
-        prediction['live_odds_available'] = bool(st.session_state.get(manual_key))
+        prediction['live_odds_available'] = bool(st.session_state.get(id_key_pred) or st.session_state.get(manual_key))
         prediction['team_form_available'] = bool(highlightly_data.get('team_form')) if highlightly_data else False
         prediction['head_to_head_available'] = bool(highlightly_data.get('head_to_head')) if highlightly_data else False
         prediction['standings_available'] = bool(highlightly_data.get('standings')) if highlightly_data else False
@@ -2096,11 +2100,12 @@ def main():
                     away_name = team_names.get(away_id, f"Team {away_id}")
                     date_str = str(game.get('date_event', ''))[:10]
                     manual_key = f"manual_odds::{home_name}::{away_name}::{date_str}"
+                    id_key = f"manual_odds_by_ids::{home_id}::{away_id}::{date_str}"
                     col_a, col_b, col_c = st.columns([2, 1, 1])
                     with col_a:
                         st.markdown(f"**{home_name} vs {away_name}** — {date_str}")
                     # Load existing values if set
-                    existing = st.session_state.get(manual_key, {})
+                    existing = st.session_state.get(id_key) or st.session_state.get(manual_key, {})
                     existing_home = float(existing.get('home', 0.0) or 0.0)
                     existing_away = float(existing.get('away', 0.0) or 0.0)
                     with col_b:
@@ -2109,6 +2114,7 @@ def main():
                         away_input = st.number_input("Away", min_value=0.0, step=0.01, format="%.2f", key=f"away_input::{manual_key}", value=existing_away)
                     # Persist if any provided
                     if home_input > 0 or away_input > 0:
+                        st.session_state[id_key] = {"home": home_input, "away": away_input}
                         st.session_state[manual_key] = {"home": home_input, "away": away_input}
             except Exception:
                 pass
@@ -2268,8 +2274,11 @@ def main():
                             home_name = prediction.get('home_team', 'Home')
                             away_name = prediction.get('away_team', 'Away')
                             date_key = prediction.get('date', 'TBD')
+                            home_id_disp = prediction.get('home_team_id')
+                            away_id_disp = prediction.get('away_team_id')
+                            id_key_disp = f"manual_odds_by_ids::{home_id_disp}::{away_id_disp}::{date_key}"
                             manual_key = f"manual_odds::{home_name}::{away_name}::{date_key}"
-                            manual_odds = st.session_state.get(manual_key)
+                            manual_odds = st.session_state.get(id_key_disp) or st.session_state.get(manual_key)
                             if manual_odds:
                                 home_odds = manual_odds.get('home', 'N/A')
                                 away_odds = manual_odds.get('away', 'N/A')
