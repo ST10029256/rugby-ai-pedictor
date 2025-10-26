@@ -337,3 +337,14 @@
 2025-10-25 18:13:37,994 - INFO - Starting match completion detection and retraining
 2025-10-25 18:13:37,995 - INFO - No new completed matches found
 2025-10-25 18:13:37,995 - INFO - Saved checkpoint: 2025-10-25T18:13:37.995434
+2025-10-26 00:53:00,736 - INFO - Starting match completion detection and retraining
+2025-10-26 00:53:00,737 - INFO - Found 5 completed matches
+2025-10-26 00:53:00,737 - INFO - Completed: Lions 49-31 Ulster (United Rugby Championship)
+2025-10-26 00:53:00,737 - INFO - Completed: Benetton 16-8 Stormers (United Rugby Championship)
+2025-10-26 00:53:00,737 - INFO - Completed: Dragons 7-12 Ospreys (United Rugby Championship)
+2025-10-26 00:53:00,737 - INFO - Completed: Leinster 26-21 Zebre (United Rugby Championship)
+2025-10-26 00:53:00,737 - INFO - Completed: The Sharks 29-19 Scarlets (United Rugby Championship)
+2025-10-26 00:53:00,737 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2025-10-26 00:53:00,737 - INFO - Leagues to retrain: [4446]
+2025-10-26 00:53:00,737 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2025-10-26 00:53:00,738 - INFO - Saved checkpoint: 2025-10-26T00:53:00.737979
