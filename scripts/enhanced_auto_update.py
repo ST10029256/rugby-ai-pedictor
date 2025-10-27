@@ -163,7 +163,8 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                             try:
                                 # Parse event data
                                 event_id = safe_to_int(event.get('idEvent'))
-                                date_str = event.get('dateEvent')
+                                # Robust date extraction: try multiple fields and formats
+                                date_str = event.get('dateEvent') or event.get('dateEventLocal')
                                 home_team = event.get('strHomeTeam', '').strip()
                                 away_team = event.get('strAwayTeam', '').strip()
                                 home_score = event.get('intHomeScore')
@@ -173,9 +174,26 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                                     continue
                                 
                                 # Convert date
+                                event_date = None
                                 try:
-                                    event_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                                except:
+                                    if date_str:
+                                        # Common 'YYYY-MM-DD'
+                                        try:
+                                            event_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                                        except Exception:
+                                            # Sometimes includes time; take date part
+                                            try:
+                                                event_date = datetime.strptime(date_str[:10], '%Y-%m-%d').date()
+                                            except Exception:
+                                                event_date = None
+                                    if event_date is None:
+                                        # Fallback to timestamp if available
+                                        ts = event.get('strTimestamp') or event.get('dateEventTimestamp')
+                                        if isinstance(ts, str) and len(ts) >= 10:
+                                            event_date = datetime.strptime(ts[:10], '%Y-%m-%d').date()
+                                except Exception:
+                                    event_date = None
+                                if event_date is None:
                                     continue
                                 
                                 # Convert scores
