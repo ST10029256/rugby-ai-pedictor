@@ -3,6 +3,10 @@ name: Retrain AI Models
 on:
   # Only run when there are actual changes - no scheduled runs
   workflow_dispatch:  # Allow manual triggering
+  workflow_run:
+    workflows: ["Check for Game Updates"]
+    types:
+      - completed
   push:
     paths:
       - 'data.sqlite'  # Trigger when database is updated
@@ -15,6 +19,7 @@ on:
 
 jobs:
   retrain-models:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Allow pushing changes back to repository
