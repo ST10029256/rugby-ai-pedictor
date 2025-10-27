@@ -2,7 +2,7 @@ name: Check for Game Updates
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Run every 6 hours (4 times per day)
+    - cron: '0 22 * * *'  # Run daily at 22:00 UTC (00:00 SAST)
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
