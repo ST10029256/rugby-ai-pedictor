@@ -15,6 +15,14 @@ import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
+# Try to import Highlightly API
+try:
+    from prediction.highlightly_client import HighlightlyRugbyAPI
+    HIGHLIGHTLY_AVAILABLE = True
+except ImportError:
+    HighlightlyRugbyAPI = None  # type: ignore
+    HIGHLIGHTLY_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -133,13 +141,17 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
             f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=10&s=2025-2026"
         ])
 
-        # Friendlies special coverage: query events by day for the next 30 days (captures scattered fixtures)
+        # Friendlies special coverage: query events by day for November 2025
+        # Target the key dates when international friendlies are scheduled
         if sportsdb_id == 5479:
             try:
                 from datetime import date, timedelta as _td
-                start = datetime.utcnow().date()
-                for i in range(0, 30):
-                    d = (start + _td(days=i)).strftime('%Y-%m-%d')
+                # Fetch November 2025 fixtures - key dates for international friendlies
+                november_dates = [
+                    '2025-11-01', '2025-11-02', '2025-11-08', '2025-11-09', 
+                    '2025-11-15', '2025-11-16', '2025-11-22', '2025-11-23'
+                ]
+                for d in november_dates:
                     urls_to_try.extend([
                         f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d={d}&s=Rugby",
                         f"https://www.thesportsdb.com/api/v1/json/1/eventsday.php?d={d}&s=Rugby",
@@ -178,12 +190,15 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                                 # Filter to correct league for day-based queries
                                 ev_league_id = event.get('idLeague') or event.get('idleague')
                                 ev_league_name = (event.get('strLeague') or '').lower()
-                                if ev_league_id and str(ev_league_id) != str(sportsdb_id):
-                                    # Friendlies often labeled as "International/Autumn/November/Test"; accept these too
-                                    if 'eventsday' in url:
-                                        allowed = any(k in ev_league_name for k in ['friend', 'international', 'november', 'autumn', 'test'])
-                                        if not allowed:
-                                            continue
+                                
+                                # For International Friendlies (5479), accept ALL rugby matches from eventsday.php
+                                # since friendlies are scattered across different competitions
+                                if sportsdb_id == 5479 and 'eventsday' in url:
+                                    # Accept all rugby matches when using day-based queries for friendlies
+                                    pass  # Don't filter by league ID for friendlies day queries
+                                elif ev_league_id and str(ev_league_id) != str(sportsdb_id):
+                                    # For other queries, filter by exact league ID match
+                                    continue
                                 # Parse event data
                                 event_id = safe_to_int(event.get('idEvent'))
                                 # Robust date extraction: try multiple fields and formats
@@ -195,6 +210,31 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                                 
                                 if not home_team or not away_team:
                                     continue
+                                
+                                # CRITICAL: For International Friendlies (5479), only accept matches where both teams
+                                # look like national teams (end with "Rugby" like "England Rugby", "Scotland Rugby")
+                                # or are known country names without club names
+                                if sportsdb_id == 5479 and 'eventsday' in url:
+                                    # List of countries with their common rugby names
+                                    rugby_countries = ['england', 'scotland', 'wales', 'ireland', 'france', 'italy', 'spain', 
+                                                     'portugal', 'argentina', 'chile', 'uruguay', 'brazil', 'usa', 'canada',
+                                                     'samoa', 'tonga', 'fiji', 'japan', 'south korea', 'hong kong',
+                                                     'new zealand', 'australia', 'south africa', 'namibia', 'zimbabwe',
+                                                     'georgia', 'romania', 'russia', 'portugal', 'germany', 'belgium', 'netherlands']
+                                    home_lower = home_team.lower()
+                                    away_lower = away_team.lower()
+                                    
+                                    # Check if both teams end with "Rugby" (like "England Rugby", "Scotland Rugby")
+                                    is_national_home = home_team.endswith(' Rugby')
+                                    is_national_away = away_team.endswith(' Rugby')
+                                    
+                                    # Check if both teams are country names
+                                    is_country_home = any(country in home_lower for country in rugby_countries)
+                                    is_country_away = any(country in away_lower for country in rugby_countries)
+                                    
+                                    # Accept if BOTH teams look like national teams
+                                    if not ((is_national_home and is_national_away) or (is_country_home and is_country_away and not 'club' in home_lower and not 'club' in away_lower)):
+                                        continue  # Skip club matches
                                 
                                 # Convert date
                                 event_date = None
@@ -380,6 +420,82 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
     logger.info(f"Added {len(games)} manual URC fixtures")
     return games
 
+def fetch_highlightly_friendlies(conn: sqlite3.Connection, league_id: int, league_name: str, sportsdb_id: int) -> int:
+    """Fetch international friendlies from Highlightly API for upcoming months"""
+    
+    if not HIGHLIGHTLY_AVAILABLE or HighlightlyRugbyAPI is None:
+        logger.info("Highlightly API not available, skipping Highlightly fetch")
+        return 0
+    
+    if sportsdb_id != 5479:  # Only for International Friendlies
+        return 0
+    
+    logger.info(f"Fetching international friendlies from Highlightly API for {league_name}...")
+    
+    api_key = os.getenv('HIGHLIGHTLY_API_KEY', '9c27c5f8-9437-4d42-8cc9-5179d3290a5b')
+    api = HighlightlyRugbyAPI(api_key)
+    
+    # Target upcoming months for friendlies
+    current_date = datetime.now().date()
+    upcoming_dates = []
+    
+    # Get friendlies for next 2 months
+    for i in range(60):
+        target_date = current_date + timedelta(days=i)
+        if target_date.month in [10, 11, 12]:  # October, November, December
+            upcoming_dates.append(target_date.strftime('%Y-%m-%d'))
+    
+    added_count = 0
+    cursor = conn.cursor()
+    
+    for date in upcoming_dates[:20]:  # Limit to 20 API calls
+        try:
+            matches = api.get_matches(date=date, limit=100)
+            
+            if matches and 'data' in matches:
+                for match in matches['data']:
+                    # Only process international friendlies
+                    league_name_match = match.get('league', {}).get('name', '')
+                    if 'friendly' not in league_name_match.lower() or 'international' not in league_name_match.lower():
+                        continue
+                    
+                    home_team = match.get('homeTeam', {}).get('name', '')
+                    away_team = match.get('awayTeam', {}).get('name', '')
+                    
+                    if not home_team or not away_team:
+                        continue
+                    
+                    # Normalize team names
+                    if not home_team.endswith(' Rugby'):
+                        home_team = f"{home_team} Rugby"
+                    if not away_team.endswith(' Rugby'):
+                        away_team = f"{away_team} Rugby"
+                    
+                    # Get or create teams
+                    home_id = get_team_id(conn, home_team, league_id)
+                    away_id = get_team_id(conn, away_team, league_id)
+                    
+                    # Check if event exists
+                    cursor.execute("""
+                        SELECT id FROM event 
+                        WHERE league_id = ? AND home_team_id = ? AND away_team_id = ? AND date_event = ?
+                    """, (league_id, home_id, away_id, date))
+                    
+                    if not cursor.fetchone():
+                        cursor.execute("""
+                            INSERT INTO event (league_id, home_team_id, away_team_id, date_event)
+                            VALUES (?, ?, ?, ?)
+                        """, (league_id, home_id, away_id, date))
+                        added_count += 1
+                        logger.info(f"Added from Highlightly: {date} | {home_team} vs {away_team}")
+        
+        except Exception as e:
+            logger.warning(f"Error fetching Highlightly data for {date}: {e}")
+            continue
+    
+    conn.commit()
+    return added_count
+
 def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, Any]]) -> int:
     """Update database with fetched games."""
     cursor = conn.cursor()
@@ -504,6 +620,13 @@ def main():
                 if missing_added > 0:
                     total_updated += missing_added
                     logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games")
+                
+                # For International Friendlies, also fetch from Highlightly API
+                if sportsdb_id == 5479:
+                    highlightly_added = fetch_highlightly_friendlies(conn, league_id, league_name, sportsdb_id)
+                    if highlightly_added > 0:
+                        total_updated += highlightly_added
+                        logger.info(f"🎯 {league_name}: Added {highlightly_added} friendlies from Highlightly API")
                     
             except Exception as e:
                 logger.error(f"❌ Error updating {league_name}: {e}")
