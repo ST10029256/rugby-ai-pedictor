@@ -2091,7 +2091,7 @@ def main():
             st.subheader("✍️ Manual Odds (optional)")
             st.caption("Enter decimal odds for each matchup. Leave blank (0.00) to use AI only.")
             try:
-                upcoming_subset_for_odds = upcoming_games.head(25)
+                upcoming_subset_for_odds = upcoming_games  # show all upcoming games
                 for _, game in upcoming_subset_for_odds.iterrows():
                     home_raw = game.get('home_team_id', 0)
                     away_raw = game.get('away_team_id', 0)
@@ -2155,7 +2155,7 @@ def main():
                     seen_matchups = set()  # Track unique matchups
                     
                     if isinstance(upcoming_games, pd.DataFrame):
-                        upcoming_subset = upcoming_games.head(50)  # Get more to account for duplicates
+                        upcoming_subset = upcoming_games  # include all upcoming games
                         for _, game in upcoming_subset.iterrows():
                             # Create unique matchup key (home_team, away_team, date)
                             matchup_key = (
@@ -2173,9 +2173,7 @@ def main():
                             if pred:
                                 predictions.append(pred)
                             
-                            # Limit to 25 unique predictions (increased from 10)
-                            if len(predictions) >= 25:
-                                break
+                            # No hard cap; Streamlit will handle display
                     else:
                         st.warning("Unable to process upcoming games data")
                         predictions = []
