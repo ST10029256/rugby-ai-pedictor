@@ -106,6 +106,7 @@ LEAGUE_CONFIGS = {
     4551: {"name": "Super Rugby", "neutral_mode": False},
     4430: {"name": "French Top 14", "neutral_mode": False},
     4414: {"name": "English Premiership Rugby", "neutral_mode": False},
+    5479: {"name": "Rugby Union International Friendlies", "neutral_mode": True},
 }
 
 @st.cache_data(ttl=1800)  # Cache for 30 minutes to reduce API calls

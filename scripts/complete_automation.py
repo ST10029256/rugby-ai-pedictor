@@ -31,7 +31,8 @@ ALL_LEAGUES = {
     4574: {"name": "Rugby World Cup", "sportsdb_id": 4574},
     4551: {"name": "Super Rugby", "sportsdb_id": 4551},
     4430: {"name": "French Top 14", "sportsdb_id": 4430},
-    4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414}
+    4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414},
+    5479: {"name": "Rugby Union International Friendlies", "sportsdb_id": 5479},
 }
 
 def run_script(script_name: str, description: str) -> bool:
