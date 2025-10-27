@@ -60,6 +60,9 @@ LEAGUE_CONFIGS = {
     4446: {"name": "United Rugby Championship", "neutral_mode": False},
     5069: {"name": "Currie Cup", "neutral_mode": False},
     4574: {"name": "Rugby World Cup", "neutral_mode": True},
+    4551: {"name": "Super Rugby", "neutral_mode": False},
+    4430: {"name": "French Top 14", "neutral_mode": False},
+    4414: {"name": "English Premiership Rugby", "neutral_mode": False},
     5479: {"name": "Rugby Union International Friendlies", "neutral_mode": True},
 }
 
