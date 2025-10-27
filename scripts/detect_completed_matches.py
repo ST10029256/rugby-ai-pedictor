@@ -39,6 +39,7 @@ LEAGUE_CONFIGS = {
     4551: {"name": "Super Rugby"},
     4430: {"name": "French Top 14"},
     4414: {"name": "English Premiership Rugby"},
+    5479: {"name": "Rugby Union International Friendlies"},
 }
 
 def get_last_checkpoint() -> Optional[datetime]:

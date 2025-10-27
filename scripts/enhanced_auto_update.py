@@ -27,7 +27,8 @@ LEAGUE_MAPPINGS = {
     4574: {"name": "Rugby World Cup", "sportsdb_id": 4574},
     4551: {"name": "Super Rugby", "sportsdb_id": 4551},
     4430: {"name": "French Top 14", "sportsdb_id": 4430},
-    4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414}
+    4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414},
+    5479: {"name": "Rugby Union International Friendlies", "sportsdb_id": 5479}
 }
 
 def safe_to_int(value: Any, default: int = 0) -> int:
@@ -417,7 +418,7 @@ def main():
     
     # OPTIMIZED: Only update leagues currently in season - historical data already exists!
     # Leagues currently in season (October 2024)
-    current_season_leagues = [4414, 4430, 4446]  # English Premiership, French Top 14, URC
+    current_season_leagues = [4414, 4430, 4446, 5479]  # Add International Friendlies
     
     logger.info(f"🎯 OPTIMIZED MODE: Only fetching upcoming games for {len(current_season_leagues)} current season leagues")
     logger.info("📚 Historical data already exists - AI models trained locally!")
