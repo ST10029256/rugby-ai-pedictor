@@ -179,9 +179,11 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                                 ev_league_id = event.get('idLeague') or event.get('idleague')
                                 ev_league_name = (event.get('strLeague') or '').lower()
                                 if ev_league_id and str(ev_league_id) != str(sportsdb_id):
-                                    # Skip non-friendlies when using eventsday
-                                    if 'eventsday' in url and 'friend' not in ev_league_name:
-                                        continue
+                                    # Friendlies often labeled as "International/Autumn/November/Test"; accept these too
+                                    if 'eventsday' in url:
+                                        allowed = any(k in ev_league_name for k in ['friend', 'international', 'november', 'autumn', 'test'])
+                                        if not allowed:
+                                            continue
                                 # Parse event data
                                 event_id = safe_to_int(event.get('idEvent'))
                                 # Robust date extraction: try multiple fields and formats
