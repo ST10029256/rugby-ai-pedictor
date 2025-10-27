@@ -42,13 +42,13 @@ class HighlightlyRugbyAPI:
         """Get rugby matches with various filters"""
         try:
             params: Dict[str, Any] = {"limit": limit, "offset": offset}
-            if league_id:
+            if league_id is not None:
                 params["leagueId"] = int(league_id)
-            if league_name:
+            if league_name is not None:
                 params["leagueName"] = str(league_name)
-            if date:
+            if date is not None:
                 params["date"] = str(date)
-            if season:
+            if season is not None:
                 params["season"] = int(season)
                 
             response = requests.get(

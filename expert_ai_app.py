@@ -192,7 +192,7 @@ def get_highlightly_data(home_team: str, away_team: str, league_id: int, match_d
         st.error(f"Error fetching Highlightly data: {e}")
         return {}
 
-@st.cache_data(ttl=1800)  # Cache for 30 minutes to reduce API calls
+@st.cache_data(ttl=60)  # Cache for 1 minute to enable live score updates
 def get_live_matches(league_id: Optional[int] = None) -> List[Dict]:
     """Get live/upcoming matches"""
     
@@ -211,13 +211,14 @@ def get_live_matches(league_id: Optional[int] = None) -> List[Dict]:
         api = HighlightlyRugbyAPI(api_key)
         
         league_mapping = {
-            4986: "Rugby Championship",
-            4446: "United Rugby Championship",
-            5069: "Currie Cup", 
-            4574: "Rugby World Cup",
-            4551: "Super Rugby",
-            4430: "French Top 14",
-            4414: "English Premiership Rugby"
+            4986: "Rugby Championship",  # ✓ Supported by Highlightly
+            4446: "United Rugby Championship",  # ✓ Supported by Highlightly
+            5069: "Currie Cup",  # ✓ Supported by Highlightly
+            4574: "World Cup",  # ✓ Rugby World Cup - Supported! Use "World Cup"
+            4551: "Super Rugby",  # ✓ Supported by Highlightly
+            4430: "Top 14",  # ✓ French Top 14 - Supported! Use "Top 14"
+            4414: "Premiership Rugby",  # ✓ English Premiership Rugby - Supported! Use "Premiership Rugby"
+            5479: "Friendly International"  # International Friendlies - use "Friendly International"
         }
         
         league_name = league_mapping.get(league_id) if league_id else None
@@ -227,12 +228,13 @@ def get_live_matches(league_id: Optional[int] = None) -> List[Dict]:
         now_sa = datetime.now(SA_TIMEZONE)
         tomorrow_sa = now_sa + timedelta(days=1)
         
-        # Get all matches without league filter (Highlightly doesn't support all leagues)
-        # We'll filter by showing only matches in the next 24 hours
-        matches = api.get_matches(
-            league_name=None,  # Get all rugby matches
-            limit=200  # Increased limit to catch all matches
-        )
+        # Get matches for the selected league
+        # All 8 leagues are now supported by Highlightly!
+        if league_name:
+            matches = api.get_matches(league_name=league_name, limit=200)
+        else:
+            # Fallback: get all matches if league not in mapping
+            matches = api.get_matches(limit=200)
         
         live_matches = []
         for match in matches.get('data', []):
@@ -258,9 +260,18 @@ def get_live_matches(league_id: Optional[int] = None) -> List[Dict]:
             
             # Include upcoming matches and live matches within 24 hours
             if match_state in ['Not started', 'First half', 'Second half', 'Half time', 'Break time'] and is_within_24h:
-                # Get live scores if available
-                home_score = match.get('homeScore', 0)
-                away_score = match.get('awayScore', 0)
+                # Parse scores from state.score (format: "17 - 15")
+                home_score = 0
+                away_score = 0
+                state_score = match.get('state', {}).get('score', '')
+                if state_score:
+                    try:
+                        parts = state_score.split('-')
+                        if len(parts) == 2:
+                            home_score = int(parts[0].strip())
+                            away_score = int(parts[1].strip())
+                    except:
+                        pass
                 
                 # Extract start time and formatted date from date if available
                 match_date = match.get('date', '')
@@ -275,7 +286,7 @@ def get_live_matches(league_id: Optional[int] = None) -> List[Dict]:
                 game_time = None
                 if match_state in ['First half', 'Second half', 'Half time']:
                     # Game time should come from the API - not simulated
-                    game_time = match.get('gameTime')  # This would be the actual API field
+                    game_time = match.get('state', {}).get('gameTime')  # This would be the actual API field
                 
                 live_matches.append({
                     "match_id": match.get('id'),
@@ -1952,13 +1963,8 @@ def main():
                 if live_matches:
                     st.success(f"Found {len(live_matches)} live/upcoming matches in next 24 hours")
                     
-                    # Show cache status
-                    import time
-                    if 'last_refresh' not in st.session_state:
-                        st.session_state.last_refresh = time.time()
-                    
-                    refresh_time = time.strftime("%H:%M:%S", time.localtime(st.session_state.last_refresh))
-                    st.caption(f"💾 Data cached for 30 minutes to preserve API quota. Last refreshed: {refresh_time}")
+                    # Show cache status - live scores update every minute
+                    st.caption(f"💾 Live scores update every minute from Highlightly API")
                     
                     for match in live_matches[:15]:  # Show first 15 live matches
                         # Get live match details
