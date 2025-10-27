@@ -100,6 +100,20 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                 f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
             ])
         
+        # SPECIAL BACKFILL: International Friendlies need broader history for training (2021-2025)
+        if sportsdb_id == 5479:
+            backfill_seasons = ['2025', '2024', '2023', '2022', '2021']
+            for season in backfill_seasons:
+                urls_to_try.extend([
+                    f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
+                    f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
+                ])
+            # Also include past league endpoint for completeness
+            urls_to_try.extend([
+                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
+                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
+            ])
+        
         # Add general upcoming games endpoint
         urls_to_try.extend([
             f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}"
