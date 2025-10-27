@@ -132,6 +132,20 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
             f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=9&s=2025-2026",
             f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=10&s=2025-2026"
         ])
+
+        # Friendlies special coverage: query events by day for the next 30 days (captures scattered fixtures)
+        if sportsdb_id == 5479:
+            try:
+                from datetime import date, timedelta as _td
+                start = datetime.utcnow().date()
+                for i in range(0, 30):
+                    d = (start + _td(days=i)).strftime('%Y-%m-%d')
+                    urls_to_try.extend([
+                        f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d={d}&s=Rugby",
+                        f"https://www.thesportsdb.com/api/v1/json/1/eventsday.php?d={d}&s=Rugby",
+                    ])
+            except Exception:
+                pass
         
         for i, url in enumerate(urls_to_try):
             try:
@@ -161,6 +175,13 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                         
                         for event in events:
                             try:
+                                # Filter to correct league for day-based queries
+                                ev_league_id = event.get('idLeague') or event.get('idleague')
+                                ev_league_name = (event.get('strLeague') or '').lower()
+                                if ev_league_id and str(ev_league_id) != str(sportsdb_id):
+                                    # Skip non-friendlies when using eventsday
+                                    if 'eventsday' in url and 'friend' not in ev_league_name:
+                                        continue
                                 # Parse event data
                                 event_id = safe_to_int(event.get('idEvent'))
                                 # Robust date extraction: try multiple fields and formats
