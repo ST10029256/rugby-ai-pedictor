@@ -427,3 +427,10 @@
 2025-11-09 22:16:39,003 - INFO - Leagues to retrain: [4430]
 2025-11-09 22:16:39,003 - INFO - 🤖 Models will be retrained to capture latest completed match results
 2025-11-09 22:16:39,003 - INFO - Saved checkpoint: 2025-11-09T22:16:39.003443
+2025-11-10 22:19:08,670 - INFO - Starting match completion detection and retraining
+2025-11-10 22:19:08,671 - INFO - Found 1 completed matches
+2025-11-10 22:19:08,671 - INFO - Completed: Wales Rugby 21-38 Argentina Rugby (Rugby Union International Friendlies)
+2025-11-10 22:19:08,671 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2025-11-10 22:19:08,671 - INFO - Leagues to retrain: [5479]
+2025-11-10 22:19:08,671 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2025-11-10 22:19:08,671 - INFO - Saved checkpoint: 2025-11-10T22:19:08.671845
