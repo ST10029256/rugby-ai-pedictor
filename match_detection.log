@@ -449,3 +449,10 @@
 2025-11-15 22:14:38,705 - INFO - Starting match completion detection and retraining
 2025-11-15 22:14:38,706 - INFO - No new completed matches found
 2025-11-15 22:14:38,706 - INFO - Saved checkpoint: 2025-11-15T22:14:38.706351
+2025-11-16 22:17:32,554 - INFO - Starting match completion detection and retraining
+2025-11-16 22:17:32,554 - INFO - Found 1 completed matches
+2025-11-16 22:17:32,555 - INFO - Completed: Georgia Rugby 12-3 Canada Rugby (Rugby Union International Friendlies)
+2025-11-16 22:17:32,555 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2025-11-16 22:17:32,555 - INFO - Leagues to retrain: [5479]
+2025-11-16 22:17:32,555 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2025-11-16 22:17:32,555 - INFO - Saved checkpoint: 2025-11-16T22:17:32.555458
