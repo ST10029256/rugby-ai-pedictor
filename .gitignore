@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+
+# Python packages (should never be committed)
+Lib/
+etc/
+share/
+
+# Local data and artifacts
+# data.sqlite  # Temporarily commented for deployment
+# artifacts/  # Commented out to allow GitHub Actions to commit trained models
+# artifacts_optimized/  # Commented out to allow GitHub Actions to commit optimized models
+
+# Streamlit local config
+.streamlit/secrets.toml
+
+# Large model/files (excluding trained models for deployment)
+# *.pkl  # Commented out - trained models needed for deployment
+*.csv
+

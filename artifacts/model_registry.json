@@ -1,0 +1,49 @@
+{
+  "last_updated": "2025-10-01T10:25:31.427298",
+  "leagues": {
+    "4986": {
+      "name": "Rugby Championship",
+      "trained_at": "2025-10-01T10:24:30.954481",
+      "training_games": 142,
+      "performance": {
+        "winner_accuracy": 0.6551724137931034,
+        "home_mae": 9.517557392784594,
+        "away_mae": 8.793360664205727,
+        "overall_mae": 9.15545902849516
+      }
+    },
+    "4446": {
+      "name": "United Rugby Championship",
+      "trained_at": "2025-10-01T10:24:52.753334",
+      "training_games": 298,
+      "performance": {
+        "winner_accuracy": 0.65,
+        "home_mae": 10.847545550719284,
+        "away_mae": 8.061575660861033,
+        "overall_mae": 9.454560605790158
+      }
+    },
+    "5069": {
+      "name": "Currie Cup",
+      "trained_at": "2025-10-01T10:25:18.000205",
+      "training_games": 345,
+      "performance": {
+        "winner_accuracy": 0.7391304347826086,
+        "home_mae": 11.530127919901807,
+        "away_mae": 13.537360804050634,
+        "overall_mae": 12.53374436197622
+      }
+    },
+    "4574": {
+      "name": "Rugby World Cup",
+      "trained_at": "2025-10-01T10:25:30.983977",
+      "training_games": 152,
+      "performance": {
+        "winner_accuracy": 0.8387096774193549,
+        "home_mae": 16.97510822789496,
+        "away_mae": 5.7013974934084,
+        "overall_mae": 11.33825286065168
+      }
+    }
+  }
+}
