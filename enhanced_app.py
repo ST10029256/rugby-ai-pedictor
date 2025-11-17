@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
-from prediction.hybrid_predictor import HybridPredictor
+from prediction.hybrid_predictor import MultiLeaguePredictor
 from prediction.enhanced_predictor import EnhancedRugbyPredictor
 from prediction.config import LEAGUE_MAPPINGS
 
@@ -25,7 +25,7 @@ st.set_page_config(
 def load_models():
     """Load AI models"""
     try:
-        predictor = HybridPredictor('data.sqlite')
+        predictor = MultiLeaguePredictor('data.sqlite')
         return predictor, None
     except Exception as e:
         st.error(f"Error loading AI models: {e}")

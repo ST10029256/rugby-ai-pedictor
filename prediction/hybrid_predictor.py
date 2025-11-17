@@ -8,6 +8,7 @@ import sqlite3
 import pickle
 import numpy as np
 import pandas as pd
+import os
 from typing import Dict, Optional, Tuple, Any
 from prediction.features import build_feature_table, FeatureConfig
 from prediction.sportdevs_client import SportDevsClient, extract_odds_features
@@ -232,6 +233,137 @@ class HybridPredictor:
         
         return self.hybrid_predict(home_team_id, away_team_id, match_date, 
                                   match_id, ai_weight, odds_weight)
+    
+    def predict_match(self, home_team: str, away_team: str, league_id: int, 
+                     match_date: str, match_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Predict match outcome using team names
+        
+        Args:
+            home_team: Name of home team
+            away_team: Name of away team
+            league_id: League ID (must match the model's league_id)
+            match_date: Match date in YYYY-MM-DD format
+            match_id: Optional match ID for bookmaker odds
+            
+        Returns:
+            Prediction dictionary with winner, scores, and confidence
+        """
+        # Verify league_id matches this predictor's league
+        if league_id != self.league_id:
+            raise ValueError(
+                f"League ID mismatch: This predictor is for league {self.league_id} "
+                f"({self.league_name}), but requested league {league_id}"
+            )
+        
+        # Get team IDs from database
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Try to find teams by name (case-insensitive)
+        cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (home_team,))
+        home_result = cursor.fetchone()
+        if not home_result:
+            conn.close()
+            raise ValueError(f"Home team '{home_team}' not found in database")
+        home_team_id = home_result[0]
+        
+        cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (away_team,))
+        away_result = cursor.fetchone()
+        if not away_result:
+            conn.close()
+            raise ValueError(f"Away team '{away_team}' not found in database")
+        away_team_id = away_result[0]
+        
+        conn.close()
+        
+        # Get hybrid prediction
+        prediction = self.smart_ensemble(home_team_id, away_team_id, match_date, match_id)
+        
+        # Format output to match expected structure
+        home_win_prob = prediction.get('hybrid_home_win_prob', prediction.get('home_win_prob', 0.5))
+        
+        return {
+            'predicted_winner': 'Home' if home_win_prob > 0.5 else 'Away',
+            'predicted_home_score': prediction.get('ai_prediction', {}).get('predicted_home_score', 0),
+            'predicted_away_score': prediction.get('ai_prediction', {}).get('predicted_away_score', 0),
+            'confidence': prediction.get('hybrid_confidence', prediction.get('confidence', 0.5)),
+            'home_win_prob': home_win_prob,
+            'away_win_prob': 1.0 - home_win_prob,
+            'additional_metrics': {
+                'home_advantage': 0.0,  # Could be calculated from features
+                'form_difference': 0.0,  # Could be calculated from features
+                'elo_difference': 0.0    # Could be calculated from features
+            }
+        }
+
+
+class MultiLeaguePredictor:
+    """Wrapper class that manages multiple HybridPredictor instances for different leagues"""
+    
+    def __init__(self, db_path: str = 'data.sqlite', sportdevs_api_key: Optional[str] = None, 
+                 artifacts_dir: str = 'artifacts'):
+        """
+        Initialize multi-league predictor
+        
+        Args:
+            db_path: Path to SQLite database
+            sportdevs_api_key: SportDevs API key (optional, can use default)
+            artifacts_dir: Directory containing model files (default: 'artifacts')
+        """
+        self.db_path = db_path
+        self.artifacts_dir = artifacts_dir
+        self.artifacts_optimized_dir = 'artifacts_optimized'
+        self.sportdevs_api_key = sportdevs_api_key or os.getenv('SPORTDEVS_API_KEY', '')
+        self._predictors: Dict[int, HybridPredictor] = {}
+    
+    def _get_predictor(self, league_id: int) -> HybridPredictor:
+        """Get or create predictor for a specific league"""
+        if league_id in self._predictors:
+            return self._predictors[league_id]
+        
+        # Try optimized model first, then regular model
+        # Check both artifacts_optimized and artifacts directories
+        model_paths = [
+            os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model_optimized.pkl'),
+            os.path.join(self.artifacts_dir, f'league_{league_id}_model_optimized.pkl'),
+            os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model.pkl'),
+            os.path.join(self.artifacts_dir, f'league_{league_id}_model.pkl')
+        ]
+        
+        model_path = None
+        for path in model_paths:
+            if os.path.exists(path):
+                model_path = path
+                break
+        
+        if not model_path:
+            raise FileNotFoundError(
+                f"No model found for league {league_id}. "
+                f"Checked: {model_paths}"
+            )
+        
+        predictor = HybridPredictor(model_path, self.sportdevs_api_key, self.db_path)
+        self._predictors[league_id] = predictor
+        return predictor
+    
+    def predict_match(self, home_team: str, away_team: str, league_id: int, 
+                     match_date: str, match_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Predict match outcome using team names
+        
+        Args:
+            home_team: Name of home team
+            away_team: Name of away team
+            league_id: League ID
+            match_date: Match date in YYYY-MM-DD format
+            match_id: Optional match ID for bookmaker odds
+            
+        Returns:
+            Prediction dictionary with winner, scores, and confidence
+        """
+        predictor = self._get_predictor(league_id)
+        return predictor.predict_match(home_team, away_team, league_id, match_date, match_id)
 
 
 def demo_hybrid_prediction():
