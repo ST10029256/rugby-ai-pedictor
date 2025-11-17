@@ -1,17 +1,29 @@
 {
   "leagues_to_retrain": [
-    4986,
-    4446,
-    5069,
-    4574,
-    4551,
-    4430,
-    4414,
     5479
   ],
-  "games_updated": 4,
-  "timestamp": "2025-11-16T22:20:29.990274",
-  "reason": "new_games_fetched",
-  "trigger": "comprehensive_data_update",
-  "description": "Found 4 new/updated games from TheSportsDB - retraining all models to capture latest data"
+  "completed_matches": [
+    {
+      "id": 2310337,
+      "league_id": 5479,
+      "date_event": "2025-11-16",
+      "home_team_id": 137136,
+      "away_team_id": 137124,
+      "home_score": 24,
+      "away_score": 33,
+      "home_team_name": "Scotland Rugby",
+      "away_team_name": "Argentina Rugby"
+    }
+  ],
+  "timestamp": "2025-11-17T22:18:40.538134",
+  "reason": "completed_matches",
+  "trigger": "match_completion_detection",
+  "description": "Found 1 completed matches - retraining models to capture latest results",
+  "match_details": [
+    {
+      "league": "Rugby Union International Friendlies",
+      "match": "Scotland Rugby 24-33 Argentina Rugby",
+      "date": "2025-11-16"
+    }
+  ]
 }
