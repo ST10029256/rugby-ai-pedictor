@@ -4,6 +4,13 @@ Expert-Level Hybrid AI Rugby Prediction App
 Combines optimized AI with live SportDevs odds for maximum accuracy
 """
 
+import warnings
+# Suppress scikit-learn version mismatch warnings
+# Models were trained with 1.5.2 but environment has 1.7.2
+# These warnings don't affect functionality but are noisy
+warnings.filterwarnings('ignore', message='.*Trying to unpickle.*')
+warnings.filterwarnings('ignore', module='sklearn.base')
+
 import streamlit as st
 import os
 import sys
@@ -436,17 +443,53 @@ def load_optimized_model(league_id: int):
         raise e
 
 def load_model_safely(league_id: int):
-    """Load model with XGBoost fallback handling"""
+    """Load model with XGBoost fallback handling and scikit-learn compatibility workarounds"""
+    # Try using joblib first if available (sometimes handles version mismatches better)
+    joblib = None
+    try:
+        import joblib as _joblib
+        joblib = _joblib
+    except ImportError:
+        pass
+    
+    def safe_unpickle(file_path):
+        """Attempt to unpickle with multiple strategies"""
+        # Strategy 1: Try joblib if available
+        if joblib is not None:
+            try:
+                return joblib.load(file_path)
+            except Exception:
+                pass  # Fall through to pickle
+        
+        # Strategy 2: Try standard pickle
+        try:
+            with open(file_path, 'rb') as f:
+                return pickle.load(f)
+        except AttributeError as e:
+            error_msg = str(e)
+            if '__pyx_unpickle' in error_msg or 'CyHalfBinomialLoss' in error_msg:
+                # This is a fundamental scikit-learn version incompatibility
+                # The Cython-compiled modules are incompatible between versions
+                raise AttributeError(
+                    "Scikit-learn version incompatibility: Models trained with 1.5.2 cannot be loaded with 1.7.2. "
+                    "The Cython-compiled modules are incompatible. You need to retrain the models with scikit-learn 1.7.2."
+                ) from e
+            else:
+                raise
+    
     # Check if optimized model exists first
     optimized_path = f'artifacts_optimized/league_{league_id}_model_optimized.pkl'
     if os.path.exists(optimized_path):
         try:
-            with open(optimized_path, 'rb') as f:
-                model = pickle.load(f)
+            model = safe_unpickle(optimized_path)
             # Model loaded silently
             return model
         except Exception as e:
-            st.warning(f"Failed to load optimized model: {e}")
+            error_msg = str(e)
+            if 'version incompatibility' in error_msg or '__pyx_unpickle' in error_msg or 'CyHalfBinomialLoss' in error_msg:
+                st.warning(f"⚠️ Scikit-learn version incompatibility detected. Trying fallback model...")
+            else:
+                st.warning(f"Failed to load optimized model: {e}")
     
     # Fallback to legacy model
     try:
@@ -462,8 +505,7 @@ def load_model_safely(league_id: int):
                 current_frame = sys._getframe()
                 current_frame.f_globals['xgboost'] = xgboost
             
-            with open(model_path, 'rb') as f:
-                model_data = pickle.load(f)
+            model_data = safe_unpickle(model_path)
             
             # Check if it's a legacy model with XGBoost
             if 'models' in model_data and 'gbdt_clf' in model_data['models']:
@@ -492,6 +534,36 @@ def load_model_safely(league_id: int):
         else:
             st.error(f"Model file not found: {model_path}")
             return None
+    except AttributeError as e:
+        error_msg = str(e)
+        if 'version incompatibility' in error_msg or '__pyx_unpickle' in error_msg or 'CyHalfBinomialLoss' in error_msg:
+            st.error(f"""
+            ## ⚠️ Scikit-learn Version Incompatibility
+            
+            **Problem:** Your models were trained with scikit-learn 1.5.2, but your current environment has version 1.7.2.
+            The Cython-compiled modules are incompatible between these versions, preventing model loading.
+            
+            **Solutions:**
+            
+            1. **Retrain models with scikit-learn 1.7.2** (Recommended):
+               ```bash
+               python scripts/train_models_optimized.py
+               ```
+               This will create new models compatible with your current scikit-learn version.
+            
+            2. **Use Python 3.11 or 3.12 with scikit-learn 1.5.2**:
+               - Python 3.14 doesn't have pre-built wheels for scikit-learn 1.5.2
+               - Create a virtual environment with Python 3.11/3.12
+               - Install scikit-learn 1.5.2 there
+            
+            **Why this happens:** Scikit-learn uses Cython-compiled code that changes between versions.
+            Models pickled with one version often cannot be unpickled with a different version.
+            
+            **Quick fix:** Run the training script to regenerate models with your current scikit-learn version.
+            """)
+        else:
+            st.error(f"Failed to load model for league {league_id}: {e}")
+        return None
     except Exception as e:
         st.error(f"Failed to load model for league {league_id}: {e}")
         return None

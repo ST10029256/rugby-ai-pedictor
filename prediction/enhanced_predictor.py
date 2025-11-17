@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 import logging
 from .highlightly_client import HighlightlyRugbyAPI
-from .hybrid_predictor import HybridPredictor
+from .hybrid_predictor import MultiLeaguePredictor
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ class EnhancedRugbyPredictor:
     def __init__(self, db_path: str, highlightly_api_key: str):
         self.db_path = db_path
         self.highlightly_api = HighlightlyRugbyAPI(highlightly_api_key)
-        self.hybrid_predictor = HybridPredictor(db_path)
+        self.hybrid_predictor = MultiLeaguePredictor(db_path)
         
         # League mapping between our system and Highlightly
         self.league_mapping = {
