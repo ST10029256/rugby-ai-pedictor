@@ -589,7 +589,6 @@ def get_upcoming_games(league_id: int):
         config = FeatureConfig(elo_priors=None, elo_k=24.0, 
                               neutral_mode=LEAGUE_CONFIGS[league_id]["neutral_mode"])
         feature_df = build_feature_table(conn, config)
-        conn.close()
         
         # Filter upcoming games
         upcoming = feature_df[
@@ -605,6 +604,43 @@ def get_upcoming_games(league_id: int):
             if isinstance(upcoming, pd.DataFrame):
                 upcoming = upcoming[upcoming["date_event"].dt.date >= today]
         
+        # EXCLUDE women's matches - filter by team names
+        if len(upcoming) > 0:
+            cursor = conn.cursor()
+            women_indicators = [' w rugby', ' women', ' womens', ' w ', ' women\'s', ' w\'s']
+            
+            # Get team names for filtering
+            home_team_ids = pd.Series(upcoming["home_team_id"]).dropna().astype(int).tolist()
+            away_team_ids = pd.Series(upcoming["away_team_id"]).dropna().astype(int).tolist()
+            team_ids = set(home_team_ids + away_team_ids)
+            
+            if team_ids:
+                placeholders = ','.join(['?'] * len(team_ids))
+                cursor.execute(f"SELECT id, name FROM team WHERE id IN ({placeholders})", list(team_ids))
+                team_names = {row[0]: row[1].lower() for row in cursor.fetchall()}
+                
+                # Filter out matches with women's teams
+                def is_women_match(row):
+                    home_id = int(row["home_team_id"]) if pd.notna(row["home_team_id"]) else None
+                    away_id = int(row["away_team_id"]) if pd.notna(row["away_team_id"]) else None
+                    
+                    if home_id and home_id in team_names:
+                        home_name = team_names[home_id]
+                        if any(indicator in home_name for indicator in women_indicators):
+                            return True
+                    
+                    if away_id and away_id in team_names:
+                        away_name = team_names[away_id]
+                        if any(indicator in away_name for indicator in women_indicators):
+                            return True
+                    
+                    return False
+                
+                # Apply filter
+                mask = ~upcoming.apply(is_women_match, axis=1)
+                upcoming = upcoming[mask].copy()
+        
+        conn.close()
         return upcoming
     except Exception as e:
         st.error(f"Error getting upcoming games: {e}")
