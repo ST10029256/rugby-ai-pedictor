@@ -214,6 +214,7 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                                 # CRITICAL: For International Friendlies (5479), only accept matches where both teams
                                 # look like national teams (end with "Rugby" like "England Rugby", "Scotland Rugby")
                                 # or are known country names without club names
+                                # EXCLUDE women's matches (e.g., "Hong Kong W Rugby", "Belgium W Rugby")
                                 if sportsdb_id == 5479 and 'eventsday' in url:
                                     # List of countries with their common rugby names
                                     rugby_countries = ['england', 'scotland', 'wales', 'ireland', 'france', 'italy', 'spain', 
@@ -224,9 +225,18 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                                     home_lower = home_team.lower()
                                     away_lower = away_team.lower()
                                     
+                                    # EXCLUDE women's matches - check for women's indicators
+                                    women_indicators = [' w rugby', ' women', ' womens', ' w ', ' women\'s', ' w\'s']
+                                    is_women_home = any(indicator in home_lower for indicator in women_indicators)
+                                    is_women_away = any(indicator in away_lower for indicator in women_indicators)
+                                    
+                                    if is_women_home or is_women_away:
+                                        continue  # Skip women's matches
+                                    
                                     # Check if both teams end with "Rugby" (like "England Rugby", "Scotland Rugby")
-                                    is_national_home = home_team.endswith(' Rugby')
-                                    is_national_away = away_team.endswith(' Rugby')
+                                    # But exclude if it's " W Rugby" (women's)
+                                    is_national_home = home_team.endswith(' Rugby') and not home_team.endswith(' W Rugby')
+                                    is_national_away = away_team.endswith(' Rugby') and not away_team.endswith(' W Rugby')
                                     
                                     # Check if both teams are country names
                                     is_country_home = any(country in home_lower for country in rugby_countries)
@@ -464,6 +474,16 @@ def fetch_highlightly_friendlies(conn: sqlite3.Connection, league_id: int, leagu
                     
                     if not home_team or not away_team:
                         continue
+                    
+                    # EXCLUDE women's matches - check for women's indicators
+                    home_lower = home_team.lower()
+                    away_lower = away_team.lower()
+                    women_indicators = [' w rugby', ' women', ' womens', ' w ', ' women\'s', ' w\'s']
+                    is_women_home = any(indicator in home_lower for indicator in women_indicators)
+                    is_women_away = any(indicator in away_lower for indicator in women_indicators)
+                    
+                    if is_women_home or is_women_away:
+                        continue  # Skip women's matches
                     
                     # Normalize team names
                     if not home_team.endswith(' Rugby'):
