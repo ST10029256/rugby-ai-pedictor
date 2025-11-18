@@ -8,10 +8,14 @@ on:
     types:
       - completed
   push:
+    branches:
+      - main
     paths:
       - 'data.sqlite'  # Trigger when database is updated
       - 'retrain_needed.flag'  # Trigger when retraining flag is created
       - 'artifacts_optimized/**'  # Trigger when models are updated
+      - 'expert_ai_app.py'  # Trigger when main app changes
+      - 'scripts/**'  # Trigger when scripts change
   pull_request:
     paths:
       - 'data.sqlite'
