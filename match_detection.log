@@ -481,3 +481,11 @@
 2025-11-22 22:17:47,156 - INFO - Starting match completion detection and retraining
 2025-11-22 22:17:47,157 - INFO - No new completed matches found
 2025-11-22 22:17:47,157 - INFO - Saved checkpoint: 2025-11-22T22:17:47.157180
+2025-11-23 22:21:55,645 - INFO - Starting match completion detection and retraining
+2025-11-23 22:21:55,646 - INFO - Found 2 completed matches
+2025-11-23 22:21:55,646 - INFO - Completed: Georgia Rugby 23-25 Japan Rugby (Rugby Union International Friendlies)
+2025-11-23 22:21:55,646 - INFO - Completed: Lyon OU 43-24 ASM Clermont Auvergne (French Top 14)
+2025-11-23 22:21:55,646 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2025-11-23 22:21:55,646 - INFO - Leagues to retrain: [4430, 5479]
+2025-11-23 22:21:55,646 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2025-11-23 22:21:55,647 - INFO - Saved checkpoint: 2025-11-23T22:21:55.646949
