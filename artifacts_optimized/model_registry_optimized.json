@@ -1,10 +1,10 @@
 {
-  "last_updated": "2025-11-27T22:25:26.293686",
+  "last_updated": "2025-11-28T22:25:34.639409",
   "optimization_enabled": true,
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2025-11-27T22:22:24.223296",
+      "trained_at": "2025-11-28T22:22:30.975897",
       "training_games": 144,
       "model_type": "stacking",
       "performance": {
@@ -20,7 +20,7 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2025-11-27T22:22:59.058647",
+      "trained_at": "2025-11-28T22:23:06.213031",
       "training_games": 336,
       "model_type": "stacking",
       "performance": {
@@ -36,7 +36,7 @@
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2025-11-27T22:23:34.947248",
+      "trained_at": "2025-11-28T22:23:42.278168",
       "training_games": 345,
       "model_type": "stacking",
       "performance": {
@@ -52,7 +52,7 @@
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2025-11-27T22:23:49.493186",
+      "trained_at": "2025-11-28T22:23:57.043468",
       "training_games": 152,
       "model_type": "stacking",
       "performance": {
@@ -68,7 +68,7 @@
     },
     "4551": {
       "name": "Super Rugby",
-      "trained_at": "2025-11-27T22:24:18.085733",
+      "trained_at": "2025-11-28T22:24:25.797613",
       "training_games": 259,
       "model_type": "stacking",
       "performance": {
@@ -84,7 +84,7 @@
     },
     "4430": {
       "name": "French Top 14",
-      "trained_at": "2025-11-27T22:24:52.655179",
+      "trained_at": "2025-11-28T22:25:00.566385",
       "training_games": 325,
       "model_type": "stacking",
       "performance": {
@@ -100,7 +100,7 @@
     },
     "4414": {
       "name": "English Premiership Rugby",
-      "trained_at": "2025-11-27T22:25:12.879321",
+      "trained_at": "2025-11-28T22:25:21.014861",
       "training_games": 203,
       "model_type": "simple",
       "performance": {
@@ -116,7 +116,7 @@
     },
     "5479": {
       "name": "Rugby Union International Friendlies",
-      "trained_at": "2025-11-27T22:25:26.138495",
+      "trained_at": "2025-11-28T22:25:34.486163",
       "training_games": 93,
       "model_type": "simple",
       "performance": {
