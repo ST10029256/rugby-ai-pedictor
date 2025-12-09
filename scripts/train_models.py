@@ -8,6 +8,7 @@ import os
 import sys
 import sqlite3
 import pickle
+import joblib  # Use joblib for better version compatibility
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple
@@ -368,10 +369,10 @@ def save_models(models: Dict[int, Dict[str, Any]], output_dir: str = "artifacts"
         filename = f"league_{league_id}_model.pkl"
         filepath = os.path.join(output_dir, filename)
         
-        with open(filepath, 'wb') as f:
-            pickle.dump(model_package, f)
+        # Use joblib for better version compatibility (handles numpy/scikit-learn version mismatches better)
+        joblib.dump(model_package, filepath, compress=3)
         
-        logger.info(f"Saved model for league {league_id} to {filepath}")
+        logger.info(f"Saved model for league {league_id} to {filepath} (using joblib)")
     
     # Save registry
     registry = {

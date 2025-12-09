@@ -21,3 +21,26 @@ share/
 # *.pkl  # Commented out - trained models needed for deployment
 *.csv
 
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebaserc.local
+
+# Node modules
+node_modules/
+public/node_modules/
+functions/node_modules/
+
+# React build
+public/build/
+public/.env.local
+public/.env.development.local
+public/.env.test.local
+public/.env.production.local
+
+# Python virtual environment
+venv/
+ENV/
+env/
