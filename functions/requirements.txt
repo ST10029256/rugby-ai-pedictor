@@ -1,0 +1,12 @@
+firebase-functions==0.1.0
+firebase-admin==6.2.0
+google-cloud-firestore==2.13.1
+google-cloud-storage==2.14.0
+numpy>=2.1.0
+pandas>=2.2.0
+scikit-learn==1.5.2
+xgboost>=2.0.0
+requests>=2.32.0
+python-dotenv>=1.0.0
+pytz>=2024.1
+

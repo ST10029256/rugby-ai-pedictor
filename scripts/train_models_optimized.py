@@ -12,6 +12,7 @@ import os
 import sys
 import sqlite3
 import pickle
+import joblib  # Use joblib for better version compatibility
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple, List
@@ -114,8 +115,9 @@ def select_top_features(X: np.ndarray, y: np.ndarray, feature_names: List[str],
     model.fit(X, y)
     
     # Calculate permutation importance
+    # Use n_jobs=1 on Windows to avoid multiprocessing issues
     perm_importance = permutation_importance(
-        model, X, y, n_repeats=5, random_state=random_state, n_jobs=-1
+        model, X, y, n_repeats=5, random_state=random_state, n_jobs=1
     )
     
     # Get top features
@@ -398,7 +400,7 @@ def train_league_optimized(league_id: int, db_path: str) -> Dict[str, Any] | Non
     logger.info(f"\nStacking Model:")
     logger.info(f"  Accuracy: {comparison['stacking']['avg_accuracy']:.3f} ± {comparison['stacking']['std_accuracy']:.3f}")
     logger.info(f"  Overall MAE: {comparison['stacking']['avg_overall_mae']:.2f}")
-    logger.info(f"\n🏆 WINNER: {winner.upper()} model")
+    logger.info(f"\nWINNER: {winner.upper()} model")
     logger.info(f"{'='*80}")
     
     # Train final model on all data using winner
@@ -456,10 +458,10 @@ def save_models(models: Dict[int, Dict[str, Any]], output_dir: str = "artifacts_
         filename = f"league_{league_id}_model_optimized.pkl"
         filepath = os.path.join(output_dir, filename)
         
-        with open(filepath, 'wb') as f:
-            pickle.dump(model_package, f)
+        # Use joblib for better version compatibility (handles numpy/scikit-learn version mismatches better)
+        joblib.dump(model_package, filepath, compress=3)
         
-        logger.info(f"Saved optimized model for league {league_id} to {filepath}")
+        logger.info(f"Saved optimized model for league {league_id} to {filepath} (using joblib)")
     
     # Save registry
     registry = {

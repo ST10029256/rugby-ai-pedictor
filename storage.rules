@@ -1,0 +1,17 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Models folder - read-only for all
+    match /models/{modelId} {
+      allow read: if true;
+      allow write: if false; // Only backend can write
+    }
+    
+    // Other files
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
+

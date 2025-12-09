@@ -57,6 +57,21 @@ jobs:
       run: |
         echo "🧹 Running post-update cleanup..."
         python cleanup_duplicates_post_update.py
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    
+    - name: Sync to Firestore (PWA Updates)
+      env:
+        GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
+      run: |
+        echo "☁️ Syncing database to Firestore for PWA..."
+        echo "📱 This ensures your PWA app is always up to date with latest games"
+        pip install google-cloud-firestore
+        python scripts/sync_to_firestore.py --db data.sqlite --project-id rugby-ai-61fd0
+        echo "✅ Firestore sync complete - PWA will show latest data"
         
     - name: Commit changes and trigger retraining if needed
       if: always()

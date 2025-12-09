@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Convert SVG to PNG - Rugby AI Icons</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            background: #0e1117;
+            color: #fafafa;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 18px;
+            margin: 10px 5px;
+            width: 100%;
+        }
+        button:hover {
+            background: #059669;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            background: #1f2937;
+            border-radius: 8px;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+    </style>
+</head>
+<body>
+    <h1>🏉 Convert SVG Icons to PNG</h1>
+    <p>This will convert your existing SVG icons to PNG format required for PWA.</p>
+    
+    <button onclick="convertAll()">Convert Both Icons to PNG</button>
+    
+    <div id="status"></div>
+    
+    <div style="margin-top: 30px; padding: 20px; background: #1f2937; border-radius: 8px;">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Click the button above</li>
+            <li>Two PNG files will download automatically</li>
+            <li>Save them in the <code>public/public/</code> folder</li>
+            <li>Make sure they're named: <code>icon-192.png</code> and <code>icon-512.png</code></li>
+            <li>Rebuild: <code>npm run build</code></li>
+            <li>Redeploy: <code>firebase deploy</code></li>
+        </ol>
+    </div>
+
+    <script>
+        async function convertSVGToPNG(size) {
+            return new Promise((resolve, reject) => {
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, size, size);
+                    canvas.toBlob((blob) => {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `icon-${size}.png`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        resolve();
+                    }, 'image/png');
+                };
+                
+                img.onerror = () => {
+                    // Fallback: create icon manually
+                    const gradient = ctx.createLinearGradient(0, 0, size, size);
+                    gradient.addColorStop(0, '#10b981');
+                    gradient.addColorStop(1, '#059669');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, size, size);
+                    
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = `bold ${size * 0.6}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('🏉', size / 2, size / 2);
+                    
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = size * 0.02;
+                    ctx.strokeRect(size * 0.1, size * 0.1, size * 0.8, size * 0.8);
+                    
+                    canvas.toBlob((blob) => {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `icon-${size}.png`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        resolve();
+                    }, 'image/png');
+                };
+                
+                // Try to load SVG from same directory
+                img.src = `icon-${size}.svg?t=${Date.now()}`;
+            });
+        }
+
+        async function convertAll() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = '<div class="status">Converting icons...</div>';
+            
+            try {
+                await convertSVGToPNG(192);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                await convertSVGToPNG(512);
+                
+                statusDiv.innerHTML = '<div class="status success">✅ Both icons converted and downloaded!<br>Make sure to save them in the public/public/ folder.</div>';
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="status error">❌ Error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
+
