@@ -463,3 +463,79 @@
 2025-11-17 22:18:40,538 - INFO - Leagues to retrain: [5479]
 2025-11-17 22:18:40,538 - INFO - 🤖 Models will be retrained to capture latest completed match results
 2025-11-17 22:18:40,538 - INFO - Saved checkpoint: 2025-11-17T22:18:40.538520
+2025-11-18 06:16:07,426 - INFO - Starting match completion detection and retraining
+2025-11-18 06:16:07,426 - INFO - No new completed matches found
+2025-11-18 06:16:07,427 - INFO - Saved checkpoint: 2025-11-18T06:16:07.427053
+2025-11-18 22:19:12,520 - INFO - Starting match completion detection and retraining
+2025-11-18 22:19:12,520 - INFO - No new completed matches found
+2025-11-18 22:19:12,520 - INFO - Saved checkpoint: 2025-11-18T22:19:12.520812
+2025-11-19 22:18:34,320 - INFO - Starting match completion detection and retraining
+2025-11-19 22:18:34,320 - INFO - No new completed matches found
+2025-11-19 22:18:34,320 - INFO - Saved checkpoint: 2025-11-19T22:18:34.320819
+2025-11-20 22:18:02,612 - INFO - Starting match completion detection and retraining
+2025-11-20 22:18:02,613 - INFO - No new completed matches found
+2025-11-20 22:18:02,613 - INFO - Saved checkpoint: 2025-11-20T22:18:02.613567
+2025-11-21 22:19:07,734 - INFO - Starting match completion detection and retraining
+2025-11-21 22:19:07,734 - INFO - No new completed matches found
+2025-11-21 22:19:07,735 - INFO - Saved checkpoint: 2025-11-21T22:19:07.734900
+2025-11-22 22:17:47,156 - INFO - Starting match completion detection and retraining
+2025-11-22 22:17:47,157 - INFO - No new completed matches found
+2025-11-22 22:17:47,157 - INFO - Saved checkpoint: 2025-11-22T22:17:47.157180
+2025-11-23 22:21:55,645 - INFO - Starting match completion detection and retraining
+2025-11-23 22:21:55,646 - INFO - Found 2 completed matches
+2025-11-23 22:21:55,646 - INFO - Completed: Georgia Rugby 23-25 Japan Rugby (Rugby Union International Friendlies)
+2025-11-23 22:21:55,646 - INFO - Completed: Lyon OU 43-24 ASM Clermont Auvergne (French Top 14)
+2025-11-23 22:21:55,646 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2025-11-23 22:21:55,646 - INFO - Leagues to retrain: [4430, 5479]
+2025-11-23 22:21:55,646 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2025-11-23 22:21:55,647 - INFO - Saved checkpoint: 2025-11-23T22:21:55.646949
+2025-11-24 22:18:40,722 - INFO - Starting match completion detection and retraining
+2025-11-24 22:18:40,723 - INFO - No new completed matches found
+2025-11-24 22:18:40,723 - INFO - Saved checkpoint: 2025-11-24T22:18:40.723633
+2025-11-25 22:19:46,488 - INFO - Starting match completion detection and retraining
+2025-11-25 22:19:46,488 - INFO - No new completed matches found
+2025-11-25 22:19:46,488 - INFO - Saved checkpoint: 2025-11-25T22:19:46.488780
+2025-11-26 22:19:03,647 - INFO - Starting match completion detection and retraining
+2025-11-26 22:19:03,647 - INFO - No new completed matches found
+2025-11-26 22:19:03,647 - INFO - Saved checkpoint: 2025-11-26T22:19:03.647774
+2025-11-27 22:18:21,113 - INFO - Starting match completion detection and retraining
+2025-11-27 22:18:21,114 - INFO - No new completed matches found
+2025-11-27 22:18:21,114 - INFO - Saved checkpoint: 2025-11-27T22:18:21.114586
+2025-11-28 22:18:11,792 - INFO - Starting match completion detection and retraining
+2025-11-28 22:18:11,793 - INFO - No new completed matches found
+2025-11-28 22:18:11,793 - INFO - Saved checkpoint: 2025-11-28T22:18:11.793476
+2025-11-29 22:17:55,812 - INFO - Starting match completion detection and retraining
+2025-11-29 22:17:55,813 - INFO - No new completed matches found
+2025-11-29 22:17:55,813 - INFO - Saved checkpoint: 2025-11-29T22:17:55.813342
+2025-11-30 22:18:10,858 - INFO - Starting match completion detection and retraining
+2025-11-30 22:18:10,858 - INFO - Found 2 completed matches
+2025-11-30 22:18:10,858 - INFO - Completed: Bulls 33-43 Lions (United Rugby Championship)
+2025-11-30 22:18:10,858 - INFO - Completed: Zebre 14-29 Cardiff Rugby (United Rugby Championship)
+2025-11-30 22:18:10,859 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2025-11-30 22:18:10,859 - INFO - Leagues to retrain: [4446]
+2025-11-30 22:18:10,859 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2025-11-30 22:18:10,859 - INFO - Saved checkpoint: 2025-11-30T22:18:10.859417
+2025-12-01 22:17:45,053 - INFO - Starting match completion detection and retraining
+2025-12-01 22:17:45,053 - INFO - No new completed matches found
+2025-12-01 22:17:45,054 - INFO - Saved checkpoint: 2025-12-01T22:17:45.053986
+2025-12-02 22:17:31,538 - INFO - Starting match completion detection and retraining
+2025-12-02 22:17:31,538 - INFO - No new completed matches found
+2025-12-02 22:17:31,539 - INFO - Saved checkpoint: 2025-12-02T22:17:31.538879
+2025-12-03 22:20:14,608 - INFO - Starting match completion detection and retraining
+2025-12-03 22:20:14,609 - INFO - No new completed matches found
+2025-12-03 22:20:14,609 - INFO - Saved checkpoint: 2025-12-03T22:20:14.609473
+2025-12-04 22:17:34,520 - INFO - Starting match completion detection and retraining
+2025-12-04 22:17:34,521 - INFO - No new completed matches found
+2025-12-04 22:17:34,521 - INFO - Saved checkpoint: 2025-12-04T22:17:34.521693
+2025-12-05 22:19:06,968 - INFO - Starting match completion detection and retraining
+2025-12-05 22:19:06,969 - INFO - No new completed matches found
+2025-12-05 22:19:06,969 - INFO - Saved checkpoint: 2025-12-05T22:19:06.969243
+2025-12-06 22:17:56,773 - INFO - Starting match completion detection and retraining
+2025-12-06 22:17:56,774 - INFO - No new completed matches found
+2025-12-06 22:17:56,774 - INFO - Saved checkpoint: 2025-12-06T22:17:56.774758
+2025-12-07 22:18:03,115 - INFO - Starting match completion detection and retraining
+2025-12-07 22:18:03,116 - INFO - No new completed matches found
+2025-12-07 22:18:03,116 - INFO - Saved checkpoint: 2025-12-07T22:18:03.116437
+2025-12-08 22:19:34,316 - INFO - Starting match completion detection and retraining
+2025-12-08 22:19:34,317 - INFO - No new completed matches found
+2025-12-08 22:19:34,317 - INFO - Saved checkpoint: 2025-12-08T22:19:34.317538
