@@ -28,6 +28,20 @@ firestore-debug.log
 ui-debug.log
 .firebaserc.local
 
+# Google Cloud credentials (NEVER commit these!)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!firebase.json
+!firestore.indexes.json
+!firestore.rules
+!storage.rules
+gha-creds-*.json
+*-creds-*.json
+*credentials*.json
+*service-account*.json
+
 # Node modules
 node_modules/
 public/node_modules/
