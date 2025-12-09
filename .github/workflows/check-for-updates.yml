@@ -84,8 +84,22 @@ jobs:
         if [ -n "$(git status --porcelain)" ]; then
           echo "📝 Changes detected - committing updates..."
           
-          # Add all modified files (checkpoint, logs, data.sqlite if changed)
-          git add -A
+          # Remove any credential files that might have been created (CRITICAL SECURITY FIX)
+          git rm -f --cached gha-creds-*.json 2>/dev/null || true
+          git rm -f --cached *-creds-*.json 2>/dev/null || true
+          
+          # Add only specific safe files
+          git add last_checkpoint.json match_detection.log auto_update.log firestore_sync.log retrain_needed.flag 2>/dev/null || true
+          
+          # Only add data.sqlite if it exists
+          [ -f "data.sqlite" ] && git add data.sqlite 2>/dev/null || true
+          
+          # Add other tracked files that changed (but skip any new .json files)
+          git add -u
+          
+          # Explicitly unstage any .json files that aren't in our safe list
+          git reset HEAD -- *.json 2>/dev/null || true
+          git add last_checkpoint.json 2>/dev/null || true
           
           # Check if retrain flag exists
           if [ -f "retrain_needed.flag" ]; then
