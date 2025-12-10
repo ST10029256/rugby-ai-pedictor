@@ -76,7 +76,6 @@ jobs:
       run: |
         echo "☁️ Uploading retrained models to Cloud Storage..."
         echo "📦 This ensures PWA uses the latest AI predictions"
-        pip install google-cloud-storage
         python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts_optimized
         echo "✅ Models uploaded - PWA will use updated AI predictions"
     
@@ -86,7 +85,6 @@ jobs:
         GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
       run: |
         echo "📊 Uploading model registry to Firestore..."
-        pip install google-cloud-firestore firebase-admin
         python scripts/upload_model_registry_to_firestore.py
         echo "✅ Model registry updated in Firestore"
         

@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Box, Typography, Grid } from '@mui/material';
 
-function PredictionsDisplay({ predictions, leagueName }) {
+const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagueName }) {
   // Group predictions by date
   const predictionsByDate = {};
   predictions.forEach((pred) => {
@@ -125,25 +125,14 @@ function PredictionsDisplay({ predictions, leagueName }) {
               homeScore = homeScore || '0';
               awayScore = awayScore || '0';
               
-              // Debug logging
-              if (idx === 0) {
-                console.log('🔍 Score extraction for first prediction:', {
-                  home_score: prediction.home_score,
-                  away_score: prediction.away_score,
-                  predicted_home_score: prediction.predicted_home_score,
-                  predicted_away_score: prediction.predicted_away_score,
-                  final_home: homeScore,
-                  final_away: awayScore,
-                  full_prediction: prediction
-                });
-              }
+              // Score extraction complete
 
               return (
               <Box key={idx} className="prediction-card fade-in-up">
                   {/* Score Display - Matching Streamlit exactly */}
                   <Box sx={{ my: 2 }}>
                     <Box sx={{ borderTop: '1px solid #4b5563', mb: 3 }} />
-                    <Grid container spacing={{ xs: 0.5, sm: 2, md: 3 }} alignItems="flex-start" sx={{ mb: 2, width: '100%', margin: 0, maxWidth: '100%' }}>
+                    <Grid container spacing={{ xs: 0.5, sm: 2, md: 3 }} alignItems="center" justifyContent="center" sx={{ mb: 2, width: '100%', margin: '0 auto', maxWidth: '100%' }}>
                       <Grid item xs={5} sm={4} md={4} lg={4} xl={4} sx={{ 
                         padding: { xs: '0.25rem', sm: '0.5rem', md: '1rem' }, 
                         boxSizing: 'border-box',
@@ -152,7 +141,7 @@ function PredictionsDisplay({ predictions, leagueName }) {
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
-                        justifyContent: 'flex-start'
+                        justifyContent: 'center'
                       }}>
                         <Typography className="team-name" sx={{ 
                           wordBreak: 'break-word',
@@ -174,20 +163,21 @@ function PredictionsDisplay({ predictions, leagueName }) {
                         display: 'flex', 
                         flexDirection: 'column',
                         alignItems: 'center', 
-                        justifyContent: 'flex-start', 
+                        justifyContent: 'center', 
                         padding: { xs: '0.25rem', sm: '0.5rem', md: '1rem' }, 
                         boxSizing: 'border-box',
                         flexShrink: 0,
-                        minWidth: { xs: '40px', sm: 'auto' }
+                        minWidth: { xs: '40px', sm: 'auto' },
+                        alignSelf: { xs: 'stretch', sm: 'flex-end', md: 'flex-end' }
                       }}>
-                        <Box sx={{ minHeight: { xs: '2.4em', sm: 'auto' }, marginBottom: { xs: '0.5rem', sm: '1rem' } }}></Box>
                         <Box sx={{ 
                           display: 'flex', 
                           alignItems: 'center', 
                           justifyContent: 'center', 
-                          minHeight: { xs: '100px', sm: '140px', md: '180px' },
                           width: '100%',
-                          marginTop: { xs: '-8px', sm: '-5px', md: '30px', lg: '30px' }
+                          height: '100%',
+                          marginTop: { xs: '2.4em', sm: '2.4em', md: '2.4em' },
+                          marginBottom: { xs: '0', sm: '0', md: '0' }
                         }}>
                           <Typography className="vs-text" sx={{ textAlign: 'center', width: '100%', margin: 0 }}>VS</Typography>
                         </Box>
@@ -200,7 +190,7 @@ function PredictionsDisplay({ predictions, leagueName }) {
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
-                        justifyContent: 'flex-start'
+                        justifyContent: 'center'
                       }}>
                         <Typography className="team-name" sx={{ 
                           wordBreak: 'break-word',
@@ -319,56 +309,68 @@ function PredictionsDisplay({ predictions, leagueName }) {
       {/* Summary Section */}
       <Box className="summary-card">
         <Typography className="summary-title">📊 Prediction Summary</Typography>
-        <Grid container spacing={3} sx={{ mt: 2 }}>
-          <Grid item xs={6} md={3}>
-            <Box className="summary-metric">
-              <Typography className="summary-metric-value">{highConf}/{predictions.length}</Typography>
-              <Typography className="summary-metric-label">High Confidence</Typography>
+        <Grid container spacing={3} sx={{ mt: 2, justifyContent: 'center', width: '100%', maxWidth: '100%' }}>
+          <Grid item xs={6} md={3} sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Box className="summary-metric" sx={{ width: '100%', textAlign: 'center' }}>
+              <Typography className="summary-metric-value" sx={{ textAlign: 'center', width: '100%' }}>{highConf}/{predictions.length}</Typography>
+              <Typography className="summary-metric-label" sx={{ textAlign: 'center', width: '100%' }}>High Confidence</Typography>
             </Box>
           </Grid>
-          <Grid item xs={6} md={3}>
-            <Box className="summary-metric">
-              <Typography className="summary-metric-value">{homeWins}</Typography>
-              <Typography className="summary-metric-label">Home Wins</Typography>
+          <Grid item xs={6} md={3} sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Box className="summary-metric" sx={{ width: '100%', textAlign: 'center' }}>
+              <Typography className="summary-metric-value" sx={{ textAlign: 'center', width: '100%' }}>{homeWins}</Typography>
+              <Typography className="summary-metric-label" sx={{ textAlign: 'center', width: '100%' }}>Home Wins</Typography>
             </Box>
           </Grid>
-          <Grid item xs={6} md={3}>
-            <Box className="summary-metric">
-              <Typography className="summary-metric-value">{awayWins}</Typography>
-              <Typography className="summary-metric-label">Away Wins</Typography>
+          <Grid item xs={6} md={3} sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Box className="summary-metric" sx={{ width: '100%', textAlign: 'center' }}>
+              <Typography className="summary-metric-value" sx={{ textAlign: 'center', width: '100%' }}>{hybridCount}/{predictions.length}</Typography>
+              <Typography className="summary-metric-label" sx={{ textAlign: 'center', width: '100%' }}>Hybrid Predictions</Typography>
             </Box>
           </Grid>
-          <Grid item xs={6} md={3}>
-            <Box className="summary-metric">
-              <Typography className="summary-metric-value">{draws}</Typography>
-              <Typography className="summary-metric-label">Draws</Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Box className="summary-metric">
-              <Typography className="summary-metric-value">{avgScoreDiff.toFixed(1)}</Typography>
-              <Typography className="summary-metric-label">Avg Margin (pts)</Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Box className="summary-metric">
-              <Typography className="summary-metric-value">{hybridCount}/{predictions.length}</Typography>
-              <Typography className="summary-metric-label">Hybrid Predictions</Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Box className="summary-metric">
-              <Typography className="summary-metric-value">
+          <Grid item xs={6} md={3} sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Box className="summary-metric" sx={{ width: '100%', textAlign: 'center' }}>
+              <Typography className="summary-metric-value" sx={{ textAlign: 'center', width: '100%' }}>
                 {(avgConfidenceBoost * 100).toFixed(1)}%
               </Typography>
-              <Typography className="summary-metric-label">Avg Confidence Boost</Typography>
+              <Typography className="summary-metric-label" sx={{ textAlign: 'center', width: '100%' }}>Avg Confidence Boost</Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={6} md={3} sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Box className="summary-metric" sx={{ 
+              width: '100%', 
+              textAlign: 'center', 
+              transform: { 
+                md: 'translateX(8vw)'
+              } 
+            }}>
+              <Typography className="summary-metric-value" sx={{ textAlign: 'center', width: '100%' }}>{awayWins}</Typography>
+              <Typography className="summary-metric-label" sx={{ textAlign: 'center', width: '100%' }}>Away Wins</Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={6} md={3} sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Box className="summary-metric" sx={{ 
+              width: '100%', 
+              textAlign: 'center', 
+              transform: { 
+                md: 'translateX(8vw)'
+              } 
+            }}>
+              <Typography className="summary-metric-value" sx={{ textAlign: 'center', width: '100%' }}>{draws}</Typography>
+              <Typography className="summary-metric-label" sx={{ textAlign: 'center', width: '100%' }}>Draws</Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={12} md={6} sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Box className="summary-metric" sx={{ width: '100%', textAlign: 'center' }}>
+              <Typography className="summary-metric-value" sx={{ textAlign: 'center', width: '100%' }}>{avgScoreDiff.toFixed(1)}</Typography>
+              <Typography className="summary-metric-label" sx={{ textAlign: 'center', width: '100%' }}>Avg Margin (pts)</Typography>
             </Box>
           </Grid>
         </Grid>
       </Box>
     </Box>
   );
-}
+});
 
 export default PredictionsDisplay;
 

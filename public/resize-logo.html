@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Resize Logo to Icons</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            background: #0e1117;
+            color: #fafafa;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 18px;
+            margin: 10px 5px;
+            width: 100%;
+        }
+        button:hover {
+            background: #059669;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            background: #1f2937;
+            border-radius: 8px;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        input[type="file"] {
+            margin: 20px 0;
+            color: #fafafa;
+        }
+    </style>
+</head>
+<body>
+    <h1>🖼️ Resize Logo to Icons</h1>
+    <p>This will resize your logo.png to 192x192 and 512x512 icon sizes.</p>
+    
+    <input type="file" id="logoInput" accept="image/png,image/jpeg,image/jpg" />
+    
+    <button onclick="resizeLogo()">Resize Logo to Icons (192 & 512)</button>
+    
+    <div id="status"></div>
+    
+    <div style="margin-top: 30px; padding: 20px; background: #1f2937; border-radius: 8px;">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Select your logo.png file (or click the button to use logo.png from the same folder)</li>
+            <li>Click the resize button</li>
+            <li>Two PNG files will download automatically</li>
+            <li>Save them in the <code>public/public/</code> folder as <code>icon-192.png</code> and <code>icon-512.png</code></li>
+            <li>Rebuild: <code>npm run build</code></li>
+        </ol>
+    </div>
+
+    <script>
+        let selectedFile = null;
+        
+        document.getElementById('logoInput').addEventListener('change', function(e) {
+            selectedFile = e.target.files[0];
+            if (selectedFile) {
+                document.getElementById('status').innerHTML = 
+                    '<div class="status">✅ File selected: ' + selectedFile.name + '</div>';
+            }
+        });
+
+        async function resizeLogo() {
+            const statusDiv = document.getElementById('status');
+            let file = selectedFile;
+            
+            // If no file selected, try to load logo.png from same directory
+            if (!file) {
+                try {
+                    const response = await fetch('logo.png');
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        file = blob;
+                        statusDiv.innerHTML = '<div class="status">📸 Using logo.png from current folder...</div>';
+                    } else {
+                        statusDiv.innerHTML = '<div class="status error">❌ Please select a logo file first, or ensure logo.png is in the same folder as this HTML file.</div>';
+                        return;
+                    }
+                } catch (error) {
+                    statusDiv.innerHTML = '<div class="status error">❌ Please select a logo file using the file input above.</div>';
+                    return;
+                }
+            }
+            
+            statusDiv.innerHTML = '<div class="status">🔄 Processing logo...</div>';
+            
+            try {
+                const img = new Image();
+                const imgUrl = file instanceof File ? URL.createObjectURL(file) : URL.createObjectURL(file);
+                
+                img.onload = () => {
+                    // Resize to 192x192
+                    const canvas192 = document.createElement('canvas');
+                    canvas192.width = 192;
+                    canvas192.height = 192;
+                    const ctx192 = canvas192.getContext('2d');
+                    ctx192.drawImage(img, 0, 0, 192, 192);
+                    
+                    canvas192.toBlob((blob) => {
+                        const url192 = URL.createObjectURL(blob);
+                        const a192 = document.createElement('a');
+                        a192.href = url192;
+                        a192.download = 'icon-192.png';
+                        document.body.appendChild(a192);
+                        a192.click();
+                        document.body.removeChild(a192);
+                        URL.revokeObjectURL(url192);
+                        
+                        // Resize to 512x512
+                        const canvas512 = document.createElement('canvas');
+                        canvas512.width = 512;
+                        canvas512.height = 512;
+                        const ctx512 = canvas512.getContext('2d');
+                        ctx512.drawImage(img, 0, 0, 512, 512);
+                        
+                        canvas512.toBlob((blob) => {
+                            const url512 = URL.createObjectURL(blob);
+                            const a512 = document.createElement('a');
+                            a512.href = url512;
+                            a512.download = 'icon-512.png';
+                            document.body.appendChild(a512);
+                            a512.click();
+                            document.body.removeChild(a512);
+                            URL.revokeObjectURL(url512);
+                            
+                            statusDiv.innerHTML = '<div class="status success">✅ Both icons created and downloaded!<br>Save them as icon-192.png and icon-512.png in the public/public/ folder.</div>';
+                        }, 'image/png');
+                    }, 'image/png');
+                };
+                
+                img.onerror = () => {
+                    statusDiv.innerHTML = '<div class="status error">❌ Error loading image. Please try again.</div>';
+                };
+                
+                img.src = imgUrl;
+                
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="status error">❌ Error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
+

@@ -69,7 +69,6 @@ jobs:
       run: |
         echo "☁️ Syncing database to Firestore for PWA..."
         echo "📱 This ensures your PWA app is always up to date with latest games"
-        pip install google-cloud-firestore
         python scripts/sync_to_firestore.py --db data.sqlite --project-id rugby-ai-61fd0
         echo "✅ Firestore sync complete - PWA will show latest data"
         

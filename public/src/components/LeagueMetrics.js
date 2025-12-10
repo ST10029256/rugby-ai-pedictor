@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { Box, CircularProgress } from '@mui/material';
 import { getLeagueMetrics } from '../firebase';
 
-function LeagueMetrics({ leagueId, leagueName }) {
+const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
   const [metrics, setMetrics] = useState({
     accuracy: 0,
     trainingGames: 0,
     aiRating: 'N/A',
+    last10Accuracy: 0,
     loading: true
   });
 
   useEffect(() => {
-    if (!leagueId) {
-      setMetrics({ accuracy: 0, trainingGames: 0, aiRating: 'N/A', loading: false });
+        if (!leagueId) {
+      setMetrics({ accuracy: 0, trainingGames: 0, aiRating: 'N/A', last10Accuracy: 0, loading: false });
       return;
     }
 
@@ -32,17 +33,20 @@ function LeagueMetrics({ leagueId, leagueName }) {
               accuracy: 0,
               trainingGames: 0,
               aiRating: 'N/A',
+              last10Accuracy: 0,
               loading: false
             });
           } else {
             const accuracy = result.data.accuracy || 0;
             const trainingGames = result.data.training_games || 0;
             const aiRating = result.data.ai_rating || 'N/A';
+            const last10Accuracy = result.data.last_10_accuracy || 0;
             
             console.log('✅ League metrics received:', {
               accuracy: accuracy,
               training_games: trainingGames,
               ai_rating: aiRating,
+              last_10_accuracy: last10Accuracy,
               full_data: result.data
             });
             
@@ -50,7 +54,7 @@ function LeagueMetrics({ leagueId, leagueName }) {
             console.log(`📊 Metrics for league ${leagueId}:`);
             console.log(`   Accuracy: ${accuracy}%`);
             console.log(`   Games Trained: ${trainingGames}`);
-            console.log(`   AI Rating: ${aiRating}`);
+            console.log(`   AI last 10 games: ${last10Accuracy}/10`);
             
             // Also log the full data object for debugging
             console.log('   Full response data:', JSON.stringify(result.data, null, 2));
@@ -59,6 +63,7 @@ function LeagueMetrics({ leagueId, leagueName }) {
               accuracy: accuracy,
               trainingGames: trainingGames,
               aiRating: aiRating,
+              last10Accuracy: last10Accuracy,
               loading: false
             });
           }
@@ -68,6 +73,7 @@ function LeagueMetrics({ leagueId, leagueName }) {
             accuracy: 0,
             trainingGames: 0,
             aiRating: 'N/A',
+            last10Accuracy: 0,
             loading: false
           });
         }
@@ -82,6 +88,7 @@ function LeagueMetrics({ leagueId, leagueName }) {
           accuracy: 0,
           trainingGames: 0,
           aiRating: 'N/A',
+          last10Accuracy: 0,
           loading: false
         });
       }
@@ -116,13 +123,17 @@ function LeagueMetrics({ leagueId, leagueName }) {
         <Box className="metric-delta">Completed</Box>
       </Box>
       <Box className="custom-metric">
-        <Box className="metric-label">AI Rating</Box>
-        <Box className="metric-value">{metrics.aiRating}</Box>
+        <Box className="metric-label">AI last 10 games</Box>
+        <Box className="metric-value">
+          {metrics.last10Accuracy > 0 
+            ? `${metrics.last10Accuracy}/10`
+            : 'N/A'}
+        </Box>
         <Box className="metric-delta">Based on Accuracy</Box>
       </Box>
     </Box>
   );
-}
+});
 
 export default LeagueMetrics;
 

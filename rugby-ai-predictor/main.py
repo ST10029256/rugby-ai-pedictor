@@ -240,6 +240,100 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                 logger.error(f"Traceback: {error_trace}")
                 return {'error': f'Prediction failed: {str(e)}'}
         
+        # Save prediction to Firestore if we have event_id or can find it
+        try:
+            event_id = data.get('event_id') or prediction.get('event_id') or prediction.get('match_id')
+            
+            # If no event_id provided, try to find it from database
+            if not event_id:
+                try:
+                    import sqlite3
+                    db_path = os.getenv("DB_PATH")
+                    if not db_path:
+                        db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
+                    
+                    if os.path.exists(db_path):
+                        conn = sqlite3.connect(db_path)
+                        cursor = conn.cursor()
+                        
+                        # Try to find event_id by matching teams and date
+                        query = """
+                        SELECT e.id FROM event e
+                        LEFT JOIN team ht ON e.home_team_id = ht.id
+                        LEFT JOIN team at ON e.away_team_id = at.id
+                        WHERE e.league_id = ? 
+                          AND (ht.name = ? OR ht.name LIKE ? OR ? LIKE '%' || ht.name || '%')
+                          AND (at.name = ? OR at.name LIKE ? OR ? LIKE '%' || at.name || '%')
+                          AND e.date_event LIKE ?
+                        ORDER BY e.date_event DESC
+                        LIMIT 1
+                        """
+                        
+                        date_pattern = f"{match_date}%"
+                        cursor.execute(query, (
+                            league_id_int,
+                            home_team, f"%{home_team}%", home_team,
+                            away_team, f"%{away_team}%", away_team,
+                            date_pattern
+                        ))
+                        result = cursor.fetchone()
+                        if result:
+                            event_id = result[0]
+                        conn.close()
+                except Exception as db_error:
+                    logger.debug(f"Could not find event_id from database: {db_error}")
+            
+            # Save to Firestore if we have event_id and prediction data
+            if event_id and prediction and not prediction.get('error'):
+                try:
+                    db = get_firestore_client()
+                    prediction_ref = db.collection('predictions').document(str(event_id))
+                    
+                    # Extract predicted winner
+                    predicted_winner = prediction.get('winner') or prediction.get('predicted_winner')
+                    if not predicted_winner:
+                        # Determine from scores
+                        home_score = prediction.get('predicted_home_score', 0)
+                        away_score = prediction.get('predicted_away_score', 0)
+                        if home_score > away_score:
+                            predicted_winner = home_team
+                        elif away_score > home_score:
+                            predicted_winner = away_team
+                        else:
+                            predicted_winner = 'Draw'
+                    
+                    # Prepare prediction data to save
+                    prediction_data = {
+                        'event_id': int(event_id),
+                        'league_id': league_id_int,
+                        'home_team': home_team,
+                        'away_team': away_team,
+                        'match_date': match_date,
+                        'predicted_winner': predicted_winner,
+                        'winner': predicted_winner,  # Also save as 'winner' for compatibility
+                        'predicted_home_score': prediction.get('predicted_home_score'),
+                        'predicted_away_score': prediction.get('predicted_away_score'),
+                        'home_win_prob': prediction.get('home_win_prob'),
+                        'confidence': prediction.get('confidence'),
+                        'prediction_type': prediction.get('prediction_type', 'AI Only'),
+                        'created_at': firestore.SERVER_TIMESTAMP,
+                    }
+                    
+                    # Add any additional prediction fields
+                    if 'ai_probability' in prediction:
+                        prediction_data['ai_probability'] = prediction.get('ai_probability')
+                    if 'hybrid_probability' in prediction:
+                        prediction_data['hybrid_probability'] = prediction.get('hybrid_probability')
+                    if 'confidence_boost' in prediction:
+                        prediction_data['confidence_boost'] = prediction.get('confidence_boost')
+                    
+                    prediction_ref.set(prediction_data, merge=True)
+                    logger.info(f"✅ Saved prediction to Firestore for event_id: {event_id}")
+                except Exception as firestore_error:
+                    logger.warning(f"Could not save prediction to Firestore: {firestore_error}")
+        except Exception as save_error:
+            logger.warning(f"Error saving prediction: {save_error}")
+        
         logger.info("=== predict_match completed successfully ===")
         return prediction
         
@@ -352,6 +446,100 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                 response_data = {'error': f'Prediction failed: {str(e)}', 'traceback': error_trace}
                 headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
                 return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
+        
+        # Save prediction to Firestore (same logic as predict_match)
+        try:
+            event_id = data.get('event_id') or prediction.get('event_id') or prediction.get('match_id')
+            
+            # If no event_id provided, try to find it from database
+            if not event_id:
+                try:
+                    import sqlite3
+                    db_path = os.getenv("DB_PATH")
+                    if not db_path:
+                        db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
+                    
+                    if os.path.exists(db_path):
+                        conn = sqlite3.connect(db_path)
+                        cursor = conn.cursor()
+                        
+                        # Try to find event_id by matching teams and date
+                        query = """
+                        SELECT e.id FROM event e
+                        LEFT JOIN team ht ON e.home_team_id = ht.id
+                        LEFT JOIN team at ON e.away_team_id = at.id
+                        WHERE e.league_id = ? 
+                          AND (ht.name = ? OR ht.name LIKE ? OR ? LIKE '%' || ht.name || '%')
+                          AND (at.name = ? OR at.name LIKE ? OR ? LIKE '%' || at.name || '%')
+                          AND e.date_event LIKE ?
+                        ORDER BY e.date_event DESC
+                        LIMIT 1
+                        """
+                        
+                        date_pattern = f"{match_date}%"
+                        cursor.execute(query, (
+                            league_id_int,
+                            home_team, f"%{home_team}%", home_team,
+                            away_team, f"%{away_team}%", away_team,
+                            date_pattern
+                        ))
+                        result = cursor.fetchone()
+                        if result:
+                            event_id = result[0]
+                        conn.close()
+                except Exception as db_error:
+                    logger.debug(f"Could not find event_id from database: {db_error}")
+            
+            # Save to Firestore if we have event_id and prediction data
+            if event_id and prediction and not prediction.get('error'):
+                try:
+                    db = get_firestore_client()
+                    prediction_ref = db.collection('predictions').document(str(event_id))
+                    
+                    # Extract predicted winner
+                    predicted_winner = prediction.get('winner') or prediction.get('predicted_winner')
+                    if not predicted_winner:
+                        # Determine from scores
+                        home_score = prediction.get('predicted_home_score', 0)
+                        away_score = prediction.get('predicted_away_score', 0)
+                        if home_score > away_score:
+                            predicted_winner = home_team
+                        elif away_score > home_score:
+                            predicted_winner = away_team
+                        else:
+                            predicted_winner = 'Draw'
+                    
+                    # Prepare prediction data to save
+                    prediction_data = {
+                        'event_id': int(event_id),
+                        'league_id': league_id_int,
+                        'home_team': home_team,
+                        'away_team': away_team,
+                        'match_date': match_date,
+                        'predicted_winner': predicted_winner,
+                        'winner': predicted_winner,  # Also save as 'winner' for compatibility
+                        'predicted_home_score': prediction.get('predicted_home_score'),
+                        'predicted_away_score': prediction.get('predicted_away_score'),
+                        'home_win_prob': prediction.get('home_win_prob'),
+                        'confidence': prediction.get('confidence'),
+                        'prediction_type': prediction.get('prediction_type', 'AI Only'),
+                        'created_at': firestore.SERVER_TIMESTAMP,
+                    }
+                    
+                    # Add any additional prediction fields
+                    if 'ai_probability' in prediction:
+                        prediction_data['ai_probability'] = prediction.get('ai_probability')
+                    if 'hybrid_probability' in prediction:
+                        prediction_data['hybrid_probability'] = prediction.get('hybrid_probability')
+                    if 'confidence_boost' in prediction:
+                        prediction_data['confidence_boost'] = prediction.get('confidence_boost')
+                    
+                    prediction_ref.set(prediction_data, merge=True)
+                    logger.info(f"✅ Saved prediction to Firestore for event_id: {event_id}")
+                except Exception as firestore_error:
+                    logger.warning(f"Could not save prediction to Firestore: {firestore_error}")
+        except Exception as save_error:
+            logger.warning(f"Error saving prediction: {save_error}")
         
         logger.info("=== predict_match_http completed successfully ===")
         headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
@@ -764,7 +952,117 @@ def get_leagues(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e)}
 
 
-@https_fn.on_call()
+def _calculate_last_10_games_accuracy(league_id: int) -> int:
+    """
+    Helper function to calculate the accuracy of the last 10 completed games for a league.
+    Returns the number of correct predictions out of 10.
+    This is NOT a Cloud Function - it's a helper function called internally.
+    """
+    import sqlite3
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Get database path
+        db_path = os.getenv("DB_PATH")
+        if not db_path:
+            db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
+        
+        if not os.path.exists(db_path):
+            logger.warning(f"Database not found at {db_path}, cannot calculate last 10 games accuracy")
+            return 0
+        
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Get last 10 completed games with scores for this league
+        query = """
+        SELECT e.id, e.home_team_id, e.away_team_id, e.home_score, e.away_score, 
+               ht.name as home_team_name, at.name as away_team_name,
+               e.date_event, e.timestamp
+        FROM event e
+        LEFT JOIN team ht ON e.home_team_id = ht.id
+        LEFT JOIN team at ON e.away_team_id = at.id
+        WHERE e.league_id = ? 
+          AND e.home_score IS NOT NULL 
+          AND e.away_score IS NOT NULL
+          AND e.status != 'Postponed'
+        ORDER BY e.date_event DESC, e.timestamp DESC
+        LIMIT 10
+        """
+        
+        cursor.execute(query, (league_id,))
+        games = cursor.fetchall()
+        conn.close()
+        
+        if len(games) < 10:
+            logger.info(f"Only {len(games)} completed games found for league {league_id}")
+            # Return 0 if we don't have 10 games yet
+            return 0
+        
+        # Get predictor to make predictions for these games
+        try:
+            predictor = get_predictor()
+            correct_predictions = 0
+            
+            for game in games:
+                event_id, home_team_id, away_team_id, home_score, away_score, \
+                home_team_name, away_team_name, date_event, timestamp = game
+                
+                # Determine actual winner
+                if home_score > away_score:
+                    actual_winner = 'Home'
+                elif away_score > home_score:
+                    actual_winner = 'Away'
+                else:
+                    actual_winner = 'Draw'
+                
+                # Make prediction (we need to predict as if the game hasn't happened yet)
+                # For accuracy, we'd need to have stored predictions made before the game
+                # For now, we'll use the model to predict based on pre-game data
+                # This is a simplified approach - ideally predictions should be stored
+                try:
+                    # Try to get stored prediction from Firestore if available
+                    db = get_firestore_client()
+                    prediction_ref = db.collection('predictions').document(str(event_id))
+                    prediction_doc = prediction_ref.get()
+                    
+                    if prediction_doc.exists:
+                        pred_data = prediction_doc.to_dict()
+                        predicted_winner = pred_data.get('predicted_winner') or pred_data.get('winner', '')
+                        
+                        # Normalize winner format
+                        if predicted_winner == home_team_name or predicted_winner == 'Home':
+                            predicted_winner = 'Home'
+                        elif predicted_winner == away_team_name or predicted_winner == 'Away':
+                            predicted_winner = 'Away'
+                        elif predicted_winner == 'Draw':
+                            predicted_winner = 'Draw'
+                        else:
+                            # Try to predict using the model
+                            continue
+                        
+                        if predicted_winner == actual_winner:
+                            correct_predictions += 1
+                    else:
+                        # No stored prediction, skip this game
+                        continue
+                except Exception as pred_error:
+                    logger.debug(f"Error getting prediction for game {event_id}: {pred_error}")
+                    continue
+            
+            logger.info(f"Last 10 games accuracy for league {league_id}: {correct_predictions}/10")
+            return correct_predictions
+            
+        except Exception as pred_error:
+            logger.warning(f"Error calculating predictions: {pred_error}")
+            return 0
+            
+    except Exception as e:
+        logger.warning(f"Error calculating last 10 games accuracy: {e}")
+        return 0
+
+
 def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get league-specific metrics (accuracy, training games, etc.)
@@ -790,6 +1088,9 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
         league_id_str = str(league_id)
         logger.info(f"Fetching metrics for league_id: {league_id_str}")
         
+        # Calculate last 10 games accuracy
+        last_10_accuracy = _calculate_last_10_games_accuracy(league_id)
+        
         # PRIMARY: Try to load from Firestore (fastest and most reliable)
         try:
             db = get_firestore_client()
@@ -807,6 +1108,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     'accuracy': league_metric.get('accuracy', 0.0),
                     'training_games': league_metric.get('training_games', 0),
                     'ai_rating': league_metric.get('ai_rating', 'N/A'),
+                    'last_10_accuracy': last_10_accuracy,
                     'trained_at': league_metric.get('trained_at'),
                     'model_type': league_metric.get('model_type', 'unknown')
                 }
@@ -845,6 +1147,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'accuracy': round(accuracy, 1),
                         'training_games': training_games,
                         'ai_rating': ai_rating,
+                        'last_10_accuracy': last_10_accuracy,
                         'trained_at': league_data.get('trained_at'),
                         'model_type': league_data.get('model_type', 'unknown')
                     }
@@ -889,6 +1192,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'accuracy': round(accuracy, 1),
                         'training_games': training_games,
                         'ai_rating': ai_rating,
+                        'last_10_accuracy': last_10_accuracy,
                         'trained_at': league_data.get('trained_at'),
                         'model_type': league_data.get('model_type', 'unknown')
                     }
@@ -936,6 +1240,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                                 'accuracy': round(accuracy, 1),
                                 'training_games': training_games,
                                 'ai_rating': ai_rating,
+                                'last_10_accuracy': last_10_accuracy,
                                 'trained_at': league_data.get('trained_at'),
                                 'model_type': league_data.get('model_type', 'unknown')
                             }
@@ -951,6 +1256,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
             'accuracy': 0.0,
             'training_games': 0,
             'ai_rating': 'N/A',
+            'last_10_accuracy': last_10_accuracy,
             'trained_at': None,
             'model_type': 'unknown'
         }

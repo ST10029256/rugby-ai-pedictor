@@ -10,6 +10,308 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Prevent scrolling when league dropdown menu is open */
+body.menu-open {
+  overflow: hidden !important;
+}
+
+body.menu-open main,
+body.menu-open .main-content-wrapper {
+  overflow: hidden !important;
+  pointer-events: auto !important; /* Ensure menu can still be clicked */
+}
+
+/* Ensure menu and drawer remain interactive */
+body.menu-open .MuiDrawer-paper,
+body.menu-open .MuiMenu-root,
+body.menu-open .MuiMenu-paper {
+  pointer-events: auto !important;
+}
+
+/* Prevent scrolling when mobile drawer is open */
+body.drawer-open {
+  overflow: hidden !important;
+}
+
+body.drawer-open main,
+body.drawer-open .main-content-wrapper {
+  overflow: hidden !important;
+  pointer-events: auto !important; /* Ensure drawer can still be clicked */
+}
+
+/* Ensure drawer remains interactive */
+body.drawer-open .MuiDrawer-paper {
+  pointer-events: auto !important;
+}
+
+/* Ensure Select dropdown menu appears above drawer on all screen sizes */
+.MuiDrawer-paper {
+  overflow: visible !important; /* Allow menu to be visible */
+  position: relative !important;
+  max-width: 280px !important;
+  width: 280px !important;
+}
+
+/* Make dropdown menu items text smaller on both desktop and mobile */
+.MuiDrawer-paper .MuiMenuItem-root {
+  font-size: 0.875rem !important; /* 14px instead of default 16px */
+}
+
+/* Desktop only: Make drawer sticky and main content scrollable */
+@media (min-width: 769px) {
+  /* Make drawer sticky on desktop - only for permanent drawers */
+  .MuiDrawer-root[class*="MuiDrawer-permanent"] .MuiDrawer-paper,
+  .MuiDrawer-root:not([class*="MuiDrawer-temporary"]) .MuiDrawer-paper {
+    position: sticky !important;
+    top: 0 !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+  }
+  
+  /* Ensure main content scrolls independently on desktop */
+  main {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling */
+  }
+  
+  /* Fix Select League input width on desktop - prevent expansion */
+  /* First, ensure the drawer paper itself doesn't expand */
+  .MuiDrawer-paper {
+    width: 280px !important;
+    max-width: 280px !important;
+    min-width: 280px !important;
+    overflow: visible !important; /* Allow labels to be visible */
+  }
+  
+  /* Ensure the drawer content Box doesn't expand */
+  .MuiDrawer-paper > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important; /* Allow label to be visible */
+  }
+  
+  /* Ensure the Box wrapper around LeagueSelector doesn't expand */
+  .MuiDrawer-paper > div > div:last-child {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important; /* Allow label to be visible */
+  }
+  
+  /* Fix InputLabel visibility - prevent cut-off */
+  .MuiDrawer-paper .MuiInputLabel-root {
+    overflow: visible !important;
+    white-space: nowrap !important;
+    max-width: 100% !important;
+    left: 0 !important;
+    right: 0 !important;
+  }
+  
+  /* Ensure label when shrunk is fully visible */
+  .MuiDrawer-paper .MuiInputLabel-shrink {
+    max-width: calc(100% - 32px) !important;
+    transform: translate(14px, -9px) scale(0.75) !important;
+    transform-origin: top left !important;
+  }
+  
+  /* Force FormControl to fixed width - drawer is 280px, padding is 24px (3*8px), so content area is ~232px */
+  .MuiDrawer-paper .MuiFormControl-root {
+    width: 100% !important;
+    max-width: 232px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    flex-shrink: 1 !important;
+    display: block !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Force OutlinedInput to fixed width */
+  .MuiDrawer-paper .MuiOutlinedInput-root {
+    width: 100% !important;
+    max-width: 232px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    flex-shrink: 1 !important;
+    flex-grow: 0 !important;
+    flex-basis: auto !important;
+    display: flex !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Force Select root to fixed width */
+  .MuiDrawer-paper .MuiSelect-root {
+    width: 100% !important;
+    max-width: 232px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    flex-shrink: 1 !important;
+    flex-grow: 0 !important;
+    flex-basis: auto !important;
+    display: block !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Force Select select element to fixed width with truncation */
+  /* Reduced padding-right from 32px to 24px to give more room for text */
+  .MuiDrawer-paper .MuiSelect-select {
+    width: calc(100% - 24px) !important;
+    max-width: calc(232px - 24px) !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    box-sizing: border-box !important;
+    padding-right: 24px !important; /* Reduced from 32px to give more text space */
+    display: block !important;
+    flex: 0 0 auto !important;
+    flex-shrink: 1 !important;
+    flex-grow: 0 !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Force InputBase to fixed width */
+  .MuiDrawer-paper .MuiInputBase-root {
+    width: 100% !important;
+    max-width: 232px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    flex-shrink: 1 !important;
+    flex-grow: 0 !important;
+    flex-basis: auto !important;
+    display: flex !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Target the native input element */
+  .MuiDrawer-paper .MuiSelect-nativeInput {
+    width: 100% !important;
+    max-width: 232px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+  
+  /* Target the div wrapper inside Select */
+  .MuiDrawer-paper .MuiSelect-root > div {
+    width: 100% !important;
+    max-width: calc(232px - 24px) !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    display: block !important;
+    box-sizing: border-box !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Force the input container to respect width constraints */
+  .MuiDrawer-paper .MuiInputBase-input {
+    width: 100% !important;
+    max-width: calc(232px - 24px) !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Ensure FormControl doesn't allow expansion */
+  .MuiDrawer-paper .MuiFormControl-root.MuiFormControl-fullWidth {
+    width: 100% !important;
+    max-width: 232px !important;
+    min-width: 0 !important;
+    display: block !important;
+    flex-shrink: 1 !important;
+    flex-grow: 0 !important;
+    table-layout: fixed !important;
+  }
+  
+  /* Override Material-UI's internal calculations */
+  .MuiDrawer-paper .MuiOutlinedInput-root.MuiInputBase-root {
+    display: flex !important;
+    width: 100% !important;
+    max-width: 232px !important;
+    min-width: 0 !important;
+    flex-shrink: 1 !important;
+    flex-grow: 0 !important;
+    flex-basis: auto !important;
+    table-layout: fixed !important;
+  }
+}
+
+/* Allow menu to be visible but constrained */
+.MuiDrawer-paper .MuiMenu-root {
+  overflow: visible !important;
+}
+
+.MuiDrawer-paper .MuiMenu-root {
+  z-index: 1400 !important;
+}
+
+.MuiDrawer-paper .MuiPaper-root.MuiMenu-paper {
+  z-index: 1400 !important;
+}
+
+/* Ensure menu list doesn't get clipped */
+.MuiMenu-list {
+  z-index: 1400 !important;
+}
+
+/* Constrain menu to drawer width and prevent overflow into main content */
+.MuiDrawer-paper .MuiPaper-root.MuiMenu-paper,
+.MuiMenu-paper {
+  max-width: 280px !important; /* Never exceed control panel width */
+  width: 100% !important;
+  box-sizing: border-box !important;
+  left: 0 !important; /* Align to left edge of drawer */
+  right: auto !important;
+}
+
+/* Prevent menu from extending beyond drawer boundaries */
+.MuiDrawer-paper .MuiMenu-root {
+  max-width: 280px !important; /* Never exceed control panel width */
+  width: 100% !important;
+  overflow: visible !important;
+  left: 0 !important; /* Align to left edge */
+}
+
+.MuiDrawer-paper .MuiMenu-root .MuiPaper-root {
+  max-width: 280px !important; /* Never exceed control panel width */
+  width: 100% !important;
+  box-sizing: border-box !important;
+  position: absolute !important;
+  left: 0 !important; /* Force left alignment */
+  right: auto !important;
+  transform-origin: top left !important;
+}
+
+/* Ensure FormControl in drawer constrains menu width */
+.MuiDrawer-paper .MuiFormControl-root {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Ensure FormControl in drawer doesn't cause overflow */
+.MuiDrawer-paper .MuiFormControl-root {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+}
+
+/* Ensure Select in drawer is constrained */
+.MuiDrawer-paper .MuiSelect-root {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
 /* Live Match Cards */
 .live-match-card {
   background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
@@ -223,11 +525,25 @@ body {
     flex-direction: row;
     gap: 0.75rem;
     align-items: center;
+    flex: 1;
+    min-width: 0;
   }
   
   .odds-team .team-name {
     margin-bottom: 0;
     margin-right: 0;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50%;
+  }
+  
+  .odds-team .odds-value {
+    flex-shrink: 0;
+    min-width: 70px;
   }
 }
 
@@ -702,8 +1018,7 @@ h2.match-title {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 140px;
-  height: 100%;
+  height: auto;
   position: relative;
   text-align: center;
   width: 100%;
@@ -900,6 +1215,25 @@ h2.match-title {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Summary Grid - Center always */
+.summary-card .MuiGrid-container {
+  justify-content: center !important;
+  width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* Summary Grid items - Center always */
+.summary-card .MuiGrid-item {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  text-align: center !important;
 }
 
 @media (min-width: 1024px) {
@@ -919,10 +1253,17 @@ h2.match-title {
   font-weight: 700;
   margin: 0 0 1.5rem 0;
   text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+  text-align: center;
+  width: 100%;
 }
 
 .summary-metric {
   text-align: center;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .summary-metric-value {
@@ -930,12 +1271,16 @@ h2.match-title {
   font-weight: 800;
   margin: 0;
   text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+  text-align: center;
+  width: 100%;
 }
 
 .summary-metric-label {
   font-size: 1rem;
   opacity: 0.9;
   margin: 0.5rem 0 0 0;
+  text-align: center;
+  width: 100%;
 }
 
 /* Animation keyframes - Enhanced */
@@ -1141,19 +1486,178 @@ h2.match-title {
     line-height: 1.3 !important;
   }
   
-  /* Manual Odds Input - Center on mobile */
-  .MuiGrid-container[spacing="2"] {
-    justify-content: center;
+  /* Manual Odds Input - Center on mobile only */
+  .manual-odds-match-box .MuiGrid-container,
+  .MuiGrid-container[spacing="2"],
+  .MuiGrid-container[spacing="1"] {
+    justify-content: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    width: 100% !important;
   }
   
   /* Center match text in manual odds on mobile */
+  .manual-odds-match-box .MuiGrid-item[class*="xs-12"] .MuiTypography-root,
   .MuiGrid-item[class*="xs-12"] .MuiTypography-root {
     text-align: center !important;
+  }
+  
+  /* Ensure manual odds input fields are centered on mobile only */
+  .manual-odds-match-box .MuiGrid-item[class*="xs-6"],
+  .manual-odds-match-box .MuiGrid-item[class*="MuiGrid-item"][class*="xs-6"],
+  .MuiGrid-item[class*="xs-6"],
+  .MuiGrid-item[class*="MuiGrid-item"][class*="xs-6"] {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    text-align: center !important;
+  }
+  
+  /* Force TextField centering on mobile only */
+  .manual-odds-match-box .MuiGrid-item[class*="xs-6"] .MuiTextField-root,
+  .manual-odds-match-box .MuiGrid-item[class*="xs-6"] > .MuiTextField-root,
+  .MuiGrid-item[class*="xs-6"] .MuiTextField-root,
+  .MuiGrid-item[class*="xs-6"] > .MuiTextField-root {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    display: flex !important;
+    justify-content: center !important;
+  }
+  
+  /* Center input text on mobile only - Reduced height */
+  .manual-odds-match-box .MuiGrid-item[class*="xs-6"] .MuiTextField-root .MuiOutlinedInput-root,
+  .MuiGrid-item[class*="xs-6"] .MuiTextField-root .MuiOutlinedInput-root {
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+  
+  .manual-odds-match-box .MuiGrid-item[class*="xs-6"] .MuiTextField-root .MuiOutlinedInput-root input,
+  .MuiGrid-item[class*="xs-6"] .MuiTextField-root .MuiOutlinedInput-root input {
+    text-align: center !important;
+    padding: 10px 8px !important;
+    font-size: 0.9rem !important;
+    height: auto !important;
+  }
+  
+  /* Label positioning - left-aligned, vertically centered on mobile and desktop */
+  .manual-odds-match-box .MuiTextField-root .MuiInputLabel-root,
+  .MuiTextField-root .MuiInputLabel-root {
+    left: 14px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    transform-origin: left center !important;
+    right: auto !important;
+    width: auto !important;
+  }
+  
+  /* Label when shrunk (when input has value) */
+  .manual-odds-match-box .MuiTextField-root .MuiInputLabel-shrink,
+  .MuiTextField-root .MuiInputLabel-shrink {
+    transform: translateY(-130%) scale(0.75) !important;
+    transform-origin: left top !important;
+  }
+  
+  /* Reduce label size on mobile */
+  .manual-odds-match-box .MuiGrid-item[class*="xs-6"] .MuiTextField-root .MuiInputLabel-root,
+  .MuiGrid-item[class*="xs-6"] .MuiTextField-root .MuiInputLabel-root {
+    font-size: 0.85rem !important;
+    left: 8px !important;
+  }
+  
+  /* Additional override for Material-UI Grid items */
+  .manual-odds-match-box .MuiGrid-item[class*="xs-6"][class*="MuiGrid-item"],
+  .MuiGrid-item[class*="xs-6"][class*="MuiGrid-item"] {
+    justify-content: center !important;
+    align-items: center !important;
+  }
+  
+  /* Center score vs score display on mobile */
+  .prediction-card .MuiGrid-container {
+    justify-content: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Ensure team scores are centered on mobile */
+  .prediction-card .MuiGrid-item[class*="xs-5"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding: 0.25rem !important;
+    box-sizing: border-box !important;
+  }
+  
+  /* VS Grid item - align with score boxes on mobile */
+  .prediction-card .MuiGrid-item[class*="xs-2"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding: 0.25rem !important;
+    box-sizing: border-box !important;
+    align-self: stretch !important;
+  }
+  
+  /* Center team names and scores on mobile */
+  .prediction-card .team-name,
+  .prediction-card .team-score {
+    text-align: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    width: 100% !important;
+  }
+  
+  /* Center VS text vertically and horizontally on mobile */
+  .prediction-card .vs-text {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+  }
+  
+  /* Ensure VS container aligns with score boxes on mobile */
+  .prediction-card .MuiGrid-item[class*="xs-2"] {
+    align-self: stretch !important;
+    justify-content: flex-start !important;
+  }
+  
+  .prediction-card .MuiGrid-item[class*="xs-2"] > div {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    margin-top: 2.4em !important;
+    min-height: 100px !important;
   }
   
   /* Drawer/Sidebar Mobile Styles */
   .MuiDrawer-paper {
     box-shadow: 4px 0 20px rgba(0,0,0,0.5) !important;
+    overflow: visible !important; /* Allow dropdown menu to overflow drawer */
+  }
+  
+  /* Ensure Select menu appears above drawer */
+  .MuiDrawer-paper .MuiMenu-root {
+    z-index: 1400 !important;
+  }
+  
+  .MuiDrawer-paper .MuiPaper-root.MuiMenu-paper {
+    z-index: 1400 !important;
   }
   
   /* Prevent body scroll when drawer is open */
@@ -1180,6 +1684,44 @@ h2.match-title {
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+  
+  /* Summary Grid - Center on mobile and desktop */
+  .summary-card .MuiGrid-container {
+    justify-content: center !important;
+    width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
+  /* Summary metrics - Center on mobile and desktop */
+  .summary-card .MuiGrid-item {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+  
+  .summary-metric {
+    text-align: center !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 auto !important;
+  }
+  
+  .summary-metric-value,
+  .summary-metric-label {
+    text-align: center !important;
+    width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
   
   /* Main Content Wrapper */
@@ -1322,26 +1864,37 @@ h2.match-title {
   }
   
   .odds-row {
-    gap: 0.75rem;
+    gap: 0.5rem;
     flex-wrap: nowrap;
-  }
-  
-  .odds-team {
-    flex-direction: column;
-    gap: 0;
     align-items: center;
   }
   
-  .odds-team .team-name {
-    font-size: 0.9rem;
-    margin-bottom: 0.75rem;
-    margin-right: 0;
+  .odds-team {
+    flex-direction: row;
+    gap: 0.5rem;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
   }
   
-  .odds-value {
+  .odds-team .team-name {
+    font-size: 0.85rem;
+    margin-bottom: 0;
+    margin-right: 0;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60%;
+  }
+  
+  .odds-team .odds-value {
+    flex-shrink: 0;
+    min-width: 60px;
     font-size: 1.4rem;
     padding: 0.35rem 0.7rem;
-    min-width: 55px;
   }
   
   .odds-vs {
@@ -1533,6 +2086,17 @@ h2.match-title {
   /* Ensure vs text aligns with center of prediction scores on larger screens */
   .vs-text {
     font-size: 5rem !important;
+  }
+  
+  /* Align VS with score boxes on desktop */
+  .prediction-card .MuiGrid-item[class*="md-4"][class*="xs-2"],
+  .prediction-card .MuiGrid-item[class*="sm-4"][class*="xs-2"] {
+    align-self: flex-end !important;
+  }
+  
+  .prediction-card .MuiGrid-item[class*="md-4"][class*="xs-2"] > div,
+  .prediction-card .MuiGrid-item[class*="sm-4"][class*="xs-2"] > div {
+    margin-top: 2.4em !important;
   }
   
   .live-vs-text {

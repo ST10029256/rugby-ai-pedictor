@@ -17,7 +17,6 @@ const createSVGIcon = (size) => {
   </defs>
   <rect width="${size}" height="${size}" fill="url(#grad)" rx="${size * 0.1}"/>
   <text x="50%" y="50%" font-family="Arial, sans-serif" font-size="${size * 0.6}" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="#ffffff">🏉</text>
-  <rect width="${size}" height="${size}" fill="none" stroke="#ffffff" stroke-width="${size * 0.02}" rx="${size * 0.1}"/>
 </svg>`;
 };
 
@@ -42,11 +41,6 @@ try {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('🏉', size / 2, size / 2);
-    
-    // Border
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = size * 0.02;
-    ctx.strokeRect(size * 0.1, size * 0.1, size * 0.8, size * 0.8);
     
     return canvas.toBuffer('image/png');
   }
