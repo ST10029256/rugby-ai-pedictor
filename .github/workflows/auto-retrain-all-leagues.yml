@@ -62,8 +62,8 @@ jobs:
       env:
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
       run: |
-        echo "🤖 Retraining AI models with optimized training..."
-        python scripts/train_models_optimized.py
+        echo "🤖 Retraining AI models with XGBoost..."
+        python scripts/train_xgboost_models.py
     
     - name: Authenticate to Google Cloud
       if: steps.check-retrain.outputs.retrain_needed == 'true'
