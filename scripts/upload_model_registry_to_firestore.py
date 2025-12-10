@@ -22,7 +22,7 @@ def upload_registry_to_firestore(registry_path: str, project_id: str = "rugby-ai
     Upload model registry JSON to Firestore
     
     Args:
-        registry_path: Path to model_registry_optimized.json
+        registry_path: Path to model_registry.json (XGBoost models)
         project_id: Firebase project ID
     """
     try:
@@ -120,7 +120,7 @@ def main():
     parser = argparse.ArgumentParser(description='Upload model registry to Firestore')
     parser.add_argument(
         '--registry',
-        default='artifacts_optimized/model_registry_optimized.json',
+        default='artifacts/model_registry.json',
         help='Path to model registry JSON file'
     )
     parser.add_argument(

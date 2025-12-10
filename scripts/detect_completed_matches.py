@@ -149,7 +149,7 @@ def trigger_model_retraining(leagues_to_retrain: List[int]) -> bool:
     logger.info(f"Triggering retraining for leagues: {leagues_to_retrain}")
     
     # Run the training script
-    train_script = os.path.join(project_root, "scripts", "train_models.py")
+    train_script = os.path.join(project_root, "scripts", "train_xgboost_models.py")
     
     try:
         result = subprocess.run(
