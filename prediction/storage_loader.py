@@ -68,16 +68,20 @@ def load_model_from_storage_or_local(
             except Exception as list_err:
                 logger.warning(f"Could not list bucket contents: {list_err}")
             
-            # Try optimized model first - check multiple possible paths
+            # Try XGBoost models first, then optimized, then regular
             blob_paths = [
-                f"models/league_{league_id}_model_optimized.pkl",  # Most likely from upload script
+                f"models/league_{league_id}_model_xgboost.pkl",  # XGBoost model
+                f"models/artifacts/league_{league_id}_model_xgboost.pkl",
+                f"league_{league_id}_model_xgboost.pkl",
+                f"artifacts/league_{league_id}_model_xgboost.pkl",
+                f"models/league_{league_id}_model_optimized.pkl",  # Optimized model
                 f"models/artifacts_optimized/league_{league_id}_model_optimized.pkl",
-                f"league_{league_id}_model_optimized.pkl",  # Direct in bucket root
-                f"artifacts_optimized/league_{league_id}_model_optimized.pkl",  # In artifacts_optimized folder
-                f"models/league_{league_id}_model.pkl",
+                f"league_{league_id}_model_optimized.pkl",
+                f"artifacts_optimized/league_{league_id}_model_optimized.pkl",
+                f"models/league_{league_id}_model.pkl",  # Regular model
                 f"models/artifacts/league_{league_id}_model.pkl",
-                f"league_{league_id}_model.pkl",  # Direct in bucket root
-                f"artifacts/league_{league_id}_model.pkl"  # In artifacts folder
+                f"league_{league_id}_model.pkl",
+                f"artifacts/league_{league_id}_model.pkl"
             ]
             
             logger.info(f"Checking {len(blob_paths)} blob paths in Cloud Storage for league {league_id}...")
@@ -113,7 +117,10 @@ def load_model_from_storage_or_local(
     
     # Try local filesystem
     logger.info("Trying local filesystem...")
+    # Prefer XGBoost models first, then optimized, then regular
     local_paths = [
+        os.path.join(local_artifacts_dir, f'league_{league_id}_model_xgboost.pkl'),
+        os.path.join(local_artifacts_alt, f'league_{league_id}_model_xgboost.pkl'),
         os.path.join(local_artifacts_dir, f'league_{league_id}_model_optimized.pkl'),
         os.path.join(local_artifacts_alt, f'league_{league_id}_model_optimized.pkl'),
         os.path.join(local_artifacts_dir, f'league_{league_id}_model.pkl'),

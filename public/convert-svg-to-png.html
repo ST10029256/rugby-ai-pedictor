@@ -95,10 +95,6 @@
                     ctx.textBaseline = 'middle';
                     ctx.fillText('🏉', size / 2, size / 2);
                     
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = size * 0.02;
-                    ctx.strokeRect(size * 0.1, size * 0.1, size * 0.8, size * 0.8);
-                    
                     canvas.toBlob((blob) => {
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');

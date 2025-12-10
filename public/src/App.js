@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Box, Drawer, Typography, CssBaseline, ThemeProvider, createTheme, CircularProgress, IconButton, useMediaQuery } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
@@ -49,6 +49,46 @@ function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   
   const isMobile = useMediaQuery('(max-width:768px)');
+
+  // Prevent scrolling when mobile drawer is open
+  useEffect(() => {
+    if (!isMobile || !mobileOpen) return;
+
+    const body = document.body;
+    const mainContent = document.querySelector('main') || document.querySelector('.main-content-wrapper');
+    
+    // Store original scroll position
+    const scrollY = window.scrollY;
+    const mainScrollTop = mainContent ? mainContent.scrollTop : 0;
+    
+    // Disable scrolling
+    body.classList.add('drawer-open');
+    body.style.overflow = 'hidden';
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.width = '100%';
+    
+    if (mainContent) {
+      mainContent.style.overflow = 'hidden';
+    }
+
+    return () => {
+      // Restore scrolling when drawer closes
+      body.classList.remove('drawer-open');
+      body.style.overflow = '';
+      body.style.position = '';
+      body.style.top = '';
+      body.style.width = '';
+      
+      // Restore scroll position
+      window.scrollTo(0, scrollY);
+      
+      if (mainContent) {
+        mainContent.style.overflow = '';
+        mainContent.scrollTop = mainScrollTop;
+      }
+    };
+  }, [mobileOpen, isMobile]);
 
   useEffect(() => {
     // Load leagues - try API first, fallback to LEAGUE_CONFIGS
@@ -437,12 +477,27 @@ function App() {
     console.log('✅ State updated, generating set to false');
   };
 
-  const handleManualOddsChange = (matchKey, odds) => {
+  const handleManualOddsChange = useCallback((matchKey, odds) => {
     setManualOdds(prev => ({
       ...prev,
       [matchKey]: odds,
     }));
-  };
+  }, []);
+
+  const leagueName = useMemo(() => {
+    return selectedLeague ? LEAGUE_CONFIGS[selectedLeague]?.name || 'Unknown' : '';
+  }, [selectedLeague]);
+
+  const handleDrawerToggle = useCallback(() => {
+    setMobileOpen(prev => !prev);
+  }, []);
+
+  const handleLeagueChange = useCallback((league) => {
+    setSelectedLeague(league);
+    if (isMobile) {
+      setMobileOpen(false);
+    }
+  }, [isMobile]);
 
   if (loading) {
     return (
@@ -455,16 +510,22 @@ function App() {
     );
   }
 
-  const leagueName = selectedLeague ? LEAGUE_CONFIGS[selectedLeague]?.name || 'Unknown' : '';
-
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
-
   const drawerContent = (
-    <Box sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h6" sx={{ color: '#fafafa', fontWeight: 700 }}>
+    <Box sx={{ 
+      p: 3, 
+      height: '100%', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      overflow: 'visible',
+      // Desktop only: Ensure drawer content doesn't scroll
+      ...(isMobile ? {} : {
+        position: 'sticky',
+        top: 0,
+        alignSelf: 'flex-start',
+      }),
+    }}>
+      <Box sx={{ display: 'flex', justifyContent: isMobile ? 'space-between' : 'center', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h6" sx={{ color: '#fafafa', fontWeight: 700, textAlign: isMobile ? 'left' : 'center' }}>
           🎯 Control Panel
         </Typography>
         {isMobile && (
@@ -487,23 +548,29 @@ function App() {
           </IconButton>
         )}
       </Box>
-      <LeagueSelector
-        leagues={leagues}
-        selectedLeague={selectedLeague}
-        onLeagueChange={(league) => {
-          setSelectedLeague(league);
-          if (isMobile) {
-            setMobileOpen(false);
-          }
-        }}
-      />
+      <Box sx={{ overflow: 'visible', position: 'relative', zIndex: 1 }}>
+        <LeagueSelector
+          leagues={leagues}
+          selectedLeague={selectedLeague}
+          onLeagueChange={handleLeagueChange}
+        />
+      </Box>
     </Box>
   );
 
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0e1117' }}>
+      <Box sx={{ 
+        display: 'flex', 
+        minHeight: '100vh', 
+        backgroundColor: '#0e1117',
+        // Desktop only: Ensure container allows sticky positioning
+        ...(isMobile ? {} : {
+          height: '100vh',
+          overflow: 'hidden',
+        }),
+      }}>
         {/* Mobile Hamburger Button */}
         {isMobile && !mobileOpen && (
           <IconButton
@@ -547,6 +614,9 @@ function App() {
           ModalProps={{
             keepMounted: true, // Better open performance on mobile.
             closeAfterTransition: true,
+            disableAutoFocus: true,
+            disableEnforceFocus: true,
+            disableRestoreFocus: true,
           }}
           transitionDuration={{ enter: 300, exit: 250 }}
           sx={{
@@ -559,6 +629,15 @@ function App() {
               borderRight: '1px solid #4b5563',
               boxShadow: isMobile ? '4px 0 20px rgba(0,0,0,0.5)' : 'none',
               transition: 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms',
+              overflow: 'visible', // Allow dropdown menu to overflow drawer
+              zIndex: 1200, // Drawer z-index
+              // Desktop only: Make drawer sticky
+              ...(isMobile ? {} : {
+                position: 'sticky',
+                top: 0,
+                height: '100vh',
+                maxHeight: '100vh',
+              }),
             },
             '& .MuiBackdrop-root': {
               transition: 'opacity 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms',
@@ -584,6 +663,12 @@ function App() {
             alignItems: 'center',
             paddingLeft: { xs: '1rem', sm: 2, md: 3 },
             paddingRight: { xs: '1rem', sm: 2, md: 3 },
+            // Desktop only: Allow main content to scroll independently
+            ...(isMobile ? {} : {
+              overflowY: 'auto',
+              height: '100vh',
+              maxHeight: '100vh',
+            }),
           }}
         >
           <Box className="main-content-wrapper" sx={{ width: '100%', maxWidth: '100%' }}>

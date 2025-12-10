@@ -13,6 +13,14 @@ from typing import Dict, Optional, Tuple, Any
 from prediction.features import build_feature_table, FeatureConfig
 from prediction.sportdevs_client import SportDevsClient, extract_odds_features
 
+# Try to import joblib for loading compressed models
+try:
+    import joblib
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    joblib = None
+    JOBLIB_AVAILABLE = False
+
 # Firestore support (lazy import)
 _firestore_client = None
 
@@ -81,9 +89,23 @@ class HybridPredictor:
         self.db_path = db_path
         self.sportdevs_client = SportDevsClient(sportdevs_api_key)
         
-        # Load trained model
-        with open(model_path, 'rb') as f:
-            self.model_data = pickle.load(f)
+        # Load trained model - try joblib first (compressed), then pickle
+        try:
+            if JOBLIB_AVAILABLE and joblib is not None:
+                self.model_data = joblib.load(model_path)
+            else:
+                with open(model_path, 'rb') as f:
+                    self.model_data = pickle.load(f)
+        except (ValueError, pickle.UnpicklingError) as e:
+            # If joblib fails or pickle fails, try the other
+            if JOBLIB_AVAILABLE and joblib is not None:
+                try:
+                    with open(model_path, 'rb') as f:
+                        self.model_data = pickle.load(f)
+                except Exception:
+                    raise ValueError(f"Failed to load model with both joblib and pickle: {e}")
+            else:
+                raise ValueError(f"Failed to load model: {e}")
         
         self.clf_model = self.model_data['models']['clf']
         self.reg_home_model = self.model_data['models']['reg_home']
@@ -434,7 +456,10 @@ class MultiLeaguePredictor:
         except ImportError as import_err:
             logger.warning(f"storage_loader import failed: {import_err}, falling back to local-only search")
             # Fallback to local-only search
+            # Prefer XGBoost models if available, then optimized, then regular
             model_paths = [
+                os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model_xgboost.pkl'),
+                os.path.join(self.artifacts_dir, f'league_{league_id}_model_xgboost.pkl'),
                 os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model_optimized.pkl'),
                 os.path.join(self.artifacts_dir, f'league_{league_id}_model_optimized.pkl'),
                 os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model.pkl'),
