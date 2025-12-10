@@ -1063,6 +1063,7 @@ def _calculate_last_10_games_accuracy(league_id: int) -> int:
         return 0
 
 
+@https_fn.on_call(timeout_sec=300, memory=512)
 def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get league-specific metrics (accuracy, training games, etc.)
@@ -1113,7 +1114,46 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     'model_type': league_metric.get('model_type', 'unknown')
                 }
             
-            # Fallback: Try full registry document
+            # Fallback: Try XGBoost registry document first (preferred)
+            logger.info("Trying model_registry/xgboost...")
+            registry_ref = db.collection('model_registry').document('xgboost')
+            registry_doc = registry_ref.get()
+            
+            if registry_doc.exists:
+                registry = registry_doc.to_dict()
+                league_data = registry.get('leagues', {}).get(league_id_str)
+                
+                if league_data:
+                    performance = league_data.get('performance', {})
+                    accuracy = performance.get('winner_accuracy', 0.0) * 100
+                    training_games = league_data.get('training_games', 0)
+                    
+                    # Calculate AI rating based on accuracy
+                    if accuracy >= 80:
+                        ai_rating = '9/10'
+                    elif accuracy >= 75:
+                        ai_rating = '8/10'
+                    elif accuracy >= 70:
+                        ai_rating = '7/10'
+                    elif accuracy >= 65:
+                        ai_rating = '6/10'
+                    elif accuracy >= 60:
+                        ai_rating = '5/10'
+                    else:
+                        ai_rating = '4/10'
+                    
+                    logger.info(f"Found XGBoost league data in registry: accuracy={accuracy}, games={training_games}")
+                    return {
+                        'league_id': league_id,
+                        'accuracy': round(accuracy, 1),
+                        'training_games': training_games,
+                        'ai_rating': ai_rating,
+                        'last_10_accuracy': last_10_accuracy,
+                        'trained_at': league_data.get('trained_at'),
+                        'model_type': league_data.get('model_type', 'xgboost')
+                    }
+            
+            # Fallback: Try optimized registry document (backward compatibility)
             logger.info("Trying model_registry/optimized...")
             registry_ref = db.collection('model_registry').document('optimized')
             registry_doc = registry_ref.get()
@@ -1141,7 +1181,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     else:
                         ai_rating = '4/10'
                     
-                    logger.info(f"Found league data in registry: accuracy={accuracy}, games={training_games}")
+                    logger.info(f"Found optimized league data in registry: accuracy={accuracy}, games={training_games}")
                     return {
                         'league_id': league_id,
                         'accuracy': round(accuracy, 1),
@@ -1149,21 +1189,40 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'ai_rating': ai_rating,
                         'last_10_accuracy': last_10_accuracy,
                         'trained_at': league_data.get('trained_at'),
-                        'model_type': league_data.get('model_type', 'unknown')
+                        'model_type': league_data.get('model_type', 'stacking')
                     }
         except Exception as firestore_error:
             logger.warning(f"Error loading from Firestore: {firestore_error}")
         
-        # FALLBACK: Try to load from Cloud Storage
+        # FALLBACK: Try to load from Cloud Storage (XGBoost first, then optimized)
         try:
             from firebase_admin import storage
             bucket = storage.bucket()
-            blob = bucket.blob('model_registry_optimized.json')
+            
+            # Try XGBoost registry first
+            blob = bucket.blob('model_registry.json')
+            if not blob.exists():
+                blob = bucket.blob('artifacts/model_registry.json')
             
             if blob.exists():
-                logger.info("Trying Cloud Storage...")
+                logger.info("Trying Cloud Storage (XGBoost registry)...")
                 registry_json = blob.download_as_text()
                 registry = json.loads(registry_json)
+                model_type_preference = 'xgboost'
+            else:
+                # Fallback to optimized registry
+                blob = bucket.blob('model_registry_optimized.json')
+                if not blob.exists():
+                    blob = bucket.blob('artifacts_optimized/model_registry_optimized.json')
+                if blob.exists():
+                    logger.info("Trying Cloud Storage (Optimized registry)...")
+                    registry_json = blob.download_as_text()
+                    registry = json.loads(registry_json)
+                    model_type_preference = 'stacking'
+                else:
+                    raise FileNotFoundError("No registry found in Cloud Storage")
+            
+            if blob.exists():
                 
                 league_data = registry.get('leagues', {}).get(league_id_str)
                 
@@ -1194,13 +1253,18 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'ai_rating': ai_rating,
                         'last_10_accuracy': last_10_accuracy,
                         'trained_at': league_data.get('trained_at'),
-                        'model_type': league_data.get('model_type', 'unknown')
+                        'model_type': league_data.get('model_type', model_type_preference if 'model_type_preference' in locals() else 'unknown')
                     }
         except Exception as storage_error:
             logger.warning(f"Error loading from storage: {storage_error}")
         
         # FALLBACK: Try to load from local file (for development or if included in deployment)
+        # Try XGBoost registry first, then optimized
         possible_paths = [
+            os.path.join(os.path.dirname(__file__), 'artifacts', 'model_registry.json'),
+            os.path.join(os.path.dirname(__file__), '..', 'artifacts', 'model_registry.json'),
+            os.path.join(os.getcwd(), 'artifacts', 'model_registry.json'),
+            '/tmp/artifacts/model_registry.json',
             os.path.join(os.path.dirname(__file__), 'artifacts_optimized', 'model_registry_optimized.json'),
             os.path.join(os.path.dirname(__file__), '..', 'artifacts_optimized', 'model_registry_optimized.json'),
             os.path.join(os.getcwd(), 'artifacts_optimized', 'model_registry_optimized.json'),
@@ -1234,7 +1298,14 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                             else:
                                 ai_rating = '4/10'
                             
-                            logger.info(f"✅ Found league data in local file: accuracy={accuracy:.1f}%, games={training_games}")
+                            # Determine model type from path
+                            model_type = league_data.get('model_type', 'unknown')
+                            if 'artifacts_optimized' in registry_path or 'optimized' in registry_path.lower():
+                                model_type = league_data.get('model_type', 'stacking')
+                            elif 'artifacts' in registry_path and 'optimized' not in registry_path:
+                                model_type = league_data.get('model_type', 'xgboost')
+                            
+                            logger.info(f"✅ Found league data in local file: accuracy={accuracy:.1f}%, games={training_games}, type={model_type}")
                             return {
                                 'league_id': league_id,
                                 'accuracy': round(accuracy, 1),
@@ -1242,7 +1313,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                                 'ai_rating': ai_rating,
                                 'last_10_accuracy': last_10_accuracy,
                                 'trained_at': league_data.get('trained_at'),
-                                'model_type': league_data.get('model_type', 'unknown')
+                                'model_type': model_type
                             }
             except Exception as file_error:
                 logger.debug(f"Error loading from {registry_path}: {file_error}")

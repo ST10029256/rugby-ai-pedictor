@@ -54,16 +54,37 @@ def upload_registry_to_firestore(registry_path: str, project_id: str = "rugby-ai
         # Initialize Firestore
         db = firestore.client()
         
+        # Determine document name based on model type in registry
+        # Check first league's model_type to determine if it's XGBoost or optimized
+        first_league = list(registry_data.get('leagues', {}).values())
+        if first_league:
+            model_type = first_league[0].get('model_type', 'unknown')
+            if 'xgboost' in model_type.lower() or 'xgb' in model_type.lower():
+                doc_name = 'xgboost'
+            elif 'stacking' in model_type.lower() or 'optimized' in model_type.lower():
+                doc_name = 'optimized'
+            else:
+                # Default based on path
+                if 'optimized' in registry_path.lower():
+                    doc_name = 'optimized'
+                else:
+                    doc_name = 'xgboost'
+        else:
+            # Default based on path
+            if 'optimized' in registry_path.lower():
+                doc_name = 'optimized'
+            else:
+                doc_name = 'xgboost'
+        
         # Upload to Firestore as a single document
-        # Store in 'model_registry' collection as document 'optimized'
-        doc_ref = db.collection('model_registry').document('optimized')
+        doc_ref = db.collection('model_registry').document(doc_name)
         
         print("Uploading to Firestore...")
         doc_ref.set(registry_data)
         
         print("[OK] Successfully uploaded model registry to Firestore!")
         print(f"   Collection: model_registry")
-        print(f"   Document: optimized")
+        print(f"   Document: {doc_name}")
         
         # Also store individual league metrics for easier querying
         print("\nStoring individual league metrics...")
@@ -141,7 +162,7 @@ def main():
         print("[OK] Upload complete!")
         print("\nThe model registry is now available in Firestore:")
         print("  - Collection: model_registry")
-        print("  - Document: optimized")
+        print(f"  - Document: (determined by model_type)")
         print("  - Individual metrics: league_metrics/{league_id}")
         sys.exit(0)
     else:
