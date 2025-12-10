@@ -33,33 +33,30 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    # TODO: Re-implement match update functionality
-    # - name: Check for completed matches
-    #   env:
-    #     THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
-    #     APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-    #     HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-    #   run: |
-    #     echo "🔍 Checking for completed matches..."
-    #     echo "📊 This will detect ALL completed matches from TheSportsDB"
-    #     python scripts/detect_completed_matches.py --db data.sqlite --verbose
+    - name: Check for completed matches
+      env:
+        THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
+        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+      run: |
+        echo "🔍 Checking for completed matches..."
+        echo "📊 This will detect ALL completed matches from TheSportsDB"
+        python scripts/detect_completed_matches.py --db data.sqlite --verbose
 
-    # TODO: Re-implement match update functionality
-    # - name: Check for new games and upcoming fixtures
-    #   env:
-    #     THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
-    #     APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-    #     HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-    #   run: |
-    #     echo "📥 Checking for new games and upcoming fixtures..."
-    #     echo "🏉 This will capture ALL new upcoming games and completed results"
-    #     python scripts/enhanced_auto_update.py --db data.sqlite --verbose
+    - name: Check for new games and upcoming fixtures
+      env:
+        THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
+        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+      run: |
+        echo "📥 Checking for new games and upcoming fixtures..."
+        echo "🏉 This will capture ALL new upcoming games and completed results"
+        python scripts/enhanced_auto_update.py --db data.sqlite --verbose
         
-    # TODO: Re-implement duplicate cleanup functionality
-    # - name: Post-update duplicate cleanup
-    #   run: |
-    #     echo "🧹 Running post-update cleanup..."
-    #     python cleanup_duplicates_post_update.py
+    - name: Post-update duplicate cleanup
+      run: |
+        echo "🧹 Running post-update cleanup..."
+        python cleanup_duplicates_post_update.py
     
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
