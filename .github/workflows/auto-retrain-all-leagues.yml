@@ -13,8 +13,7 @@ on:
     paths:
       - 'data.sqlite'  # Trigger when database is updated
       - 'retrain_needed.flag'  # Trigger when retraining flag is created
-      - 'artifacts_optimized/**'  # Trigger when models are updated
-      - 'expert_ai_app.py'  # Trigger when main app changes
+      - 'artifacts/**'  # Trigger when models are updated
       - 'scripts/**'  # Trigger when scripts change
   pull_request:
     paths:
@@ -113,17 +112,6 @@ jobs:
           git commit -m "Auto-retrain: Updated AI models with new data [skip ci]"
           git push
         fi
-        
-    - name: Trigger Streamlit Cloud Redeploy
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      run: |
-        echo "🚀 Triggering Streamlit Cloud redeployment..."
-        # Create a timestamp file to force Streamlit redeploy
-        echo "# Auto-redeploy trigger: $(date)" > .streamlit_redeploy_trigger
-        git add .streamlit_redeploy_trigger
-        git commit -m "Trigger Streamlit redeploy: Models updated $(date) [skip ci]"
-        git push
-        echo "✅ Streamlit Cloud redeployment triggered successfully"
         
     - name: Upload training logs
       if: steps.check-retrain.outputs.retrain_needed == 'true'
