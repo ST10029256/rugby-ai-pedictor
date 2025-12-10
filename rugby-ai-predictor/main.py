@@ -1103,16 +1103,37 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
             
             if league_metric_doc.exists:
                 league_metric = league_metric_doc.to_dict()
-                logger.info(f"Found league metrics in Firestore: {league_metric}")
-                return {
-                    'league_id': league_id,
-                    'accuracy': league_metric.get('accuracy', 0.0),
-                    'training_games': league_metric.get('training_games', 0),
-                    'ai_rating': league_metric.get('ai_rating', 'N/A'),
-                    'last_10_accuracy': last_10_accuracy,
-                    'trained_at': league_metric.get('trained_at'),
-                    'model_type': league_metric.get('model_type', 'unknown')
-                }
+                model_type = league_metric.get('model_type', 'unknown')
+                accuracy = league_metric.get('accuracy', 0.0)
+                logger.info(f"Found league metrics in Firestore: model_type={model_type}, accuracy={accuracy}%, training_games={league_metric.get('training_games', 0)}")
+                logger.info(f"Full league_metric data: {league_metric}")
+                
+                # Force XGBoost if we detect old stacking data (safety check)
+                if model_type == 'stacking' and 'last_updated' in league_metric:
+                    last_updated = league_metric.get('last_updated', '')
+                    if '2025-12-09' in last_updated:  # Old optimized timestamp
+                        logger.warning(f"WARNING: Detected old stacking data, trying to reload from XGBoost registry...")
+                        # Fall through to try XGBoost registry
+                    else:
+                        return {
+                            'league_id': league_id,
+                            'accuracy': accuracy,
+                            'training_games': league_metric.get('training_games', 0),
+                            'ai_rating': league_metric.get('ai_rating', 'N/A'),
+                            'last_10_accuracy': last_10_accuracy,
+                            'trained_at': league_metric.get('trained_at'),
+                            'model_type': model_type
+                        }
+                else:
+                    return {
+                        'league_id': league_id,
+                        'accuracy': accuracy,
+                        'training_games': league_metric.get('training_games', 0),
+                        'ai_rating': league_metric.get('ai_rating', 'N/A'),
+                        'last_10_accuracy': last_10_accuracy,
+                        'trained_at': league_metric.get('trained_at'),
+                        'model_type': model_type
+                    }
             
             # Fallback: Try XGBoost registry document first (preferred)
             logger.info("Trying model_registry/xgboost...")
