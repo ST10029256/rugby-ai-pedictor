@@ -1078,7 +1078,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
     logger.setLevel(logging.DEBUG)
     
     try:
-        logger.info("=== get_league_metrics called ===")
+        logger.info("=== get_league_metrics called (XGBoost v2) ===")
         data = req.data or {}
         league_id = data.get('league_id')
         
