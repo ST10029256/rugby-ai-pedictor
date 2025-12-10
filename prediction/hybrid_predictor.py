@@ -541,7 +541,7 @@ def demo_hybrid_prediction():
     
     # Load a model (URC for example)
     try:
-        model_path = 'artifacts_optimized/league_4446_model_optimized.pkl'
+        model_path = 'artifacts/league_4446_model_xgboost.pkl'
         predictor = HybridPredictor(model_path, api_key)
         
         print("\n" + "="*80)

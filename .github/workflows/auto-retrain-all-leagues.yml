@@ -76,7 +76,7 @@ jobs:
       run: |
         echo "☁️ Uploading retrained models to Cloud Storage..."
         echo "📦 This ensures PWA uses the latest AI predictions"
-        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts_optimized
+        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts
         echo "✅ Models uploaded - PWA will use updated AI predictions"
     
     - name: Upload model registry to Firestore
