@@ -4,7 +4,13 @@ Verify and force-update league_metrics documents in Firestore
 """
 import json
 import sys
+import platform
 from pathlib import Path
+
+# Fix Windows encoding
+if platform.system() == 'Windows':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -77,9 +83,9 @@ def verify_and_fix_league_metrics():
                     }
                     
                     doc_ref.set(league_metric)
-                    print(f"  ✅ Updated!")
+                    print(f"  [OK] Updated!")
                 else:
-                    print(f"  ✅ Correct")
+                    print(f"  [OK] Correct")
             else:
                 print(f"\nLeague {league_id}: ❌ Document does not exist - Creating...")
                 # Calculate AI rating
@@ -109,7 +115,7 @@ def verify_and_fix_league_metrics():
                 }
                 
                 doc_ref.set(league_metric)
-                print(f"  ✅ Created!")
+                print(f"  [OK] Created!")
         
         print("\n" + "=" * 60)
         print("Verification complete!")
