@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Box, Drawer, Typography, CssBaseline, ThemeProvider, createTheme, CircularProgress, IconButton, useMediaQuery } from '@mui/material';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Box, Drawer, Typography, CssBaseline, ThemeProvider, createTheme, CircularProgress, IconButton, useMediaQuery, Button } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
+import LogoutIcon from '@mui/icons-material/Logout';
 import LeagueSelector from './components/LeagueSelector';
 import LeagueMetrics from './components/LeagueMetrics';
 import LiveMatches from './components/LiveMatches';
 import ManualOddsInput from './components/ManualOddsInput';
 import PredictionsDisplay from './components/PredictionsDisplay';
-import { getLeagues, getUpcomingMatches } from './firebase';
+import LoginWidget from './components/LoginWidget';
+import SubscriptionPage from './components/SubscriptionPage';
+import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
+import { MEDIA_URLS } from './utils/storageUrls';
 import './App.css';
 
 const darkTheme = createTheme({
@@ -34,10 +38,15 @@ const LEAGUE_CONFIGS = {
   4551: { name: "Super Rugby", neutral_mode: false },
   4430: { name: "French Top 14", neutral_mode: false },
   4414: { name: "English Premiership Rugby", neutral_mode: false },
+  4714: { name: "Six Nations Championship", neutral_mode: true },
   5479: { name: "Rugby Union International Friendlies", neutral_mode: true },
 };
 
 function App() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authData, setAuthData] = useState(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [showSubscription, setShowSubscription] = useState(false);
   const [leagues, setLeagues] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState(null);
   const [upcomingMatches, setUpcomingMatches] = useState([]);
@@ -47,8 +56,127 @@ function App() {
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const videoRef = useRef(null);
+  const headerVideoRef = useRef(null);
   
   const isMobile = useMediaQuery('(max-width:768px)');
+
+  // Check authentication on mount - auto-login if valid key is stored
+  useEffect(() => {
+    const checkAuthentication = async () => {
+      try {
+        const storedAuth = localStorage.getItem('rugby_ai_auth');
+        if (storedAuth) {
+          const auth = JSON.parse(storedAuth);
+          
+            // Validate stored auth structure
+          if (!auth.licenseKey) {
+            localStorage.removeItem('rugby_ai_auth');
+            setCheckingAuth(false);
+            return;
+          }
+          
+          // Check if expired (with 1 hour buffer to account for timezone differences)
+          if (auth.expiresAt && auth.expiresAt * 1000 < Date.now() - 3600000) {
+            localStorage.removeItem('rugby_ai_auth');
+            setAuthenticated(false);
+            setCheckingAuth(false);
+            return;
+          }
+          
+          // Verify with server to ensure key is still valid
+          try {
+          const result = await verifyLicenseKey({ license_key: auth.licenseKey });
+            if (result.data && result.data.valid) {
+              // Update auth data with latest info from server
+              const updatedAuth = {
+                licenseKey: auth.licenseKey,
+                expiresAt: result.data.expires_at || auth.expiresAt,
+                subscriptionType: result.data.subscription_type || auth.subscriptionType,
+                email: result.data.email || auth.email,
+                authenticatedAt: Date.now(),
+              };
+              
+              // Save updated auth data
+              localStorage.setItem('rugby_ai_auth', JSON.stringify(updatedAuth));
+              setAuthData(updatedAuth);
+            setAuthenticated(true);
+          } else {
+              // Key is no longer valid
+            localStorage.removeItem('rugby_ai_auth');
+            setAuthenticated(false);
+          }
+          } catch (verifyError) {
+            // If verification fails (network error, etc.), still allow login with stored data
+            setAuthData(auth);
+            setAuthenticated(true);
+          }
+        } else {
+          // No stored auth
+          setAuthenticated(false);
+        }
+      } catch (error) {
+        console.error('Auth check error:', error);
+        localStorage.removeItem('rugby_ai_auth');
+        setAuthenticated(false);
+      } finally {
+        setCheckingAuth(false);
+      }
+    };
+    
+    checkAuthentication();
+  }, []);
+
+  const handleLoginSuccess = (auth) => {
+    setAuthData(auth);
+    setAuthenticated(true);
+    
+    // Restore selected league from localStorage after login
+    const savedLeague = localStorage.getItem('rugby_ai_selected_league');
+    if (savedLeague) {
+      const leagueId = parseInt(savedLeague);
+      if (!isNaN(leagueId)) {
+        setSelectedLeague(leagueId);
+      }
+    }
+  };
+
+  const handleLogout = () => {
+    // Save license key before removing auth so it can be pre-filled on next login
+    if (authData && authData.licenseKey) {
+      localStorage.setItem('rugby_ai_license_key', authData.licenseKey);
+    }
+    
+    localStorage.removeItem('rugby_ai_auth');
+    // Keep selected league in localStorage so it's restored on next login
+    setAuthenticated(false);
+    setAuthData(null);
+    setLeagues([]);
+    setSelectedLeague(null);
+    setUpcomingMatches([]);
+    setPredictions([]);
+  };
+
+  // Restore selected league from localStorage after authentication check
+  useEffect(() => {
+    if (authenticated && !selectedLeague) {
+      const savedLeague = localStorage.getItem('rugby_ai_selected_league');
+      if (savedLeague) {
+        const leagueId = parseInt(savedLeague);
+        if (!isNaN(leagueId)) {
+          setSelectedLeague(leagueId);
+        }
+      }
+    }
+  }, [authenticated, selectedLeague]);
+
+  // Save selected league to localStorage whenever it changes
+  useEffect(() => {
+    if (selectedLeague) {
+      localStorage.setItem('rugby_ai_selected_league', selectedLeague.toString());
+    }
+  }, [selectedLeague]);
+
 
   // Prevent scrolling when mobile drawer is open
   useEffect(() => {
@@ -91,19 +219,21 @@ function App() {
   }, [mobileOpen, isMobile]);
 
   useEffect(() => {
+    // Only load leagues when authenticated
+    if (!authenticated) {
+      setLeagues([]);
+      return;
+    }
+
     // Load leagues - try API first, fallback to LEAGUE_CONFIGS
     getLeagues()
       .then((result) => {
-        console.log('Leagues API response:', result);
-        console.log('Result data:', result?.data);
         let availableLeagues = [];
         
         if (result && result.data) {
           if (result.data.leagues && Array.isArray(result.data.leagues)) {
             availableLeagues = result.data.leagues;
-            console.log('Found leagues in result.data.leagues:', availableLeagues);
           } else if (result.data.error) {
-            console.warn('API returned error, using fallback:', result.data.error);
             // Fallback to LEAGUE_CONFIGS
             availableLeagues = Object.entries(LEAGUE_CONFIGS).map(([id, config]) => ({
               id: parseInt(id),
@@ -125,18 +255,28 @@ function App() {
         
         // If still empty, use LEAGUE_CONFIGS as fallback
         if (availableLeagues.length === 0) {
-          console.log('Using LEAGUE_CONFIGS fallback');
           availableLeagues = Object.entries(LEAGUE_CONFIGS).map(([id, config]) => ({
             id: parseInt(id),
             name: config.name,
           }));
         }
         
-        console.log('Final available leagues:', availableLeagues);
         setLeagues(availableLeagues);
         if (availableLeagues.length > 0) {
+          // Only auto-select if no league is currently selected and no saved league exists
+          const savedLeague = localStorage.getItem('rugby_ai_selected_league');
+          if (!selectedLeague && !savedLeague) {
           setSelectedLeague(availableLeagues[0].id);
-          console.log('Set selected league to:', availableLeagues[0].id);
+          } else if (savedLeague) {
+            const leagueId = parseInt(savedLeague);
+            // Verify the saved league is still in available leagues
+            if (!isNaN(leagueId) && availableLeagues.some(l => l.id === leagueId)) {
+              setSelectedLeague(leagueId);
+            } else if (!selectedLeague) {
+              // Saved league not available, use first available
+              setSelectedLeague(availableLeagues[0].id);
+            }
+          }
         }
         setLoading(false);
       })
@@ -149,11 +289,21 @@ function App() {
         }));
         setLeagues(fallbackLeagues);
         if (fallbackLeagues.length > 0) {
+          const savedLeague = localStorage.getItem('rugby_ai_selected_league');
+          if (savedLeague) {
+            const leagueId = parseInt(savedLeague);
+            if (!isNaN(leagueId) && fallbackLeagues.some(l => l.id === leagueId)) {
+              setSelectedLeague(leagueId);
+            } else {
           setSelectedLeague(fallbackLeagues[0].id);
+            }
+          } else {
+            setSelectedLeague(fallbackLeagues[0].id);
+          }
         }
         setLoading(false);
       });
-  }, []);
+  }, [authenticated]);
 
   useEffect(() => {
     if (!selectedLeague) {
@@ -167,99 +317,41 @@ function App() {
     setLoadingMatches(true);
 
     const fetchUpcoming = async () => {
-      console.log('\n=== fetchUpcoming called ===');
-      console.log('Selected league:', selectedLeague);
-      
       try {
-        console.log('📡 Calling getUpcomingMatches API...');
-        const startTime = Date.now();
         const result = await getUpcomingMatches({ league_id: selectedLeague, limit: 50 });
-        const duration = Date.now() - startTime;
-        console.log(`⏱️ API call took ${duration}ms`);
-        
-        console.log('📦 Full result object:', result);
-        console.log('📦 Result.data:', result?.data);
-        console.log('📦 Result.data.matches:', result?.data?.matches);
         
         if (result && result.data) {
           const matches = result.data.matches || [];
-          console.log(`✅ Found ${matches.length} upcoming matches`);
-          
-          if (result.data.debug) {
-            console.log('🔍 Debug info:', result.data.debug);
-            console.log(`   Total checked: ${result.data.debug.total_checked}`);
-            console.log(`   With scores: ${result.data.debug.with_scores}`);
-            console.log(`   Past dates: ${result.data.debug.past_dates}`);
-            console.log(`   No date: ${result.data.debug.no_date}`);
-            console.log(`   Date parse failures: ${result.data.debug.date_parse_failures}`);
-            console.log(`   Team lookup count: ${result.data.debug.team_lookup_count}`);
-            console.log(`   Team names found: ${result.data.debug.team_names_found}`);
-            console.log(`   Women filtered: ${result.data.debug.women_filtered}`);
-            
-            if (result.data.debug.sample_dates && result.data.debug.sample_dates.length > 0) {
-              console.log('   Sample failed dates:', result.data.debug.sample_dates);
-            }
-          }
-          
-          if (result.data.warning) {
-            console.warn('⚠️ API warning:', result.data.warning);
-          }
+          setUpcomingMatches(matches);
           
           if (result.data.error) {
-            console.error('❌ API error:', result.data.error);
+            console.error('API error:', result.data.error);
           }
-          
-          console.log('📋 Matches array:', matches);
-          setUpcomingMatches(matches);
-          console.log('✅ State updated with matches');
         } else {
-          console.warn('⚠️ No matches data in result');
-          console.warn('Result structure:', {
-            hasResult: !!result,
-            hasData: !!(result?.data),
-            dataKeys: result?.data ? Object.keys(result.data) : []
-          });
           setUpcomingMatches([]);
         }
       } catch (err) {
-        console.error('❌ Exception loading upcoming matches:', err);
-        console.error('Error name:', err.name);
-        console.error('Error message:', err.message);
-        console.error('Error stack:', err.stack);
+        console.error('Exception loading upcoming matches:', err);
         setUpcomingMatches([]);
       } finally {
         setLoadingMatches(false);
       }
-      
-      console.log('=== fetchUpcoming completed ===\n');
     };
 
     fetchUpcoming();
   }, [selectedLeague]);
 
   const handleGeneratePredictions = async () => {
-    console.log('=== handleGeneratePredictions called ===');
-    console.log('selectedLeague:', selectedLeague);
-    console.log('upcomingMatches.length:', upcomingMatches.length);
-    console.log('upcomingMatches:', upcomingMatches);
-    
     if (!selectedLeague || upcomingMatches.length === 0) {
-      console.warn('Cannot generate predictions: no league selected or no matches');
-      console.warn('selectedLeague:', selectedLeague, 'upcomingMatches.length:', upcomingMatches.length);
       return;
     }
 
-    console.log('✅ Starting prediction generation for', upcomingMatches.length, 'matches');
-    console.log('League ID:', selectedLeague);
     setGenerating(true);
     const newPredictions = [];
     const seenMatchups = new Set(); // Track unique matchups (matching Streamlit)
-    console.log('Initialized prediction arrays');
 
     // Import predictMatch dynamically
-    console.log('Importing predictMatch from firebase...');
     const { predictMatch } = await import('./firebase');
-    console.log('✅ predictMatch imported:', typeof predictMatch);
 
     // Precompute unique match tasks (so we don't waste time on duplicates)
     const tasks = [];
@@ -279,8 +371,6 @@ function App() {
       tasks.push({ match, matchDate, matchupKey, odds });
     }
 
-    console.log(`Prepared ${tasks.length} unique match tasks (from ${upcomingMatches.length} upcoming matches)`);
-
     // Helper function to retry API calls with exponential backoff
     const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 1000) => {
       for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -298,7 +388,6 @@ function App() {
           // Only retry on CORS/503 errors
           if (isCorsError || is503Error) {
             const delay = initialDelay * Math.pow(2, attempt);
-            console.log(`⚠️ Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms`);
             await new Promise(resolve => setTimeout(resolve, delay));
           } else {
             throw error;
@@ -316,22 +405,7 @@ function App() {
         const currentIndex = taskIndex++;
         const { match, matchDate, odds } = tasks[currentIndex];
 
-        console.log(`\n--- Processing match ${currentIndex + 1}/${tasks.length} ---`);
-        console.log('Match data:', match);
-        console.log('Match date:', matchDate);
-        console.log('Manual odds found:', odds);
-
         try {
-          console.log(`📊 Calling predictMatch: ${match.home_team} vs ${match.away_team} (${matchDate})`);
-          console.log('Request params:', {
-            home_team: match.home_team,
-            away_team: match.away_team,
-            league_id: selectedLeague,
-            match_date: matchDate,
-            enhanced: false,
-          });
-
-          const startTime = Date.now();
           const result = await retryWithBackoff(async () => {
             return await predictMatch({
               home_team: match.home_team,
@@ -341,28 +415,14 @@ function App() {
               enhanced: false,
             });
           });
-          const duration = Date.now() - startTime;
-          console.log(`⏱️ Prediction took ${duration}ms`);
-          console.log('Result:', result);
-          console.log('Result.data:', result?.data);
 
           if (result && result.data && !result.data.error) {
-            console.log('✅ Prediction successful');
             const pred = result.data;
 
             // Extract AI prediction values (matching Streamlit make_expert_prediction)
             const aiHomeWinProb = pred.home_win_prob || 0.5;
             const predictedHomeScore = parseFloat(pred.predicted_home_score || 0);
             const predictedAwayScore = parseFloat(pred.predicted_away_score || 0);
-            
-            console.log(`📊 Scores for ${match.home_team} vs ${match.away_team}:`, {
-              predicted_home_score: pred.predicted_home_score,
-              predicted_away_score: pred.predicted_away_score,
-              parsed_home: predictedHomeScore,
-              parsed_away: predictedAwayScore,
-              rounded_home: Math.round(predictedHomeScore),
-              rounded_away: Math.round(predictedAwayScore)
-            });
 
             // Combine AI prediction with manual odds (matching Streamlit logic EXACTLY)
             let homeWinProb = aiHomeWinProb;
@@ -446,35 +506,21 @@ function App() {
             };
 
             newPredictions.push(finalPrediction);
-            console.log('✅ Added prediction to array:', finalPrediction);
           } else {
-            console.warn('❌ Prediction failed or returned error');
-            console.warn('Result:', result);
             if (result?.data?.error) {
-              console.error('Error from API:', result.data.error);
-              if (result.data.traceback) {
-                console.error('Traceback:', result.data.traceback);
-              }
+              console.error('Prediction error:', result.data.error);
             }
           }
         } catch (err) {
-          console.error(`❌ Exception predicting match ${match.home_team} vs ${match.away_team}:`, err);
-          console.error('Error name:', err.name);
-          console.error('Error message:', err.message);
-          console.error('Error stack:', err.stack);
-          console.error('Full error object:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+          console.error('Exception predicting match:', err);
         }
       }
     };
 
     await Promise.all(Array.from({ length: concurrency }, () => runTask()));
 
-    console.log(`\n=== Prediction generation complete ===`);
-    console.log(`Generated ${newPredictions.length} predictions out of ${upcomingMatches.length} matches`);
-    console.log('Predictions:', newPredictions);
     setPredictions(newPredictions);
     setGenerating(false);
-    console.log('✅ State updated, generating set to false');
   };
 
   const handleManualOddsChange = useCallback((matchKey, odds) => {
@@ -488,6 +534,39 @@ function App() {
     return selectedLeague ? LEAGUE_CONFIGS[selectedLeague]?.name || 'Unknown' : '';
   }, [selectedLeague]);
 
+  // Setup video background loop
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleLoadedMetadata = () => {
+      video.play().catch(() => {
+        // Autoplay might be blocked, that's fine
+      });
+    };
+
+    const handleCanPlay = () => {
+      // Video ready to play
+    };
+
+    const handleError = (e) => {
+      console.error('Background video failed to load:', e);
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('error', handleError);
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('error', handleError);
+    };
+  }, []);
+
   const handleDrawerToggle = useCallback(() => {
     setMobileOpen(prev => !prev);
   }, []);
@@ -498,6 +577,35 @@ function App() {
       setMobileOpen(false);
     }
   }, [isMobile]);
+
+  // Show login widget if not authenticated
+  if (checkingAuth) {
+    return (
+      <ThemeProvider theme={darkTheme}>
+        <CssBaseline />
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+          <CircularProgress sx={{ color: '#10b981' }} />
+        </Box>
+      </ThemeProvider>
+    );
+  }
+
+  if (!authenticated) {
+    if (showSubscription) {
+    return (
+      <ThemeProvider theme={darkTheme}>
+        <CssBaseline />
+          <SubscriptionPage onBack={() => setShowSubscription(false)} />
+        </ThemeProvider>
+      );
+    }
+    return (
+      <ThemeProvider theme={darkTheme}>
+        <CssBaseline />
+        <LoginWidget onLoginSuccess={handleLoginSuccess} onShowSubscription={() => setShowSubscription(true)} />
+      </ThemeProvider>
+    );
+  }
 
   if (loading) {
     return (
@@ -513,33 +621,95 @@ function App() {
   const drawerContent = (
     <Box sx={{ 
       p: 3, 
-      height: '100%', 
+      height: '100%',
+      width: '100%',
       display: 'flex', 
-      flexDirection: 'column', 
-      overflow: 'visible',
-      // Desktop only: Ensure drawer content doesn't scroll
-      ...(isMobile ? {} : {
-        position: 'sticky',
+      flexDirection: 'column',
+      boxSizing: 'border-box',
+      background: 'linear-gradient(180deg, rgba(38, 39, 48, 0.95) 0%, rgba(31, 41, 55, 0.98) 100%)',
+      position: 'relative',
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      minHeight: isMobile ? '100vh' : 'auto',
+      // Prevent content from affecting layout when dropdown opens
+      ...(!isMobile ? {
+        contain: 'layout style',
+      } : {}),
+      // Premium styling
+      '&::before': {
+        content: '""',
+        position: 'absolute',
         top: 0,
-        alignSelf: 'flex-start',
-      }),
+        left: 0,
+        right: 0,
+        height: '2px',
+        background: 'linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%)',
+        opacity: 0.6,
+      },
     }}>
-      <Box sx={{ display: 'flex', justifyContent: isMobile ? 'space-between' : 'center', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h6" sx={{ color: '#fafafa', fontWeight: 700, textAlign: isMobile ? 'left' : 'center' }}>
-          🎯 Control Panel
+      {/* Premium Header */}
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: isMobile ? 'space-between' : 'center', 
+        alignItems: 'center', 
+        mb: 4,
+        flexShrink: 0,
+        width: '100%',
+        position: 'relative',
+        pb: 2,
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          bottom: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '60px',
+          height: '2px',
+          background: 'linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%)',
+          borderRadius: '2px',
+        },
+      }}>
+        <Typography variant="h5" sx={{ 
+          color: '#fafafa', 
+          fontWeight: 800,
+          fontSize: isMobile ? '1.25rem' : '1.5rem',
+          textAlign: isMobile ? 'left' : 'center',
+          letterSpacing: '-0.02em',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isMobile ? 'flex-start' : 'center',
+          gap: 1,
+          '& .emoji': {
+            fontSize: isMobile ? '1.5rem' : '1.75rem',
+            filter: 'drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3))',
+          },
+          '& .text': {
+            background: 'linear-gradient(135deg, #fafafa 0%, #10b981 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            textShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+          },
+        }}>
+          <img src="/rugby_emoji.png" alt="Rugby Ball" style={{ width: '24px', height: '24px', marginRight: '8px', verticalAlign: 'middle' }} />
+          <span className="text">Control Panel</span>
         </Typography>
         {isMobile && (
           <IconButton
             onClick={handleDrawerToggle}
             sx={{ 
               color: '#fafafa',
-              transition: 'all 0.2s ease',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               '&:hover': {
-                transform: 'rotate(90deg)',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                transform: 'rotate(90deg) scale(1.1)',
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                borderColor: 'rgba(16, 185, 129, 0.4)',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
               },
               '&:active': {
-                transform: 'rotate(90deg) scale(0.9)',
+                transform: 'rotate(90deg) scale(0.95)',
               },
             }}
             aria-label="close drawer"
@@ -548,7 +718,49 @@ function App() {
           </IconButton>
         )}
       </Box>
-      <Box sx={{ overflow: 'visible', position: 'relative', zIndex: 1 }}>
+      
+      {/* Premium Logout Button */}
+      <Box sx={{ 
+        mb: 3, 
+        display: 'flex', 
+        justifyContent: 'center',
+        flexShrink: 0,
+        width: '100%',
+      }}>
+        <Button
+          onClick={handleLogout}
+          startIcon={<LogoutIcon />}
+          sx={{
+            color: '#d1d5db',
+            fontSize: '0.875rem',
+            textTransform: 'none',
+            fontWeight: 500,
+            px: 2.5,
+            py: 1,
+            borderRadius: '10px',
+            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              color: '#fafafa',
+              backgroundColor: 'rgba(239, 68, 68, 0.15)',
+              borderColor: 'rgba(239, 68, 68, 0.3)',
+              transform: 'translateY(-2px)',
+              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+            },
+          }}
+        >
+          Logout
+        </Button>
+      </Box>
+      <Box sx={{ 
+        flex: '1 1 auto',
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        minHeight: 0,
+        mt: 2,
+      }}>
         <LeagueSelector
           leagues={leagues}
           selectedLeague={selectedLeague}
@@ -565,12 +777,51 @@ function App() {
         display: 'flex', 
         minHeight: '100vh', 
         backgroundColor: '#0e1117',
+        position: 'relative',
+        overflow: 'hidden',
         // Desktop only: Ensure container allows sticky positioning
         ...(isMobile ? {} : {
           height: '100vh',
           overflow: 'hidden',
         }),
       }}>
+        {/* Video Background */}
+        <Box
+          component="video"
+          ref={videoRef}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            zIndex: 0,
+            pointerEvents: 'none',
+          }}
+        >
+          <source src={MEDIA_URLS.videoRugby} type="video/mp4" />
+        </Box>
+
+        {/* Dark overlay for better readability */}
+        <Box
+          sx={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(14, 17, 23, 0.75)',
+            zIndex: 1,
+            pointerEvents: 'none',
+            // Ensure overlay doesn't cover drawer on mobile
+            ...(isMobile && mobileOpen ? {
+              zIndex: 1100, // Below drawer
+            } : {}),
+          }}
+        />
         {/* Mobile Hamburger Button */}
         {isMobile && !mobileOpen && (
           <IconButton
@@ -584,15 +835,16 @@ function App() {
               left: 16,
               zIndex: 1300,
               backgroundColor: 'rgba(38, 39, 48, 0.95)',
+              backdropFilter: 'blur(10px)',
               color: '#fafafa',
               padding: '14px',
               borderRadius: '14px',
               boxShadow: '0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
-              backdropFilter: 'blur(10px)',
               transition: 'all 0.3s ease',
               opacity: mobileOpen ? 0 : 1,
               transform: mobileOpen ? 'scale(0.8)' : 'scale(1)',
               pointerEvents: mobileOpen ? 'none' : 'auto',
+              willChange: 'transform', // GPU acceleration
               '&:hover': {
                 backgroundColor: 'rgba(38, 39, 48, 1)',
                 transform: 'scale(1.05)',
@@ -606,46 +858,89 @@ function App() {
           </IconButton>
         )}
 
-        {/* Sidebar Drawer */}
-        <Drawer
-          variant={isMobile ? 'temporary' : 'permanent'}
-          open={isMobile ? mobileOpen : true}
-          onClose={handleDrawerToggle}
-          ModalProps={{
-            keepMounted: true, // Better open performance on mobile.
-            closeAfterTransition: true,
-            disableAutoFocus: true,
-            disableEnforceFocus: true,
-            disableRestoreFocus: true,
-          }}
-          transitionDuration={{ enter: 300, exit: 250 }}
-          sx={{
-            width: isMobile ? 280 : 280,
-            flexShrink: 0,
-            '& .MuiDrawer-paper': {
+        {/* Desktop Sidebar Drawer */}
+        {!isMobile && (
+          <Drawer
+            variant="permanent"
+            open={true}
+            sx={{
               width: 280,
-              boxSizing: 'border-box',
-              backgroundColor: '#262730',
-              borderRight: '1px solid #4b5563',
-              boxShadow: isMobile ? '4px 0 20px rgba(0,0,0,0.5)' : 'none',
-              transition: 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms',
-              overflow: 'visible', // Allow dropdown menu to overflow drawer
-              zIndex: 1200, // Drawer z-index
-              // Desktop only: Make drawer sticky
-              ...(isMobile ? {} : {
+              flexShrink: 0,
+              position: 'relative',
+              zIndex: 2,
+              '& .MuiDrawer-paper': {
+                width: 280,
+                boxSizing: 'border-box',
+                background: 'linear-gradient(180deg, rgba(38, 39, 48, 0.98) 0%, rgba(31, 41, 55, 0.95) 100%)',
+                backdropFilter: 'blur(20px) saturate(180%)',
+                borderRight: '1px solid rgba(16, 185, 129, 0.2)',
+                boxShadow: '4px 0 24px rgba(0, 0, 0, 0.4), inset -1px 0 0 rgba(16, 185, 129, 0.1)',
+                overflow: 'visible',
                 position: 'sticky',
                 top: 0,
                 height: '100vh',
                 maxHeight: '100vh',
-              }),
-            },
-            '& .MuiBackdrop-root': {
-              transition: 'opacity 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms',
-            },
-          }}
-        >
-          {drawerContent}
-        </Drawer>
+                // Prevent drawer from affecting main content layout
+                contain: 'layout style paint',
+              },
+            }}
+          >
+            {drawerContent}
+          </Drawer>
+        )}
+
+        {/* Mobile Control Panel - Fixed Position Overlay */}
+        {isMobile && (
+          <>
+            {/* Backdrop */}
+            {mobileOpen && (
+              <Box
+                onClick={handleDrawerToggle}
+                sx={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                  zIndex: 1299,
+                  animation: 'fadeIn 0.3s ease-in-out',
+                  willChange: 'opacity',
+                  '@keyframes fadeIn': {
+                    from: { opacity: 0 },
+                    to: { opacity: 1 },
+                  },
+                }}
+              />
+            )}
+            
+            {/* Mobile Control Panel */}
+            <Box
+              sx={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '280px',
+                height: '100vh',
+                background: 'linear-gradient(180deg, rgba(38, 39, 48, 0.98) 0%, rgba(31, 41, 55, 0.95) 100%)',
+                backdropFilter: 'blur(20px) saturate(180%)',
+                borderRight: '1px solid rgba(16, 185, 129, 0.2)',
+                boxShadow: '4px 0 24px rgba(0, 0, 0, 0.5), inset -1px 0 0 rgba(16, 185, 129, 0.1)',
+                zIndex: 1300,
+                transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
+                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                willChange: 'transform', // GPU acceleration
+                backfaceVisibility: 'hidden', // Smooth rendering
+              }}
+            >
+              {drawerContent}
+            </Box>
+          </>
+        )}
 
         {/* Main Content */}
         <Box
@@ -653,7 +948,7 @@ function App() {
           sx={{
             flexGrow: 1,
             p: { xs: '1rem', sm: 2, md: 3 },
-            backgroundColor: '#0e1117',
+            backgroundColor: 'transparent',
             color: '#fafafa',
             width: { xs: '100%', sm: 'auto' },
             overflowX: 'hidden',
@@ -663,27 +958,64 @@ function App() {
             alignItems: 'center',
             paddingLeft: { xs: '1rem', sm: 2, md: 3 },
             paddingRight: { xs: '1rem', sm: 2, md: 3 },
+            position: 'relative',
+            zIndex: 2,
             // Desktop only: Allow main content to scroll independently
             ...(isMobile ? {} : {
               overflowY: 'auto',
               height: '100vh',
               maxHeight: '100vh',
+              // Prevent layout shifts when dropdown opens
+              contain: 'layout style',
             }),
           }}
         >
           <Box className="main-content-wrapper" sx={{ width: '100%', maxWidth: '100%' }}>
-            {/* Header */}
-            <Box className="main-header" sx={{ mt: { xs: 6, sm: 0 }, width: '100%' }}>
-              <Box className="rugby-ball-emoji" sx={{ display: { xs: 'block', sm: 'none' }, textAlign: 'center', fontSize: '3rem', mb: 1 }}>
-                🏉
+            {/* Header Video */}
+            <Box 
+              className="main-header" 
+              sx={{ 
+                mt: { xs: 6, sm: 0 }, 
+                width: '100%',
+                height: { xs: '300px', sm: '450px', md: '600px' },
+                borderRadius: '8px',
+                overflow: 'hidden',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: 0,
+              }}
+            >
+              <Box
+                sx={{
+                  width: '100%',
+                  height: '100%',
+                  '& video': {
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    objectPosition: { xs: 'center center', sm: 'center 70%', md: 'center 80%' },
+                  },
+                }}
+              >
+                <video
+                  ref={headerVideoRef}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  preload="auto"
+                  style={{
+                    willChange: 'transform',
+                    transform: 'translateZ(0)', // GPU acceleration
+                  }}
+                  onError={(e) => {
+                    console.error('Header video failed to load:', e);
+                  }}
+                >
+                  <source src={MEDIA_URLS.videoRugbyBall} type="video/mp4" />
+                </video>
               </Box>
-              <Typography variant="h1" className="main-header-title">
-                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>🏉 </Box>
-                Rugby AI Predictions
-              </Typography>
-              <Typography variant="body1" className="main-header-subtitle">
-                Advanced AI-powered match predictions
-              </Typography>
             </Box>
 
             {selectedLeague && (
@@ -755,7 +1087,7 @@ function App() {
             {!selectedLeague && (
               <Box sx={{ textAlign: 'center', mt: 8 }}>
                 <Typography variant="h2" sx={{ color: '#2c3e50', mb: 2 }}>
-                  🏉 Select a League to Begin
+                  <img src="/rugby_emoji.png" alt="Rugby Ball" style={{ width: '32px', height: '32px', verticalAlign: 'middle', marginRight: '8px' }} /> Select a League to Begin
                 </Typography>
                 <Typography variant="body1" sx={{ color: '#7f8c8d' }}>
                   Choose from our AI-powered rugby prediction leagues

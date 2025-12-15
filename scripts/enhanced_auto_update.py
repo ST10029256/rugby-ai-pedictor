@@ -36,6 +36,7 @@ LEAGUE_MAPPINGS = {
     4551: {"name": "Super Rugby", "sportsdb_id": 4551},
     4430: {"name": "French Top 14", "sportsdb_id": 4430},
     4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414},
+    4714: {"name": "Six Nations Championship", "sportsdb_id": 4714},
     5479: {"name": "Rugby Union International Friendlies", "sportsdb_id": 5479}
 }
 
@@ -84,7 +85,7 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
     
     try:
         # League-specific season formats based on TheSportsDB calendar data
-        if sportsdb_id == 4551:  # Super Rugby - uses single year format
+        if sportsdb_id in [4551, 4714]:  # Super Rugby and Six Nations - use single year format
             season_formats = ['2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015', '2014', '2013', '2012', '2011', '2010']
         elif sportsdb_id in [4430, 4414]:  # French Top 14 and English Premiership - use year-year format
             season_formats = ['2025-2026', '2024-2025', '2023-2024', '2022-2023', '2021-2022', '2020-2021', '2019-2020', '2018-2019', '2017-2018', '2016-2017', '2015-2016', '2014-2015', '2013-2014', '2012-2013', '2011-2012', '2010-2011', '2009-2010', '2008-2009']
@@ -358,6 +359,7 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
         5069: [],  # Currie Cup
         4574: [],  # Rugby World Cup
         4551: [],  # Super Rugby
+        4714: [],  # Six Nations Championship
     }
     
     missing_games = missing_games_map.get(league_id, [])
@@ -632,15 +634,15 @@ def main():
     
     total_updated = 0
     
-    # OPTIMIZED: Only update leagues currently in season - historical data already exists!
-    # Leagues currently in season (October 2024)
-    current_season_leagues = [4414, 4430, 4446, 5479]  # Add International Friendlies
+    # Process ALL leagues for upcoming games - some leagues may have upcoming fixtures even if not in main season
+    # (e.g., Six Nations in Feb-Mar, Rugby Championship in Aug-Oct, etc.)
+    all_leagues = list(LEAGUE_MAPPINGS.keys())
     
-    logger.info(f"🎯 OPTIMIZED MODE: Only fetching upcoming games for {len(current_season_leagues)} current season leagues")
-    logger.info("📚 Historical data already exists - AI models trained locally!")
+    logger.info(f"🔄 Fetching upcoming games for ALL {len(all_leagues)} leagues")
+    logger.info("📚 This ensures we capture upcoming fixtures for all leagues, regardless of season")
     
-    # Process ONLY current season leagues
-    for league_id in current_season_leagues:
+    # Process ALL leagues to check for upcoming games
+    for league_id in all_leagues:
         if league_id in LEAGUE_MAPPINGS:
             league_info = LEAGUE_MAPPINGS[league_id]
             league_name = league_info['name']
@@ -676,13 +678,8 @@ def main():
             except Exception as e:
                 logger.error(f"❌ Error updating {league_name}: {e}")
     
-    # Skip historical leagues - they don't need updates!
-    historical_leagues = [league_id for league_id in LEAGUE_MAPPINGS.keys() if league_id not in current_season_leagues]
-    if historical_leagues:
-        logger.info(f"⏭️ Skipping {len(historical_leagues)} historical leagues - data already exists!")
-        for league_id in historical_leagues:
-            league_name = LEAGUE_MAPPINGS[league_id]['name']
-            logger.info(f"   📚 {league_name} - historical data preserved")
+    # All leagues have been processed above - no need to skip any
+    logger.info("✅ All leagues processed for upcoming games")
     
     conn.close()
     
