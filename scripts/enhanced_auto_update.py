@@ -122,6 +122,31 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                 f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
             ])
         
+        # BACKFILL: Top 14 needs historical data - fetch all seasons for better training data
+        if sportsdb_id == 4430:  # French Top 14
+            logger.info(f"Fetching historical seasons for {league_name} to build comprehensive dataset")
+            # Fetch games for all historical seasons (skip current season as it's already added above)
+            historical_seasons = [s for s in season_formats if s not in current_seasons]
+            for season in historical_seasons:
+                urls_to_try.extend([
+                    f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
+                    f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
+                ])
+            # Also include past league endpoint for completeness
+            urls_to_try.extend([
+                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
+                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
+            ])
+            # Fetch games by rounds for recent seasons (Top 14 has 26 rounds per season)
+            # Only fetch rounds for last 3 seasons to avoid too many API calls
+            recent_seasons = season_formats[:3]  # Last 3 seasons
+            for season in recent_seasons:
+                for round_num in range(1, 27):  # Top 14 has 26 rounds per season
+                    urls_to_try.extend([
+                        f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}",
+                        f"https://www.thesportsdb.com/api/v1/json/1/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}"
+                    ])
+        
         # Add general upcoming games endpoint
         urls_to_try.extend([
             f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}"
