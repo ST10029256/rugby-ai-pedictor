@@ -148,6 +148,22 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
                         f"https://www.thesportsdb.com/api/v1/json/1/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}"
                     ])
         
+        # BACKFILL: Six Nations needs historical data - it's only played Feb-Mar, so fetch historical seasons
+        if sportsdb_id == 4714:  # Six Nations Championship
+            logger.info(f"Fetching historical seasons for {league_name} to build comprehensive dataset")
+            # Fetch games for all historical seasons (Six Nations uses single year format: 2024, 2023, etc.)
+            historical_seasons = [s for s in season_formats if s not in current_seasons]
+            for season in historical_seasons:
+                urls_to_try.extend([
+                    f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
+                    f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
+                ])
+            # Also include past league endpoint for completeness
+            urls_to_try.extend([
+                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
+                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
+            ])
+        
         # Add general upcoming games endpoint
         urls_to_try.extend([
             f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}"
