@@ -8,6 +8,37 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Performance optimizations */
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+    /* Prevent zooming on mobile */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+
+/* Prevent zooming on input focus (iOS Safari) */
+input,
+select,
+textarea {
+  font-size: 16px !important; /* Prevents iOS zoom on focus */
+}
+
+@media screen and (max-width: 768px) {
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px !important; /* Prevents zoom on focus */
+    touch-action: manipulation;
+  }
+  
+  /* Prevent text selection that might trigger zoom */
+  * {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
 }
 
 /* Prevent scrolling when league dropdown menu is open */
@@ -42,6 +73,37 @@ body.drawer-open .main-content-wrapper {
 /* Ensure drawer remains interactive */
 body.drawer-open .MuiDrawer-paper {
   pointer-events: auto !important;
+}
+
+/* Force mobile drawer to be visible when open */
+@media (max-width: 768px) {
+  .MuiDrawer-root[class*="MuiDrawer-temporary"] .MuiDrawer-paper[aria-hidden="false"],
+  .MuiDrawer-root[class*="MuiDrawer-temporary"][aria-hidden="false"] .MuiDrawer-paper {
+    transform: translateX(0) !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
+
+/* Performance optimizations for smooth animations */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* GPU acceleration for animated elements */
+video,
+.MuiDrawer-paper,
+.MuiBackdrop-root {
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Optimize transitions */
+[style*="transition"],
+[class*="transition"] {
+  will-change: transform, opacity;
 }
 
 /* Ensure Select dropdown menu appears above drawer on all screen sizes */

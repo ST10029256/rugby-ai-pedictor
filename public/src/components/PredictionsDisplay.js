@@ -1,7 +1,26 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect } from 'react';
 import { Box, Typography, Grid } from '@mui/material';
+import { MEDIA_URLS } from '../utils/storageUrls';
 
 const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagueName }) {
+  // Log image loading status
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      const source = MEDIA_URLS.imageRugby;
+      if (source.includes('firebasestorage.googleapis.com')) {
+        console.log('✅ [Storage] Rugby image loaded successfully from Firebase Storage');
+      } else {
+        console.log('📁 [Local] Rugby image loaded from local file');
+      }
+    };
+    img.onerror = (e) => {
+      console.error('❌ [Storage] Rugby image failed to load from:', MEDIA_URLS.imageRugby);
+      console.error('Error details:', e);
+    };
+    img.src = MEDIA_URLS.imageRugby;
+  }, []);
+
   // Group predictions by date
   const predictionsByDate = {};
   predictions.forEach((pred) => {
@@ -128,7 +147,32 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
               // Score extraction complete
 
               return (
-              <Box key={idx} className="prediction-card fade-in-up">
+              <Box 
+                key={idx} 
+                className="prediction-card fade-in-up"
+                sx={{
+                  backgroundImage: `url(${MEDIA_URLS.imageRugby})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                  position: 'relative',
+                  '&::after': {
+                    content: '""',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'linear-gradient(145deg, rgba(26, 32, 44, 0.85) 0%, rgba(45, 55, 72, 0.85) 100%)',
+                    zIndex: 0,
+                    pointerEvents: 'none',
+                  },
+                  '& > *': {
+                    position: 'relative',
+                    zIndex: 1,
+                  },
+                }}
+              >
                   {/* Score Display - Matching Streamlit exactly */}
                   <Box sx={{ my: 2 }}>
                     <Box sx={{ borderTop: '1px solid #4b5563', mb: 3 }} />

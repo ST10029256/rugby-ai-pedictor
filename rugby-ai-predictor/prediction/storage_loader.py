@@ -72,16 +72,23 @@ def load_model_from_storage(
         except Exception as list_err:
             logger.warning(f"Could not list bucket contents: {list_err}")
         
-        # Try optimized model first - check multiple possible paths
+        # Check for XGBoost models first (preferred), then optimized, then generic
         blob_paths = [
-            f"models/league_{league_id}_model_optimized.pkl",  # Most likely from upload script
+            # XGBoost models (preferred - trained on 900+ games)
+            f"models/league_{league_id}_model_xgboost.pkl",
+            f"models/artifacts/league_{league_id}_model_xgboost.pkl",
+            f"league_{league_id}_model_xgboost.pkl",
+            f"artifacts/league_{league_id}_model_xgboost.pkl",
+            # Optimized models (fallback)
+            f"models/league_{league_id}_model_optimized.pkl",
             f"models/artifacts_optimized/league_{league_id}_model_optimized.pkl",
-            f"league_{league_id}_model_optimized.pkl",  # Direct in bucket root
-            f"artifacts_optimized/league_{league_id}_model_optimized.pkl",  # In artifacts_optimized folder
+            f"league_{league_id}_model_optimized.pkl",
+            f"artifacts_optimized/league_{league_id}_model_optimized.pkl",
+            # Generic models (legacy fallback)
             f"models/league_{league_id}_model.pkl",
             f"models/artifacts/league_{league_id}_model.pkl",
-            f"league_{league_id}_model.pkl",  # Direct in bucket root
-            f"artifacts/league_{league_id}_model.pkl"  # In artifacts folder
+            f"league_{league_id}_model.pkl",
+            f"artifacts/league_{league_id}_model.pkl"
         ]
         
         logger.info(f"Checking {len(blob_paths)} blob paths in Cloud Storage for league {league_id}...")

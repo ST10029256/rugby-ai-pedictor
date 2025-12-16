@@ -12,16 +12,32 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SportDevsClient:
-    """Client for SportDevs Rugby API"""
+    """Client for SportDevs Rugby API
     
-    def __init__(self, api_key: str, base_url: str = "https://rugby.sportdevs.com"):
+    Supports both direct SportDevs API and RapidAPI formats.
+    Set use_rapidapi=True if your API key is from RapidAPI.
+    """
+    
+    def __init__(self, api_key: str, base_url: str = "https://rugby.sportdevs.com", use_rapidapi: bool = False, rapidapi_host: str = "sportdevs.p.rapidapi.com"):
         self.base_url = base_url
         self.api_key = api_key
-        self.headers = {
-            "Accept": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "X-API-Key": api_key
-        }
+        self.use_rapidapi = use_rapidapi
+        
+        if use_rapidapi:
+            # RapidAPI format
+            self.headers = {
+                "Accept": "application/json",
+                "X-RapidAPI-Key": api_key,
+                "X-RapidAPI-Host": rapidapi_host
+            }
+        else:
+            # Standard SportDevs format
+            self.headers = {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "X-API-Key": api_key
+            }
+        
         self.session = requests.Session()
         self.session.headers.update(self.headers)
     
@@ -32,6 +48,17 @@ class SportDevsClient:
             # Add small delay to prevent rate limiting
             time.sleep(0.1)
             response = self.session.get(url, params=params, timeout=15)
+            
+            # Check for subscription issues (RapidAPI)
+            if response.status_code == 403:
+                try:
+                    error_data = response.json()
+                    if "not subscribed" in str(error_data.get("message", "")).lower():
+                        logger.error(f"Not subscribed to API on RapidAPI. Please subscribe to SportDevs Rugby API on RapidAPI.")
+                        return None
+                except:
+                    pass
+            
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -136,6 +163,39 @@ class SportDevsClient:
         refs_data = self._make_request("referees")
         if refs_data and isinstance(refs_data, list):
             return refs_data
+        return []
+    
+    def get_match_lineups(self, match_id: int) -> Optional[Dict]:
+        """Get team lineups for a specific match"""
+        lineups_data = self._make_request("matches-lineups", params={"match_id": match_id})
+        if lineups_data:
+            return lineups_data
+        return None
+    
+    def get_team_news(self, team_id: int, limit: int = 50) -> List[Dict]:
+        """Get news/media content for a specific team"""
+        params = {"team_id": team_id, "limit": limit}
+        news_data = self._make_request("media-teams", params=params)
+        if news_data and isinstance(news_data, list):
+            return news_data
+        return []
+    
+    def get_league_news(self, league_id: Optional[int] = None, limit: int = 50) -> List[Dict]:
+        """Get news for a specific league or all leagues"""
+        params: Dict[str, Any] = {"limit": limit}
+        if league_id:
+            params["league_id"] = league_id
+        news_data = self._make_request("media-leagues", params=params)
+        if news_data and isinstance(news_data, list):
+            return news_data
+        return []
+    
+    def get_all_news(self, limit: int = 100) -> List[Dict]:
+        """Get all available rugby news"""
+        params = {"limit": limit}
+        news_data = self._make_request("media", params=params)
+        if news_data and isinstance(news_data, list):
+            return news_data
         return []
 
 def extract_odds_features(odds_data: Optional[Dict]) -> Dict[str, float]:

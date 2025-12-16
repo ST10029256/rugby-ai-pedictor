@@ -26,16 +26,23 @@ def upload_registry_to_firestore(registry_path: str, project_id: str = "rugby-ai
         project_id: Firebase project ID
     """
     try:
-        # Initialize Firebase Admin (use default credentials if available)
+        # Initialize Firebase Admin with explicit project ID
         try:
-            # Try to initialize with default credentials (from environment or service account)
-            initialize_app()
-            print("[OK] Initialized Firebase Admin with default credentials")
+            # Try to initialize with explicit project
+            from firebase_admin import get_app
+            try:
+                app = get_app(project_id)
+                print(f"[OK] Using existing Firebase Admin connection for project: {project_id}")
+            except ValueError:
+                # App doesn't exist, initialize with project
+                initialize_app(options={'projectId': project_id})
+                print(f"[OK] Initialized Firebase Admin for project: {project_id}")
         except ValueError:
             # Already initialized, continue
+            print(f"[OK] Firebase Admin already initialized (using project: {project_id})")
             pass
         except Exception as e:
-            print(f"[WARNING] Could not initialize with default credentials: {e}")
+            print(f"[WARNING] Could not initialize with project {project_id}: {e}")
             print("   Make sure you have:")
             print("   1. Set GOOGLE_APPLICATION_CREDENTIALS environment variable, OR")
             print("   2. Run 'gcloud auth application-default login', OR")
@@ -51,7 +58,7 @@ def upload_registry_to_firestore(registry_path: str, project_id: str = "rugby-ai
         with open(registry_path, 'r') as f:
             registry_data = json.load(f)
         
-        # Initialize Firestore
+        # Initialize Firestore (uses the app we initialized above)
         db = firestore.client()
         
         # Determine document name based on model type in registry
@@ -109,6 +116,9 @@ def upload_registry_to_firestore(registry_path: str, project_id: str = "rugby-ai
             else:
                 ai_rating = '4/10'
             
+            # Determine default model_type based on which registry this is
+            default_model_type = 'xgboost' if doc_name == 'xgboost' else 'stacking'
+            
             league_metric = {
                 'league_id': int(league_id),
                 'league_name': league_data.get('name'),
@@ -116,7 +126,7 @@ def upload_registry_to_firestore(registry_path: str, project_id: str = "rugby-ai
                 'training_games': league_data.get('training_games', 0),
                 'ai_rating': ai_rating,
                 'trained_at': league_data.get('trained_at'),
-                'model_type': league_data.get('model_type', 'unknown'),
+                'model_type': league_data.get('model_type', default_model_type),
                 'performance': performance,
                 'last_updated': registry_data.get('last_updated')
             }

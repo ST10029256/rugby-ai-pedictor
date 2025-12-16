@@ -10,13 +10,22 @@ logger = logging.getLogger(__name__)
 class HighlightlyRugbyAPI:
     """Highlightly Rugby API client for enhanced rugby data"""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, use_rapidapi: bool = False):
         self.api_key = api_key
-        self.base_url = "https://rugby.highlightly.net"
-        self.headers = {
-            "x-rapidapi-key": api_key,
-            "x-rapidapi-host": "rugby-highlights-api.p.rapidapi.com"
-        }
+        self.use_rapidapi = use_rapidapi
+        
+        if use_rapidapi:
+            self.base_url = "https://rugby-highlights-api.p.rapidapi.com"
+            self.headers = {
+                "x-rapidapi-key": api_key,
+                "x-rapidapi-host": "rugby-highlights-api.p.rapidapi.com"
+            }
+        else:
+            self.base_url = "https://rugby.highlightly.net"
+            self.headers = {
+                "x-rapidapi-key": api_key,
+                "x-rapidapi-host": "rugby-highlights-api.p.rapidapi.com"
+            }
     
     def get_leagues(self, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
         """Get all available rugby leagues"""
@@ -165,11 +174,53 @@ class HighlightlyRugbyAPI:
                 headers=self.headers,
                 params={"leagueId": league_id, "season": season}
             )
+            
+            # Check for rate limiting before raising
+            if response.status_code == 429:
+                rate_limit_info = {
+                    "_rate_limited": True,
+                    "_rate_limit_headers": {}
+                }
+                # Extract rate limit headers if available
+                for header in ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 
+                              'Retry-After', 'X-RateLimit-Reset-After']:
+                    if header in response.headers:
+                        rate_limit_info["_rate_limit_headers"][header] = response.headers[header]
+                
+                logger.warning(f"Rate limited (429) for league {league_id}, season {season}")
+                if rate_limit_info["_rate_limit_headers"]:
+                    logger.warning(f"Rate limit info: {rate_limit_info['_rate_limit_headers']}")
+                
+                return {"groups": [], "league": {}, **rate_limit_info}
+            
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            # Add rate limit flag if response is empty (might be rate limited)
+            if isinstance(result, dict) and not result.get('groups') and not result.get('league'):
+                result["_rate_limited"] = True
+            return result
+        except requests.exceptions.HTTPError as e:
+            if e.response and e.response.status_code == 429:
+                rate_limit_info = {
+                    "_rate_limited": True,
+                    "_rate_limit_headers": {}
+                }
+                # Extract rate limit headers if available
+                for header in ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 
+                              'Retry-After', 'X-RateLimit-Reset-After']:
+                    if header in e.response.headers:
+                        rate_limit_info["_rate_limit_headers"][header] = e.response.headers[header]
+                
+                logger.warning(f"Rate limited (429) for league {league_id}, season {season}")
+                if rate_limit_info["_rate_limit_headers"]:
+                    logger.warning(f"Rate limit info: {rate_limit_info['_rate_limit_headers']}")
+                
+                return {"groups": [], "league": {}, **rate_limit_info}
+            logger.error(f"Error fetching standings: {e}")
+            return {"groups": [], "league": {}, "_error": str(e)}
         except Exception as e:
             logger.error(f"Error fetching standings: {e}")
-            return {"groups": [], "league": {}}
+            return {"groups": [], "league": {}, "_error": str(e)}
 
 def test_highlightly_api():
     """Test the Highlightly API integration"""

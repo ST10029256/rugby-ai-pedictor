@@ -7,6 +7,12 @@ service firebase.storage {
       allow write: if false; // Only backend can write
     }
     
+    // Media folder - public read access for videos and images
+    match /media/{fileName} {
+      allow read: if true;
+      allow write: if false; // Only backend/admin can write
+    }
+    
     // Other files
     match /{allPaths=**} {
       allow read: if true;

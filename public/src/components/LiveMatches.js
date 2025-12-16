@@ -80,7 +80,7 @@ function LiveMatches({ leagueId }) {
           <Box key={match.match_id || match.id} className="live-match-card">
             <Box className="live-match-header">
               <Typography className="live-match-title">
-                🏉 {match.home_team} vs {match.away_team}
+                <img src="/rugby_emoji.png" alt="Rugby Ball" style={{ width: '20px', height: '20px', verticalAlign: 'middle', marginRight: '6px' }} /> {match.home_team} vs {match.away_team}
               </Typography>
               <Box className={`live-match-status ${stateClass}`}>
                 {liveState}

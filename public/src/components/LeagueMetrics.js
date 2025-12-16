@@ -7,13 +7,13 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
     accuracy: 0,
     trainingGames: 0,
     aiRating: 'N/A',
-    last10Accuracy: 0,
+    margin: 0,
     loading: true
   });
 
   useEffect(() => {
         if (!leagueId) {
-      setMetrics({ accuracy: 0, trainingGames: 0, aiRating: 'N/A', last10Accuracy: 0, loading: false });
+      setMetrics({ accuracy: 0, trainingGames: 0, aiRating: 'N/A', margin: 0, loading: false });
       return;
     }
 
@@ -33,20 +33,20 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
               accuracy: 0,
               trainingGames: 0,
               aiRating: 'N/A',
-              last10Accuracy: 0,
+              margin: 0,
               loading: false
             });
           } else {
             const accuracy = result.data.accuracy || 0;
             const trainingGames = result.data.training_games || 0;
             const aiRating = result.data.ai_rating || 'N/A';
-            const last10Accuracy = result.data.last_10_accuracy || 0;
+            const margin = result.data.overall_mae || result.data.margin || 0;
             
             console.log('✅ League metrics received:', {
               accuracy: accuracy,
               training_games: trainingGames,
               ai_rating: aiRating,
-              last_10_accuracy: last10Accuracy,
+              margin: margin,
               full_data: result.data
             });
             
@@ -54,7 +54,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
             console.log(`📊 Metrics for league ${leagueId}:`);
             console.log(`   Accuracy: ${accuracy}%`);
             console.log(`   Games Trained: ${trainingGames}`);
-            console.log(`   AI last 10 games: ${last10Accuracy}/10`);
+            console.log(`   Margin Error: ${margin.toFixed(2)} points`);
             
             // Also log the full data object for debugging
             console.log('   Full response data:', JSON.stringify(result.data, null, 2));
@@ -63,7 +63,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
               accuracy: accuracy,
               trainingGames: trainingGames,
               aiRating: aiRating,
-              last10Accuracy: last10Accuracy,
+              margin: margin,
               loading: false
             });
           }
@@ -73,7 +73,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
             accuracy: 0,
             trainingGames: 0,
             aiRating: 'N/A',
-            last10Accuracy: 0,
+            margin: 0,
             loading: false
           });
         }
@@ -88,7 +88,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
           accuracy: 0,
           trainingGames: 0,
           aiRating: 'N/A',
-          last10Accuracy: 0,
+          margin: 0,
           loading: false
         });
       }
@@ -123,13 +123,13 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
         <Box className="metric-delta">Completed</Box>
       </Box>
       <Box className="custom-metric">
-        <Box className="metric-label">AI last 10 games</Box>
+        <Box className="metric-label">Margin Error</Box>
         <Box className="metric-value">
-          {metrics.last10Accuracy > 0 
-            ? `${metrics.last10Accuracy}/10`
+          {metrics.margin > 0 
+            ? `${metrics.margin.toFixed(1)} pts`
             : 'N/A'}
         </Box>
-        <Box className="metric-delta">Based on Accuracy</Box>
+        <Box className="metric-delta">Avg per Team</Box>
       </Box>
     </Box>
   );

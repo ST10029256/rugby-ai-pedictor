@@ -131,10 +131,13 @@ class HybridPredictor:
         
         X = np.array(feature_vector).reshape(1, -1)
         
-        # Get predictions
+        # Get predictions (raw, no adjustments yet)
         home_win_prob = self.clf_model.predict_proba(X)[0, 1]
         predicted_home_score = max(0, self.reg_home_model.predict(X)[0])
         predicted_away_score = max(0, self.reg_away_model.predict(X)[0])
+        
+        # Note: Score adjustment based on classifier will be done in hybrid_predict
+        # only when method is "AI Only" (no odds). This keeps raw predictions here.
         
         # Confidence based on probability
         confidence = max(home_win_prob, 1 - home_win_prob)
@@ -224,17 +227,69 @@ class HybridPredictor:
         hybrid_confidence = (effective_ai_weight * ai_pred['confidence'] + 
                             effective_odds_weight * bookmaker_pred['confidence'])
         
+        # Determine winner from hybrid probability (classifier + odds, more accurate)
+        predicted_winner = 'Home' if hybrid_home_prob > 0.5 else 'Away'
+        
+        # Adjust scores to match predicted winner ONLY when using AI-only (no odds)
+        # This preserves classifier accuracy for AI-only predictions
+        predicted_home_score = ai_pred['predicted_home_score']
+        predicted_away_score = ai_pred['predicted_away_score']
+        
+        if effective_odds_weight == 0.0:  # AI-only mode
+            # Classifier is more accurate at predicting winners (66-90% accuracy)
+            # Adjust scores to match classifier's winner prediction
+            classifier_home_wins = ai_pred['home_win_prob'] > 0.5
+            score_based_home_wins = predicted_home_score > predicted_away_score
+            score_margin = abs(predicted_home_score - predicted_away_score)
+            total_score = predicted_home_score + predicted_away_score
+            
+            if classifier_home_wins != score_based_home_wins:
+                # Scores and classifier disagree - adjust scores to match classifier
+                if classifier_home_wins:
+                    # Classifier says home wins, but scores show away winning
+                    min_margin = max(1.0, score_margin * 0.5)  # At least half the original margin
+                    predicted_home_score = (total_score + min_margin) / 2
+                    predicted_away_score = (total_score - min_margin) / 2
+                else:
+                    # Classifier says away wins, but scores show home winning
+                    min_margin = max(1.0, score_margin * 0.5)
+                    predicted_away_score = (total_score + min_margin) / 2
+                    predicted_home_score = (total_score - min_margin) / 2
+                
+                # Ensure scores are non-negative and rounded
+                predicted_home_score = max(0, round(predicted_home_score))
+                predicted_away_score = max(0, round(predicted_away_score))
+                
+                # Final check: ensure winner is correct
+                if classifier_home_wins:
+                    if predicted_home_score <= predicted_away_score:
+                        predicted_home_score = predicted_away_score + 1
+                else:
+                    if predicted_away_score <= predicted_home_score:
+                        predicted_away_score = predicted_home_score + 1
+            
+            # Handle ties: use classifier to break tie
+            elif predicted_home_score == predicted_away_score:
+                if classifier_home_wins:
+                    predicted_home_score = predicted_away_score + 1
+                else:
+                    predicted_away_score = predicted_home_score + 1
+            
+            # Update ai_pred with adjusted scores
+            ai_pred['predicted_home_score'] = predicted_home_score
+            ai_pred['predicted_away_score'] = predicted_away_score
+        
         prediction = {
             'ai_prediction': ai_pred,
             'bookmaker_prediction': bookmaker_pred,
             'hybrid_home_win_prob': float(hybrid_home_prob),
             'hybrid_away_win_prob': float(1 - hybrid_home_prob),
             'hybrid_confidence': float(hybrid_confidence),
-            'predicted_winner': 'Home' if hybrid_home_prob > 0.5 else 'Away',
-            'predicted_score': f"{ai_pred['predicted_home_score']:.0f}-{ai_pred['predicted_away_score']:.0f}",
+            'predicted_winner': predicted_winner,  # Use probability-based winner (more accurate)
+            'predicted_score': f"{predicted_home_score:.0f}-{predicted_away_score:.0f}",
             'ai_weight': ai_weight,
             'odds_weight': odds_weight,
-            'method': 'hybrid'
+            'method': 'AI Only (No Odds)' if effective_odds_weight == 0.0 else 'hybrid'
         }
         
         print(f"     HYBRID: Home win {hybrid_home_prob:.1%}, Confidence: {hybrid_confidence:.1%}")
@@ -396,11 +451,24 @@ class HybridPredictor:
         
         # Format output to match expected structure
         home_win_prob = prediction.get('hybrid_home_win_prob', prediction.get('home_win_prob', 0.5))
+        predicted_home_score = prediction.get('ai_prediction', {}).get('predicted_home_score', 0)
+        predicted_away_score = prediction.get('ai_prediction', {}).get('predicted_away_score', 0)
+        
+        # Determine winner from classifier probability (more accurate than scores)
+        # Scores have already been adjusted in get_ai_prediction to match classifier
+        predicted_winner = 'Home' if home_win_prob > 0.5 else 'Away'
+        
+        # Final safety check: ensure scores match the predicted winner
+        # This should already be done in get_ai_prediction, but double-check
+        if predicted_winner == 'Home' and predicted_home_score <= predicted_away_score:
+            predicted_home_score = predicted_away_score + 1.0
+        elif predicted_winner == 'Away' and predicted_away_score <= predicted_home_score:
+            predicted_away_score = predicted_home_score + 1.0
         
         return {
-            'predicted_winner': 'Home' if home_win_prob > 0.5 else 'Away',
-            'predicted_home_score': prediction.get('ai_prediction', {}).get('predicted_home_score', 0),
-            'predicted_away_score': prediction.get('ai_prediction', {}).get('predicted_away_score', 0),
+            'predicted_winner': predicted_winner,
+            'predicted_home_score': float(predicted_home_score),
+            'predicted_away_score': float(predicted_away_score),
             'confidence': prediction.get('hybrid_confidence', prediction.get('confidence', 0.5)),
             'home_win_prob': home_win_prob,
             'away_win_prob': 1.0 - home_win_prob,

@@ -18,7 +18,7 @@ import pickle
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
 
@@ -40,7 +40,7 @@ except ImportError:
 
 from prediction.config import LEAGUE_MAPPINGS
 from prediction.features import build_feature_table, FeatureConfig
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score, cross_val_predict
 from sklearn.metrics import accuracy_score, mean_absolute_error, classification_report
 
 def load_data(conn: sqlite3.Connection, league_id: int, config: FeatureConfig) -> pd.DataFrame:
@@ -98,92 +98,175 @@ def prepare_features_and_targets(df: pd.DataFrame) -> tuple:
 
 def train_xgboost_models(X: np.ndarray, y_winner: np.ndarray, 
                          y_home_score: np.ndarray, y_away_score: np.ndarray,
-                         feature_cols: List[str]) -> Dict[str, Any]:
-    """Train XGBoost models for winner prediction and score prediction"""
+                         feature_cols: List[str], use_all_data: bool = True) -> Dict[str, Any]:
+    """Train XGBoost models for winner prediction and score prediction
+    
+    Args:
+        use_all_data: If True, train on all data and use cross-validation for evaluation.
+                     If False, use 80/20 train/test split.
+    """
     print(f"🤖 Training XGBoost models...")
     
-    # Split data
-    X_train, X_test, y_winner_train, y_winner_test, \
-    y_home_train, y_home_test, y_away_train, y_away_test = train_test_split(
-        X, y_winner, y_home_score, y_away_score,
-        test_size=0.2, random_state=42, stratify=y_winner
-    )
-    
-    print(f"   Training set: {len(X_train)} games")
-    print(f"   Test set: {len(X_test)} games")
-    
-    # 1. Winner Classifier (XGBoost)
-    print(f"   Training winner classifier...")
-    clf = xgb.XGBClassifier(
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        eval_metric='logloss'
-    )
-    clf.fit(X_train, y_winner_train)
-    
-    # Evaluate classifier
-    y_winner_pred = clf.predict(X_test)
-    winner_accuracy = accuracy_score(y_winner_test, y_winner_pred)
-    print(f"   ✅ Winner accuracy: {winner_accuracy:.1%}")
-    
-    # 2. Home Score Regressor (XGBoost)
-    print(f"   Training home score regressor...")
-    reg_home = xgb.XGBRegressor(
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        eval_metric='mae'
-    )
-    reg_home.fit(X_train, y_home_train)
-    
-    # Evaluate home regressor
-    y_home_pred = reg_home.predict(X_test)
-    home_mae = mean_absolute_error(y_home_test, y_home_pred)
-    print(f"   ✅ Home score MAE: {home_mae:.2f} points")
-    
-    # 3. Away Score Regressor (XGBoost)
-    print(f"   Training away score regressor...")
-    reg_away = xgb.XGBRegressor(
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        eval_metric='mae'
-    )
-    reg_away.fit(X_train, y_away_train)
-    
-    # Evaluate away regressor
-    y_away_pred = reg_away.predict(X_test)
-    away_mae = mean_absolute_error(y_away_test, y_away_pred)
-    print(f"   ✅ Away score MAE: {away_mae:.2f} points")
-    
-    overall_mae = (home_mae + away_mae) / 2
-    
-    return {
-        'models': {
-            'clf': clf,
-            'reg_home': reg_home,
-            'reg_away': reg_away
-        },
-        'feature_columns': feature_cols,
-        'performance': {
-            'winner_accuracy': winner_accuracy,
-            'home_mae': home_mae,
-            'away_mae': away_mae,
-            'overall_mae': overall_mae
-        },
-        'training_games': len(X_train),
-        'test_games': len(X_test)
-    }
+    if use_all_data and len(X) >= 50:
+        # Use all data for training, evaluate with cross-validation
+        print(f"   Using all {len(X)} games for training (cross-validation for evaluation)")
+        
+        # 1. Winner Classifier (XGBoost)
+        print(f"   Training winner classifier...")
+        clf = xgb.XGBClassifier(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            eval_metric='logloss'
+        )
+        clf.fit(X, y_winner)
+        
+        # Evaluate with cross-validation (5-fold)
+        cv_scores = cross_val_score(clf, X, y_winner, cv=5, scoring='accuracy')
+        winner_accuracy = cv_scores.mean()
+        print(f"   ✅ Winner accuracy (CV): {winner_accuracy:.1%} (±{cv_scores.std():.1%})")
+        
+        # 2. Home Score Regressor (XGBoost)
+        print(f"   Training home score regressor...")
+        reg_home = xgb.XGBRegressor(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            eval_metric='mae'
+        )
+        reg_home.fit(X, y_home_score)
+        
+        # Evaluate with cross-validation
+        y_home_pred_cv = cross_val_predict(reg_home, X, y_home_score, cv=5)
+        home_mae = mean_absolute_error(y_home_score, y_home_pred_cv)
+        print(f"   ✅ Home score MAE (CV): {home_mae:.2f} points")
+        
+        # 3. Away Score Regressor (XGBoost)
+        print(f"   Training away score regressor...")
+        reg_away = xgb.XGBRegressor(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            eval_metric='mae'
+        )
+        reg_away.fit(X, y_away_score)
+        
+        # Evaluate with cross-validation
+        y_away_pred_cv = cross_val_predict(reg_away, X, y_away_score, cv=5)
+        away_mae = mean_absolute_error(y_away_score, y_away_pred_cv)
+        print(f"   ✅ Away score MAE (CV): {away_mae:.2f} points")
+        
+        overall_mae = (home_mae + away_mae) / 2
+        
+        return {
+            'models': {
+                'clf': clf,
+                'reg_home': reg_home,
+                'reg_away': reg_away
+            },
+            'feature_columns': feature_cols,
+            'performance': {
+                'winner_accuracy': winner_accuracy,
+                'home_mae': home_mae,
+                'away_mae': away_mae,
+                'overall_mae': overall_mae
+            },
+            'training_games': len(X),
+            'test_games': 0
+        }
+    else:
+        # Use train/test split (original behavior)
+        # Split data
+        X_train, X_test, y_winner_train, y_winner_test, \
+        y_home_train, y_home_test, y_away_train, y_away_test = train_test_split(
+            X, y_winner, y_home_score, y_away_score,
+            test_size=0.2, random_state=42, stratify=y_winner
+        )
+        
+        print(f"   Training set: {len(X_train)} games")
+        print(f"   Test set: {len(X_test)} games")
+        
+        # 1. Winner Classifier (XGBoost)
+        print(f"   Training winner classifier...")
+        clf = xgb.XGBClassifier(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            eval_metric='logloss'
+        )
+        clf.fit(X_train, y_winner_train)
+        
+        # Evaluate classifier
+        y_winner_pred = clf.predict(X_test)
+        winner_accuracy = accuracy_score(y_winner_test, y_winner_pred)
+        print(f"   ✅ Winner accuracy: {winner_accuracy:.1%}")
+        
+        # 2. Home Score Regressor (XGBoost)
+        print(f"   Training home score regressor...")
+        reg_home = xgb.XGBRegressor(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            eval_metric='mae'
+        )
+        reg_home.fit(X_train, y_home_train)
+        
+        # Evaluate home regressor
+        y_home_pred = reg_home.predict(X_test)
+        home_mae = mean_absolute_error(y_home_test, y_home_pred)
+        print(f"   ✅ Home score MAE: {home_mae:.2f} points")
+        
+        # 3. Away Score Regressor (XGBoost)
+        print(f"   Training away score regressor...")
+        reg_away = xgb.XGBRegressor(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            eval_metric='mae'
+        )
+        reg_away.fit(X_train, y_away_train)
+        
+        # Evaluate away regressor
+        y_away_pred = reg_away.predict(X_test)
+        away_mae = mean_absolute_error(y_away_test, y_away_pred)
+        print(f"   ✅ Away score MAE: {away_mae:.2f} points")
+        
+        overall_mae = (home_mae + away_mae) / 2
+        
+        return {
+            'models': {
+                'clf': clf,
+                'reg_home': reg_home,
+                'reg_away': reg_away
+            },
+            'feature_columns': feature_cols,
+            'performance': {
+                'winner_accuracy': winner_accuracy,
+                'home_mae': home_mae,
+                'away_mae': away_mae,
+                'overall_mae': overall_mae
+            },
+            'training_games': len(X_train),
+            'test_games': len(X_test)
+        }
 
 def save_model(model_data: Dict[str, Any], league_id: int, league_name: str, 
                output_dir: str = 'artifacts') -> str:
@@ -250,11 +333,11 @@ def train_league(league_id: int, league_name: str, db_path: str) -> bool:
         # Connect to database
         conn = sqlite3.connect(db_path)
         
-        # Configure features (neutral mode for Rugby World Cup)
+        # Configure features (neutral mode for Rugby World Cup and Six Nations)
         config = FeatureConfig(
             elo_priors=None,
             elo_k=24.0,
-            neutral_mode=(league_id == 4574)  # Rugby World Cup
+            neutral_mode=(league_id == 4574 or league_id == 4714)  # Rugby World Cup and Six Nations
         )
         
         # Load data
@@ -266,8 +349,8 @@ def train_league(league_id: int, league_name: str, db_path: str) -> bool:
         # Prepare features and targets
         X, y_winner, y_home_score, y_away_score, feature_cols = prepare_features_and_targets(df)
         
-        # Train models
-        model_data = train_xgboost_models(X, y_winner, y_home_score, y_away_score, feature_cols)
+        # Train models (use all data for training when we have enough games)
+        model_data = train_xgboost_models(X, y_winner, y_home_score, y_away_score, feature_cols, use_all_data=True)
         
         # Save model
         model_file = save_model(model_data, league_id, league_name)
@@ -286,12 +369,37 @@ def train_league(league_id: int, league_name: str, db_path: str) -> bool:
         traceback.print_exc()
         return False
 
+def check_total_games(db_path: str, min_games: int = 900) -> Tuple[bool, int]:
+    """Check if total completed games across all leagues meets minimum threshold"""
+    conn = sqlite3.connect(db_path)
+    
+    try:
+        # Count total completed games (with scores) across all leagues
+        cursor = conn.execute("""
+            SELECT COUNT(*) 
+            FROM event 
+            WHERE home_score IS NOT NULL 
+            AND away_score IS NOT NULL
+            AND league_id IN ({})
+        """.format(','.join(map(str, LEAGUE_MAPPINGS.keys()))))
+        
+        total_games = cursor.fetchone()[0]
+        meets_threshold = total_games >= min_games
+        
+        return meets_threshold, total_games
+    finally:
+        conn.close()
+
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(description='Train XGBoost models for rugby prediction')
     parser.add_argument('--league-id', type=int, help='Train specific league ID')
     parser.add_argument('--all-leagues', action='store_true', help='Train all leagues')
     parser.add_argument('--db-path', type=str, default=None, help='Path to database')
+    parser.add_argument('--min-total-games', type=int, default=900, 
+                       help='Minimum total games required before training (default: 900)')
+    parser.add_argument('--skip-game-check', action='store_true',
+                       help='Skip the total games check and train anyway')
     
     args = parser.parse_args()
     
@@ -308,6 +416,21 @@ def main():
         sys.exit(1)
     
     print(f"📁 Using database: {db_path}")
+    
+    # Check total games threshold (unless explicitly skipped)
+    if not args.skip_game_check and args.all_leagues:
+        print(f"\n🔍 Checking total games threshold ({args.min_total_games}+ games required)...")
+        meets_threshold, total_games = check_total_games(str(db_path), args.min_total_games)
+        
+        print(f"   Total completed games: {total_games}")
+        
+        if not meets_threshold:
+            print(f"   ⚠️  Total games ({total_games}) is below threshold ({args.min_total_games})")
+            print(f"   ❌ Not enough data to train XGBoost models. Need {args.min_total_games - total_games} more games.")
+            print(f"   💡 Use --skip-game-check to train anyway")
+            sys.exit(1)
+        
+        print(f"   ✅ Total games ({total_games}) meets threshold ({args.min_total_games}+) - proceeding with XGBoost training")
     
     # Determine which leagues to train
     if args.league_id:

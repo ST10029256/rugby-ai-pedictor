@@ -1,0 +1,18 @@
+{
+  "leagues_to_retrain": [
+    4986,
+    4446,
+    5069,
+    4574,
+    4551,
+    4430,
+    4414,
+    4714,
+    5479
+  ],
+  "games_updated": 45,
+  "timestamp": "2025-12-15T13:56:14.001362",
+  "reason": "new_games_fetched",
+  "trigger": "comprehensive_data_update",
+  "description": "Found 45 new/updated games from TheSportsDB - retraining all models to capture latest data"
+}

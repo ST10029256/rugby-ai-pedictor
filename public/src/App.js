@@ -10,6 +10,9 @@ import ManualOddsInput from './components/ManualOddsInput';
 import PredictionsDisplay from './components/PredictionsDisplay';
 import LoginWidget from './components/LoginWidget';
 import SubscriptionPage from './components/SubscriptionPage';
+import NewsFeed from './components/NewsFeed';
+import LeagueStandings from './components/LeagueStandings';
+import RugbyBallLoader from './components/RugbyBallLoader';
 import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
 import { MEDIA_URLS } from './utils/storageUrls';
 import './App.css';
@@ -56,6 +59,11 @@ function App() {
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', or 'standings'
+  const [userPreferences] = useState({
+    followed_teams: [],
+    followed_leagues: [],
+  });
   const videoRef = useRef(null);
   const headerVideoRef = useRef(null);
   
@@ -238,6 +246,10 @@ function App() {
             availableLeagues = Object.entries(LEAGUE_CONFIGS).map(([id, config]) => ({
               id: parseInt(id),
               name: config.name,
+              upcoming_matches: 0,
+              recent_matches: 0,
+              has_news: false,
+              total_news: 0,
             }));
           } else {
             // Check if data is directly the leagues array
@@ -259,6 +271,30 @@ function App() {
             id: parseInt(id),
             name: config.name,
           }));
+        } else {
+          // Merge API leagues with LEAGUE_CONFIGS to ensure all configured leagues are available
+          // This ensures Six Nations and other leagues are always available even if API doesn't return them
+          const configLeagues = Object.entries(LEAGUE_CONFIGS).map(([id, config]) => ({
+            id: parseInt(id),
+            name: config.name,
+            upcoming_matches: 0,
+            recent_matches: 0,
+            has_news: false,
+            total_news: 0,
+          }));
+          
+          // Create a map of existing leagues by ID
+          const leagueMap = new Map(availableLeagues.map(l => [l.id, l]));
+          
+          // Add any leagues from LEAGUE_CONFIGS that aren't in the API response
+          configLeagues.forEach(configLeague => {
+            if (!leagueMap.has(configLeague.id)) {
+              availableLeagues.push(configLeague);
+            }
+          });
+          
+          // Sort by ID to keep consistent order
+          availableLeagues.sort((a, b) => a.id - b.id);
         }
         
         setLeagues(availableLeagues);
@@ -286,6 +322,10 @@ function App() {
         const fallbackLeagues = Object.entries(LEAGUE_CONFIGS).map(([id, config]) => ({
           id: parseInt(id),
           name: config.name,
+          upcoming_matches: 0,
+          recent_matches: 0,
+          has_news: false,
+          total_news: 0,
         }));
         setLeagues(fallbackLeagues);
         if (fallbackLeagues.length > 0) {
@@ -339,6 +379,7 @@ function App() {
     };
 
     fetchUpcoming();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLeague]);
 
   const handleGeneratePredictions = async () => {
@@ -584,7 +625,7 @@ function App() {
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
-          <CircularProgress sx={{ color: '#10b981' }} />
+          <RugbyBallLoader size={120} color="#10b981" />
         </Box>
       </ThemeProvider>
     );
@@ -612,7 +653,7 @@ function App() {
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
-          <Typography>Loading...</Typography>
+          <RugbyBallLoader size={120} color="#10b981" />
         </Box>
       </ThemeProvider>
     );
@@ -831,20 +872,20 @@ function App() {
             onClick={handleDrawerToggle}
             sx={{
               position: 'fixed',
-              top: 16,
-              left: 16,
+              top: { xs: 12, sm: 16 },
+              left: { xs: 20, sm: 20 },
               zIndex: 1300,
               backgroundColor: 'rgba(38, 39, 48, 0.95)',
               backdropFilter: 'blur(10px)',
               color: '#fafafa',
-              padding: '14px',
-              borderRadius: '14px',
+              padding: { xs: '8px', sm: '14px' },
+              borderRadius: '12px',
               boxShadow: '0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
               transition: 'all 0.3s ease',
               opacity: mobileOpen ? 0 : 1,
               transform: mobileOpen ? 'scale(0.8)' : 'scale(1)',
               pointerEvents: mobileOpen ? 'none' : 'auto',
-              willChange: 'transform', // GPU acceleration
+              willChange: 'transform',
               '&:hover': {
                 backgroundColor: 'rgba(38, 39, 48, 1)',
                 transform: 'scale(1.05)',
@@ -854,7 +895,7 @@ function App() {
               },
             }}
           >
-            <MenuIcon sx={{ fontSize: '28px' }} />
+            <MenuIcon sx={{ fontSize: { xs: '22px', sm: '28px' } }} />
           </IconButton>
         )}
 
@@ -942,6 +983,117 @@ function App() {
           </>
         )}
 
+        {/* Navigation Tabs - Fixed header on all screen sizes */}
+        <Box sx={{ 
+            position: 'fixed',
+            top: 0,
+            left: { xs: 0, sm: '280px' },
+            right: 0,
+            width: { xs: '100vw', sm: 'auto' },
+            maxWidth: 'none',
+            display: 'flex',
+            gap: { xs: 0.25, sm: 2 },
+            justifyContent: { xs: 'flex-start', sm: 'center' },
+            alignItems: 'center',
+            paddingLeft: { xs: '60px', sm: '24px', md: '32px' },
+            paddingRight: { xs: '20px', sm: '24px', md: '32px' },
+            paddingTop: { xs: '12px', sm: '12px' },
+            paddingBottom: { xs: '12px', sm: '12px' },
+            backgroundColor: 'rgba(14, 17, 23, 0.95)',
+            backdropFilter: 'blur(10px)',
+            borderBottom: '1px solid rgba(16, 185, 129, 0.2)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+            zIndex: 1200,
+            minHeight: { xs: '56px', sm: '56px' },
+            boxSizing: 'border-box',
+            margin: 0,
+          }}>
+            <Button
+              onClick={() => setActiveView('predictions')}
+              sx={{
+                color: activeView === 'predictions' ? '#10b981' : '#9ca3af',
+                borderBottom: activeView === 'predictions' ? '2px solid #10b981' : '2px solid transparent',
+                borderRadius: 0,
+                textTransform: 'none',
+                fontWeight: 600,
+                px: { xs: 1, sm: 3 },
+                py: { xs: 0.75, sm: 1 },
+                fontSize: '14px',
+                '& .MuiButton-label, & .MuiButton-root': {
+                  fontSize: '14px',
+                },
+                whiteSpace: 'nowrap',
+                minWidth: 'fit-content',
+                height: { xs: '36px', sm: 'auto' }, // Fixed height on mobile
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: { xs: 1, sm: 'none' }, // Equal width on mobile
+                '&:hover': {
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              🎯 Predictions
+            </Button>
+            <Button
+              onClick={() => setActiveView('news')}
+              sx={{
+                color: activeView === 'news' ? '#10b981' : '#9ca3af',
+                borderBottom: activeView === 'news' ? '2px solid #10b981' : '2px solid transparent',
+                borderRadius: 0,
+                textTransform: 'none',
+                fontWeight: 600,
+                px: { xs: 1, sm: 3 },
+                py: { xs: 0.75, sm: 1 },
+                fontSize: '14px',
+                '& .MuiButton-label, & .MuiButton-root': {
+                  fontSize: '14px',
+                },
+                whiteSpace: 'nowrap',
+                minWidth: 'fit-content',
+                height: { xs: '36px', sm: 'auto' }, // Fixed height on mobile
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: { xs: 1, sm: 'none' }, // Equal width on mobile
+                '&:hover': {
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              📰 News
+            </Button>
+            <Button
+              onClick={() => setActiveView('standings')}
+              sx={{
+                color: activeView === 'standings' ? '#10b981' : '#9ca3af',
+                borderBottom: activeView === 'standings' ? '2px solid #10b981' : '2px solid transparent',
+                borderRadius: 0,
+                textTransform: 'none',
+                fontWeight: 600,
+                px: { xs: 1, sm: 3 },
+                py: { xs: 0.75, sm: 1 },
+                fontSize: '14px',
+                '& .MuiButton-label, & .MuiButton-root': {
+                  fontSize: '14px',
+                },
+                whiteSpace: 'nowrap',
+                minWidth: 'fit-content',
+                height: { xs: '36px', sm: 'auto' }, // Fixed height on mobile
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: { xs: 1, sm: 'none' }, // Equal width on mobile
+                '&:hover': {
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              🏆 Standings
+            </Button>
+          </Box>
+
         {/* Main Content */}
         <Box
           component="main"
@@ -970,14 +1122,43 @@ function App() {
             }),
           }}
         >
-          <Box className="main-content-wrapper" sx={{ width: '100%', maxWidth: '100%' }}>
+          <Box className="main-content-wrapper" sx={{ 
+            width: '100%', 
+            maxWidth: '100%',
+            paddingTop: { xs: '80px', sm: '90px' }, // Space for fixed header at same level as burger (mobile) or just header (desktop)
+            overflowX: activeView === 'predictions' ? 'visible' : 'hidden',
+            boxSizing: 'border-box',
+          }}>
+            {activeView === 'news' ? (
+              <NewsFeed 
+                userPreferences={userPreferences} 
+                leagueId={selectedLeague} 
+                leagueName={leagueName}
+              />
+            ) : activeView === 'standings' ? (
+              <Box sx={{ 
+                width: '100%', 
+                maxWidth: '1400px', 
+                mx: 'auto', 
+                p: { xs: 2, sm: 3, md: 4 },
+                position: 'relative',
+                minHeight: 'calc(100vh - 300px)',
+                overflow: 'hidden',
+                boxSizing: 'border-box',
+              }}>
+                <LeagueStandings leagueId={selectedLeague} leagueName={leagueName} />
+              </Box>
+            ) : (
+              <>
             {/* Header Video */}
             <Box 
               className="main-header" 
               sx={{ 
-                mt: { xs: 6, sm: 0 }, 
-                width: '100%',
+                mt: { xs: 1, sm: 0 }, 
+                width: { xs: '100%', sm: 'calc(100% + 32px)', md: 'calc(100% + 48px)' },
                 height: { xs: '300px', sm: '450px', md: '600px' },
+                marginLeft: { xs: 0, sm: -2, md: -3 },
+                marginRight: { xs: 0, sm: -2, md: -3 },
                 borderRadius: '8px',
                 overflow: 'hidden',
                 display: 'flex',
@@ -1032,13 +1213,11 @@ function App() {
 
               {/* Manual Odds Input */}
               {loadingMatches ? (
-                <Box sx={{ mb: 4, p: 4, backgroundColor: '#1f2937', borderRadius: 2, textAlign: 'center' }}>
+                <Box sx={{ mb: 4, p: 4, backgroundColor: '#1f2937', borderRadius: 2, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px' }}>
                   <Typography variant="h6" sx={{ mb: 2, color: '#fafafa' }}>
                     📅 Loading Upcoming Matches...
                   </Typography>
-                  <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                    <CircularProgress size={40} sx={{ color: '#10b981' }} />
-                  </Box>
+                  <RugbyBallLoader size={100} color="#10b981" />
                 </Box>
               ) : upcomingMatches.length > 0 ? (
                 <ManualOddsInput
@@ -1060,9 +1239,9 @@ function App() {
                 {/* Generate Predictions Button */}
                 <Box sx={{ my: 4, display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center', gap: 2, width: '100%' }}>
                   {generating && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                      <CircularProgress size={20} sx={{ color: '#10b981' }} />
-                      <Typography sx={{ color: '#fafafa', fontSize: '1rem' }}>Analyzing matches...</Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, mb: 2, width: '100%' }}>
+                      <RugbyBallLoader size={100} color="#10b981" />
+                      <Typography sx={{ color: '#fafafa', fontSize: '1rem', textAlign: 'center' }}>Analyzing matches...</Typography>
                     </Box>
                   )}
                   <button
@@ -1093,6 +1272,8 @@ function App() {
                   Choose from our AI-powered rugby prediction leagues
                 </Typography>
               </Box>
+            )}
+              </>
             )}
           </Box>
         </Box>
