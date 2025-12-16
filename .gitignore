@@ -58,3 +58,10 @@ public/.env.production.local
 venv/
 ENV/
 env/
+
+# Large video files (exceed GitHub's 100MB limit)
+*.mov
+*.mp4
+public/public/*.mov
+public/public/*.mp4
+public/*.mov
