@@ -1,9 +1,9 @@
 {
-  "last_updated": "2025-12-19T22:46:10.026673",
+  "last_updated": "2025-12-20T22:42:22.884460",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2025-12-19T22:45:35.924495",
+      "trained_at": "2025-12-20T22:41:47.903822",
       "training_games": 144,
       "model_type": "xgboost",
       "performance": {
@@ -15,31 +15,31 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2025-12-19T22:45:41.353332",
-      "training_games": 344,
+      "trained_at": "2025-12-20T22:41:53.594559",
+      "training_games": 352,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.6451832907075874,
-        "home_mae": 9.868306844733482,
-        "away_mae": 8.024108031461406,
-        "overall_mae": 8.946207438097444
+        "winner_accuracy": 0.653440643863179,
+        "home_mae": 9.853585096922787,
+        "away_mae": 7.606218947605654,
+        "overall_mae": 8.72990202226422
       }
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2025-12-19T22:45:46.817092",
+      "trained_at": "2025-12-20T22:41:59.060130",
       "training_games": 345,
       "model_type": "xgboost",
       "performance": {
         "winner_accuracy": 0.6,
-        "home_mae": 10.97067731221517,
-        "away_mae": 10.968382050334544,
-        "overall_mae": 10.969529681274857
+        "home_mae": 10.953652456532353,
+        "away_mae": 10.898847929636638,
+        "overall_mae": 10.926250193084496
       }
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2025-12-19T22:45:49.687101",
+      "trained_at": "2025-12-20T22:42:01.816816",
       "training_games": 152,
       "model_type": "xgboost",
       "performance": {
@@ -51,7 +51,7 @@
     },
     "4551": {
       "name": "Super Rugby",
-      "trained_at": "2025-12-19T22:45:54.257932",
+      "trained_at": "2025-12-20T22:42:06.622237",
       "training_games": 259,
       "model_type": "xgboost",
       "performance": {
@@ -63,7 +63,7 @@
     },
     "4430": {
       "name": "French Top 14",
-      "trained_at": "2025-12-19T22:46:00.693369",
+      "trained_at": "2025-12-20T22:42:13.380332",
       "training_games": 666,
       "model_type": "xgboost",
       "performance": {
@@ -75,19 +75,19 @@
     },
     "4414": {
       "name": "English Premiership Rugby",
-      "trained_at": "2025-12-19T22:46:04.287172",
-      "training_games": 208,
+      "trained_at": "2025-12-20T22:42:17.061584",
+      "training_games": 209,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.6678281068524972,
-        "home_mae": 10.472001639696268,
-        "away_mae": 8.466179352540236,
-        "overall_mae": 9.469090496118252
+        "winner_accuracy": 0.6650406504065041,
+        "home_mae": 10.622297661156175,
+        "away_mae": 8.38976071097634,
+        "overall_mae": 9.506029186066257
       }
     },
     "5479": {
       "name": "Rugby Union International Friendlies",
-      "trained_at": "2025-12-19T22:46:10.020221",
+      "trained_at": "2025-12-20T22:42:22.877962",
       "training_games": 94,
       "model_type": "xgboost",
       "performance": {
@@ -99,7 +99,7 @@
     },
     "4714": {
       "name": "Six Nations Championship",
-      "trained_at": "2025-12-19T22:46:08.248093",
+      "trained_at": "2025-12-20T22:42:21.100020",
       "training_games": 240,
       "model_type": "xgboost",
       "performance": {
