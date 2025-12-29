@@ -10,9 +10,9 @@
     4714,
     5479
   ],
-  "games_updated": 13,
-  "timestamp": "2025-12-28T22:31:50.893019",
+  "games_updated": 3,
+  "timestamp": "2025-12-29T22:32:10.151797",
   "reason": "new_games_fetched",
   "trigger": "comprehensive_data_update",
-  "description": "Found 13 new/updated games from TheSportsDB - retraining all models to capture latest data"
+  "description": "Found 3 new/updated games from TheSportsDB - retraining all models to capture latest data"
 }
