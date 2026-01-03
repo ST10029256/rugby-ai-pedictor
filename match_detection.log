@@ -660,3 +660,10 @@
 2026-01-02 22:20:06,773 - INFO - Starting match completion detection and retraining
 2026-01-02 22:20:06,773 - INFO - No new completed matches found
 2026-01-02 22:20:06,773 - INFO - Saved checkpoint: 2026-01-02T22:20:06.773731
+2026-01-03 22:19:08,692 - INFO - Starting match completion detection and retraining
+2026-01-03 22:19:08,692 - INFO - Found 1 completed matches
+2026-01-03 22:19:08,693 - INFO - Completed: Ulster 28-3 Munster (United Rugby Championship)
+2026-01-03 22:19:08,693 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-01-03 22:19:08,693 - INFO - Leagues to retrain: [4446]
+2026-01-03 22:19:08,693 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-01-03 22:19:08,693 - INFO - Saved checkpoint: 2026-01-03T22:19:08.693686
