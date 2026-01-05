@@ -12,8 +12,9 @@ import {
   TableRow,
   Paper,
   Chip,
-  CircularProgress,
   Alert,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getLeagueStandings } from '../firebase';
@@ -36,18 +37,8 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
   const [standings, setStandings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  // Prevent body scroll when loading
-  useEffect(() => {
-    if (loading) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [loading]);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   useEffect(() => {
     const loadStandings = async () => {
@@ -154,70 +145,135 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
   return (
     <Card sx={{ mb: 3, background: 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)' }}>
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <EmojiEventsIcon sx={{ mr: 1, color: '#fbbf24' }} />
-          <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'white' }}>
-            {leagueName || 'League'} Standings
-          </Typography>
+        <Box sx={{ display: 'flex', alignItems: { xs: 'flex-start', sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 1, sm: 0 }, mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <EmojiEventsIcon sx={{ mr: 1, color: '#fbbf24' }} />
+            <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'white', fontSize: { xs: '1.1rem', sm: '1.5rem' } }}>
+              {leagueName || 'League'} Standings
+            </Typography>
+          </Box>
           {standings.league?.season && (
             <Chip
               label={`Season ${standings.league.season}`}
               size="small"
-              sx={{ ml: 2, backgroundColor: 'rgba(255, 255, 255, 0.2)', color: 'white' }}
+              sx={{
+                ml: { xs: 0, sm: 2 },
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                color: 'white',
+                alignSelf: { xs: 'flex-start', sm: 'center' },
+              }}
             />
           )}
         </Box>
 
-        <TableContainer component={Paper} sx={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', backdropFilter: 'blur(10px)', maxHeight: 'none', overflow: 'visible' }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ backgroundColor: 'rgba(0, 0, 0, 0.2)' }}>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold', width: '50px' }}>Pos</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Team</TableCell>
-                <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>P</TableCell>
-                <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>W</TableCell>
-                <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>D</TableCell>
-                <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>L</TableCell>
-                <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>Pts</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {teams.map((team, index) => {
-                const teamData = team.team || team;
-                const teamName = teamData.name || teamData.team_name || 'Unknown';
-                const position = team.position || index + 1;
-                const points = team.points || 0;
-                const wins = team.wins || 0;
-                const draws = team.draws || 0;
-                const loses = team.loses || team.losses || 0;
-                const gamesPlayed = team.gamesPlayed || (wins + draws + loses);
+        {isMobile ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+            {teams.map((team, index) => {
+              const teamData = team.team || team;
+              const teamName = teamData.name || teamData.team_name || 'Unknown';
+              const position = team.position || index + 1;
+              const points = team.points || 0;
+              const wins = team.wins || 0;
+              const draws = team.draws || 0;
+              const loses = team.loses || team.losses || 0;
+              const gamesPlayed = team.gamesPlayed || (wins + draws + loses);
 
-                return (
-                  <TableRow
-                    key={teamData.id || index}
-                    sx={{
-                      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
-                      backgroundColor: position <= 3 ? 'rgba(251, 191, 36, 0.1)' : 'transparent',
-                    }}
-                  >
-                    <TableCell sx={{ color: 'white', fontWeight: position <= 3 ? 'bold' : 'normal' }}>
-                      {position <= 3 && <EmojiEventsIcon sx={{ fontSize: 16, mr: 0.5, color: '#fbbf24', verticalAlign: 'middle' }} />}
-                      {position}
-                    </TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: position <= 3 ? 'bold' : 'normal' }}>
-                      {teamName}
-                    </TableCell>
-                    <TableCell align="center" sx={{ color: 'white' }}>{gamesPlayed}</TableCell>
-                    <TableCell align="center" sx={{ color: 'white' }}>{wins}</TableCell>
-                    <TableCell align="center" sx={{ color: 'white' }}>{draws}</TableCell>
-                    <TableCell align="center" sx={{ color: 'white' }}>{loses}</TableCell>
-                    <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>{points}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
+              return (
+                <Paper
+                  key={teamData.id || index}
+                  sx={{
+                    p: 1.25,
+                    borderRadius: 2,
+                    backgroundColor: position <= 3 ? 'rgba(251, 191, 36, 0.08)' : 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    backdropFilter: 'blur(10px)',
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ color: 'white', fontWeight: 800, fontSize: '0.95rem', lineHeight: 1.2 }} noWrap>
+                        {position}. {teamName}
+                      </Typography>
+                      <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.8rem', mt: 0.25 }}>
+                        P {gamesPlayed} • W {wins} • D {draws} • L {loses}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
+                      <Typography sx={{ color: '#fbbf24', fontWeight: 900, fontSize: '1.15rem', lineHeight: 1 }}>
+                        {points}
+                      </Typography>
+                      <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.75rem' }}>
+                        Pts
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Paper>
+              );
+            })}
+          </Box>
+        ) : (
+          <TableContainer
+            component={Paper}
+            sx={{
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              backdropFilter: 'blur(10px)',
+              maxHeight: 'none',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              '&::-webkit-scrollbar': { height: 8 },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 8 },
+            }}
+          >
+            <Table size="small" sx={{ minWidth: 600 }}>
+              <TableHead>
+                <TableRow sx={{ backgroundColor: 'rgba(0, 0, 0, 0.2)' }}>
+                  <TableCell sx={{ color: 'white', fontWeight: 'bold', width: '60px' }}>Pos</TableCell>
+                  <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Team</TableCell>
+                  <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>P</TableCell>
+                  <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>W</TableCell>
+                  <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>D</TableCell>
+                  <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>L</TableCell>
+                  <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>Pts</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {teams.map((team, index) => {
+                  const teamData = team.team || team;
+                  const teamName = teamData.name || teamData.team_name || 'Unknown';
+                  const position = team.position || index + 1;
+                  const points = team.points || 0;
+                  const wins = team.wins || 0;
+                  const draws = team.draws || 0;
+                  const loses = team.loses || team.losses || 0;
+                  const gamesPlayed = team.gamesPlayed || (wins + draws + loses);
+
+                  return (
+                    <TableRow
+                      key={teamData.id || index}
+                      sx={{
+                        '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+                        backgroundColor: position <= 3 ? 'rgba(251, 191, 36, 0.1)' : 'transparent',
+                      }}
+                    >
+                      <TableCell sx={{ color: 'white', fontWeight: position <= 3 ? 'bold' : 'normal' }}>
+                        {position <= 3 && <EmojiEventsIcon sx={{ fontSize: 16, mr: 0.5, color: '#fbbf24', verticalAlign: 'middle' }} />}
+                        {position}
+                      </TableCell>
+                      <TableCell sx={{ color: 'white', fontWeight: position <= 3 ? 'bold' : 'normal' }}>
+                        {teamName}
+                      </TableCell>
+                      <TableCell align="center" sx={{ color: 'white' }}>{gamesPlayed}</TableCell>
+                      <TableCell align="center" sx={{ color: 'white' }}>{wins}</TableCell>
+                      <TableCell align="center" sx={{ color: 'white' }}>{draws}</TableCell>
+                      <TableCell align="center" sx={{ color: 'white' }}>{loses}</TableCell>
+                      <TableCell align="center" sx={{ color: 'white', fontWeight: 'bold' }}>{points}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
       </CardContent>
     </Card>
   );

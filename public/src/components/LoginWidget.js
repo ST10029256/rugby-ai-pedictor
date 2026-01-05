@@ -21,7 +21,8 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
 
   // Auto-format license key as user types
   const formatLicenseKey = (value) => {
-    const cleaned = value.replace(/[^A-Z0-9]/g, '').toUpperCase();
+    // Allow both lower/upper while typing; normalize to uppercase for display/storage
+    const cleaned = value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     const formatted = cleaned.match(/.{1,4}/g)?.join('-') || cleaned;
     return formatted;
   };
@@ -354,6 +355,11 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
             }}
             inputProps={{
                     maxLength: 19,
+              // Let users type lower/upper naturally (keyboard stays normal),
+              // but we still format+uppercase the value in JS.
+              autoCapitalize: 'none',
+              autoCorrect: 'off',
+              spellCheck: 'false',
               style: { color: '#f9fafb' },
             }}
           />

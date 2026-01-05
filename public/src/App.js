@@ -13,9 +13,11 @@ import SubscriptionPage from './components/SubscriptionPage';
 import NewsFeed from './components/NewsFeed';
 import LeagueStandings from './components/LeagueStandings';
 import RugbyBallLoader from './components/RugbyBallLoader';
+import HistoricalPredictions from './components/HistoricalPredictions';
 import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
 import { MEDIA_URLS } from './utils/storageUrls';
 import './App.css';
+import { getLocalYYYYMMDD } from './utils/date';
 
 const darkTheme = createTheme({
   palette: {
@@ -59,7 +61,7 @@ function App() {
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', or 'standings'
+  const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', 'standings', or 'history'
   const [userPreferences] = useState({
     followed_teams: [],
     followed_leagues: [],
@@ -397,7 +399,7 @@ function App() {
     // Precompute unique match tasks (so we don't waste time on duplicates)
     const tasks = [];
     for (const match of upcomingMatches) {
-      const matchDate = match.date_event ? match.date_event.split('T')[0] : new Date().toISOString().split('T')[0];
+      const matchDate = match.date_event ? match.date_event.split('T')[0] : getLocalYYYYMMDD();
       const matchupKey = `${match.home_team_id || match.home_team}::${match.away_team_id || match.away_team}::${matchDate}`;
       if (seenMatchups.has(matchupKey)) {
         console.log('⏭️ Skipping duplicate matchup (precompute):', matchupKey);
@@ -1007,6 +1009,10 @@ function App() {
             minHeight: { xs: '56px', sm: '56px' },
             boxSizing: 'border-box',
             margin: 0,
+            overflowX: { xs: 'auto', sm: 'visible' },
+            WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none',
+            '&::-webkit-scrollbar': { display: 'none' },
           }}>
             <Button
               onClick={() => setActiveView('predictions')}
@@ -1092,6 +1098,34 @@ function App() {
             >
               🏆 Standings
             </Button>
+            <Button
+              onClick={() => setActiveView('history')}
+              sx={{
+                color: activeView === 'history' ? '#10b981' : '#9ca3af',
+                borderBottom: activeView === 'history' ? '2px solid #10b981' : '2px solid transparent',
+                borderRadius: 0,
+                textTransform: 'none',
+                fontWeight: 600,
+                px: { xs: 1, sm: 3 },
+                py: { xs: 0.75, sm: 1 },
+                fontSize: '14px',
+                '& .MuiButton-label, & .MuiButton-root': {
+                  fontSize: '14px',
+                },
+                whiteSpace: 'nowrap',
+                minWidth: 'fit-content',
+                height: { xs: '36px', sm: 'auto' }, // Fixed height on mobile
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: { xs: 1, sm: 'none' }, // Equal width on mobile
+                '&:hover': {
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              📜 History
+            </Button>
           </Box>
 
         {/* Main Content */}
@@ -1099,7 +1133,9 @@ function App() {
           component="main"
           sx={{
             flexGrow: 1,
-            p: { xs: '1rem', sm: 2, md: 3 },
+            // On mobile, let the header video go edge-to-edge in Predictions view (no extra gap).
+            // Other views keep comfortable padding.
+            p: { xs: activeView === 'predictions' ? 0 : '1rem', sm: 2, md: 3 },
             backgroundColor: 'transparent',
             color: '#fafafa',
             width: { xs: '100%', sm: 'auto' },
@@ -1108,8 +1144,8 @@ function App() {
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            paddingLeft: { xs: '1rem', sm: 2, md: 3 },
-            paddingRight: { xs: '1rem', sm: 2, md: 3 },
+            paddingLeft: { xs: activeView === 'predictions' ? 0 : '1rem', sm: 2, md: 3 },
+            paddingRight: { xs: activeView === 'predictions' ? 0 : '1rem', sm: 2, md: 3 },
             position: 'relative',
             zIndex: 2,
             // Desktop only: Allow main content to scroll independently
@@ -1143,23 +1179,28 @@ function App() {
                 p: { xs: 2, sm: 3, md: 4 },
                 position: 'relative',
                 minHeight: 'calc(100vh - 300px)',
-                overflow: 'hidden',
+                overflowX: 'visible',
+                overflowY: 'visible',
                 boxSizing: 'border-box',
               }}>
                 <LeagueStandings leagueId={selectedLeague} leagueName={leagueName} />
               </Box>
+            ) : activeView === 'history' ? (
+              <HistoricalPredictions leagueId={selectedLeague} leagueName={leagueName} />
             ) : (
               <>
             {/* Header Video */}
             <Box 
               className="main-header" 
               sx={{ 
-                mt: { xs: 1, sm: 0 }, 
+                // Remove the extra top gap on mobile; keep desktop spacing.
+                mt: { xs: 0, sm: 0 }, 
                 width: { xs: '100%', sm: 'calc(100% + 32px)', md: 'calc(100% + 48px)' },
                 height: { xs: '300px', sm: '450px', md: '600px' },
                 marginLeft: { xs: 0, sm: -2, md: -3 },
                 marginRight: { xs: 0, sm: -2, md: -3 },
-                borderRadius: '8px',
+                // Edge-to-edge on mobile looks better and avoids visible gaps.
+                borderRadius: { xs: 0, sm: '8px' },
                 overflow: 'hidden',
                 display: 'flex',
                 justifyContent: 'center',

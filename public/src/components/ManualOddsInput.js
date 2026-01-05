@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { Box, Typography, TextField, Grid } from '@mui/material';
+import { getLocalYYYYMMDD } from '../utils/date';
 
 const ManualOddsInput = memo(function ManualOddsInput({ matches, manualOdds, onOddsChange }) {
   return (
@@ -12,7 +13,7 @@ const ManualOddsInput = memo(function ManualOddsInput({ matches, manualOdds, onO
       </Typography>
 
       {matches.map((match) => {
-        const matchDate = match.date_event ? match.date_event.split('T')[0] : new Date().toISOString().split('T')[0];
+        const matchDate = match.date_event ? match.date_event.split('T')[0] : getLocalYYYYMMDD();
         // Support both ID-based and name-based keys (matching Streamlit)
         const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
         const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;

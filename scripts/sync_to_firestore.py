@@ -12,6 +12,16 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List, Set
 import logging
 
+# Windows console can default to cp1252, which throws UnicodeEncodeError for emoji log messages.
+# Force UTF-8 where possible so scheduled runs don't spam logging errors.
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+except Exception:
+    pass
+
 try:
     from google.cloud import firestore  # type: ignore
     from google.cloud.firestore import SERVER_TIMESTAMP  # type: ignore

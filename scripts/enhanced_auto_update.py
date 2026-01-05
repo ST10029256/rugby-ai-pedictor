@@ -40,6 +40,59 @@ LEAGUE_MAPPINGS = {
     5479: {"name": "Rugby Union International Friendlies", "sportsdb_id": 5479}
 }
 
+YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}  # e.g. Premiership, Top 14, URC
+SINGLE_YEAR_LEAGUE_IDS = {4551, 4714, 4986, 5069, 5479}  # e.g. Super Rugby, Six Nations, etc.
+
+# Max rounds to scan (used with --scan-rounds). These are conservative caps.
+MAX_ROUNDS_BY_LEAGUE: Dict[int, int] = {
+    4446: 18,  # URC (regular season + some variations; cap for scanning)
+    4414: 18,  # Premiership
+    4430: 26,  # Top 14
+    4551: 18,  # Super Rugby (varies)
+    4714: 5,   # Six Nations
+    4986: 6,   # Rugby Championship
+    5069: 14,  # Currie Cup (varies)
+    4574: 30,  # World Cup (placeholder cap)
+    5479: 30,  # Friendlies (round scanning may not help much)
+}
+
+def compute_current_seasons(sportsdb_id: int, today: Optional[datetime] = None) -> List[str]:
+    """
+    Compute season strings to try for upcoming fixtures.
+
+    TheSportsDB season formats vary by competition. We try a small set to maximize coverage:
+    - Year-span leagues: try the "current season" and adjacent season (helps around season boundaries)
+    - Single-year leagues: try current year and previous year (some APIs lag/labeling)
+    """
+    now = today or datetime.utcnow()
+    year = now.year
+    month = now.month
+
+    seasons: List[str] = []
+
+    # If league isn't classified, try both styles (still only a couple calls)
+    is_year_span = sportsdb_id in YEAR_SPAN_LEAGUE_IDS
+    is_single_year = sportsdb_id in SINGLE_YEAR_LEAGUE_IDS
+    if not is_year_span and not is_single_year:
+        is_year_span = True
+        is_single_year = True
+
+    if is_year_span:
+        # Rugby seasons typically run Aug/Sept -> May/June. Use Aug (8) as boundary.
+        current_span = f"{year}-{year + 1}" if month >= 8 else f"{year - 1}-{year}"
+        adjacent_span = f"{year - 1}-{year}" if current_span == f"{year}-{year + 1}" else f"{year}-{year + 1}"
+        seasons.extend([current_span, adjacent_span])
+
+    if is_single_year:
+        seasons.extend([str(year), str(year - 1)])
+
+    # Deduplicate while preserving order
+    deduped: List[str] = []
+    for s in seasons:
+        if s not in deduped:
+            deduped.append(s)
+    return deduped
+
 def safe_to_int(value: Any, default: int = 0) -> int:
     """Safely convert value to int with default fallback."""
     if value is None:
@@ -77,129 +130,73 @@ def get_team_id(conn: sqlite3.Connection, team_name: str, league_id: int) -> Opt
     logger.info(f"Created new team: {team_name} (ID: {team_id})")
     return team_id
 
-def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str) -> List[Dict[str, Any]]:
+def fetch_games_from_sportsdb(
+    league_id: int,
+    sportsdb_id: int,
+    league_name: str,
+    include_history: bool = False,
+    scan_rounds: bool = False,
+    days_ahead: int = 180,
+    days_back: int = 14,
+) -> List[Dict[str, Any]]:
     """Fetch games from TheSportsDB for a specific league."""
     logger.info(f"Fetching games for {league_name} (SportsDB ID: {sportsdb_id})")
     
     games = []
     
     try:
-        # League-specific season formats based on TheSportsDB calendar data
-        if sportsdb_id in [4551, 4714]:  # Super Rugby and Six Nations - use single year format
-            season_formats = ['2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015', '2014', '2013', '2012', '2011', '2010']
-        elif sportsdb_id in [4430, 4414]:  # French Top 14 and English Premiership - use year-year format
-            season_formats = ['2025-2026', '2024-2025', '2023-2024', '2022-2023', '2021-2022', '2020-2021', '2019-2020', '2018-2019', '2017-2018', '2016-2017', '2015-2016', '2014-2015', '2013-2014', '2012-2013', '2011-2012', '2010-2011', '2009-2010', '2008-2009']
-        else:  # Other leagues - try both formats
-            season_formats = ['2025', '2024-2025', '2024', '2023-2024', '2023', '2022-2023', '2022', '2021-2022', '2021', '2020-2021', '2020', '2019-2020', '2019', '2018-2019', '2018', '2017-2018', '2017', '2016-2017', '2016', '2015-2016', '2015', '2014-2015', '2014', '2013-2014', '2013', '2012-2013', '2012', '2011-2012', '2011', '2010-2011', '2010']
-        
-        # OPTIMIZED: Only fetch upcoming games - historical data already exists!
+        # OPTIMIZED: fetch upcoming games first (historical backfills are optional via --include-history)
         urls_to_try = []
         
-        # ONLY upcoming games endpoints (no historical data needed)
+        # Upcoming games endpoints (often limited to ~15 fixtures)
         urls_to_try.extend([
             f"https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id={sportsdb_id}",
             f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}"
         ])
         
-        # ONLY current season for upcoming games (2025-2026 or 2025)
-        current_seasons = ['2025-2026', '2025'] if sportsdb_id in [4430, 4414] else ['2025']
-        for season in current_seasons:
+        # Season-based endpoints (dynamic, based on today's date)
+        for season in compute_current_seasons(sportsdb_id):
             urls_to_try.extend([
                 f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
                 f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
             ])
-        
-        # SPECIAL BACKFILL: International Friendlies need broader history for training (2021-2025)
-        if sportsdb_id == 5479:
-            backfill_seasons = ['2025', '2024', '2023', '2022', '2021']
-            for season in backfill_seasons:
-                urls_to_try.extend([
-                    f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
-                    f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
-                ])
-            # Also include past league endpoint for completeness
-            urls_to_try.extend([
-                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
-                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
-            ])
-        
-        # BACKFILL: Top 14 needs historical data - fetch all seasons for better training data
-        if sportsdb_id == 4430:  # French Top 14
-            logger.info(f"Fetching historical seasons for {league_name} to build comprehensive dataset")
-            # Fetch games for all historical seasons (skip current season as it's already added above)
-            historical_seasons = [s for s in season_formats if s not in current_seasons]
-            for season in historical_seasons:
-                urls_to_try.extend([
-                    f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
-                    f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
-                ])
-            # Also include past league endpoint for completeness
-            urls_to_try.extend([
-                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
-                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
-            ])
-            # Fetch games by rounds for recent seasons (Top 14 has 26 rounds per season)
-            # Only fetch rounds for last 3 seasons to avoid too many API calls
-            recent_seasons = season_formats[:3]  # Last 3 seasons
-            for season in recent_seasons:
-                for round_num in range(1, 27):  # Top 14 has 26 rounds per season
+
+        # Optional: scan rounds to discover more fixtures (TheSportsDB sometimes won't return full seasons in one call).
+        if scan_rounds:
+            max_rounds = MAX_ROUNDS_BY_LEAGUE.get(sportsdb_id, 30)
+            for season in compute_current_seasons(sportsdb_id):
+                for round_num in range(1, max_rounds + 1):
                     urls_to_try.extend([
                         f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}",
-                        f"https://www.thesportsdb.com/api/v1/json/1/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}"
+                        f"https://www.thesportsdb.com/api/v1/json/1/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}",
                     ])
-        
-        # BACKFILL: Six Nations needs historical data - it's only played Feb-Mar, so fetch historical seasons
-        if sportsdb_id == 4714:  # Six Nations Championship
-            logger.info(f"Fetching historical seasons for {league_name} to build comprehensive dataset")
-            # Fetch games for all historical seasons (Six Nations uses single year format: 2024, 2023, etc.)
-            historical_seasons = [s for s in season_formats if s not in current_seasons]
-            for season in historical_seasons:
+
+        # For International Friendlies, fixtures are scattered; sample upcoming weekends via day-based query.
+        if sportsdb_id == 5479:
+            today = datetime.utcnow().date()
+            weekend_dates: List[str] = []
+            for i in range(0, 70):
+                d = today + timedelta(days=i)
+                # 5=Saturday, 6=Sunday
+                if d.weekday() in (5, 6):
+                    weekend_dates.append(d.strftime('%Y-%m-%d'))
+            for d in weekend_dates[:12]:  # cap calls to avoid rate limiting
                 urls_to_try.extend([
-                    f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
-                    f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
+                    f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d={d}&s=Rugby",
+                    f"https://www.thesportsdb.com/api/v1/json/1/eventsday.php?d={d}&s=Rugby",
                 ])
-            # Also include past league endpoint for completeness
-            urls_to_try.extend([
-                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
-                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
-            ])
-        
-        # Add general upcoming games endpoint
+
+        # Add general league endpoint (can include recent/upcoming depending on API)
         urls_to_try.extend([
             f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}"
         ])
-        
-        # Add more specific endpoints for this week (October 2025) - check more rounds
-        urls_to_try.extend([
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=1&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=2&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=3&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=4&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=5&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=6&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=7&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=8&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=9&s=2025-2026",
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r=10&s=2025-2026"
-        ])
 
-        # Friendlies special coverage: query events by day for November 2025
-        # Target the key dates when international friendlies are scheduled
-        if sportsdb_id == 5479:
-            try:
-                from datetime import date, timedelta as _td
-                # Fetch November 2025 fixtures - key dates for international friendlies
-                november_dates = [
-                    '2025-11-01', '2025-11-02', '2025-11-08', '2025-11-09', 
-                    '2025-11-15', '2025-11-16', '2025-11-22', '2025-11-23'
-                ]
-                for d in november_dates:
-                    urls_to_try.extend([
-                        f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d={d}&s=Rugby",
-                        f"https://www.thesportsdb.com/api/v1/json/1/eventsday.php?d={d}&s=Rugby",
-                    ])
-            except Exception:
-                pass
+        # Optional history backfill (kept behind a flag so the daily pipeline stays fast/reliable)
+        if include_history and sportsdb_id in {4430, 4714, 5479}:
+            urls_to_try.extend([
+                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
+                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
+            ])
         
         for i, url in enumerate(urls_to_try):
             try:
@@ -355,12 +352,37 @@ def fetch_games_from_sportsdb(league_id: int, sportsdb_id: int, league_name: str
             unique_games.append(game)
     
     logger.info(f"Found {len(games)} total games, {len(unique_games)} unique games for {league_name}")
+
+    # Filter to a sensible date window so we don't waste inserts on ancient events.
+    today = datetime.utcnow().date()
+    min_date = today - timedelta(days=days_back)
+    max_date = today + timedelta(days=days_ahead)
+
+    in_window: List[Dict[str, Any]] = []
+    past = 0
+    future = 0
+    for g in unique_games:
+        d = g.get('date_event')
+        if not d:
+            continue
+        if d < min_date or d > max_date:
+            continue
+        in_window.append(g)
+        if d < today:
+            past += 1
+        elif d > today:
+            future += 1
+
+    logger.info(
+        f"Date window for {league_name}: {min_date} .. {max_date} | "
+        f"in-window={len(in_window)} (past={past}, today={len(in_window) - past - future}, future={future})"
+    )
     
     # If no games found from API, log warning
     if not unique_games:
         logger.warning(f"No games found from API for {league_name}")
     
-    return unique_games
+    return in_window
 
 def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, league_name: str) -> int:
     """Detect and add missing games by checking TheSportsDB website data."""
@@ -492,11 +514,10 @@ def fetch_highlightly_friendlies(conn: sqlite3.Connection, league_id: int, leagu
     current_date = datetime.now().date()
     upcoming_dates = []
     
-    # Get friendlies for next 2 months
+    # Get friendlies for next ~2 months
     for i in range(60):
         target_date = current_date + timedelta(days=i)
-        if target_date.month in [10, 11, 12]:  # October, November, December
-            upcoming_dates.append(target_date.strftime('%Y-%m-%d'))
+        upcoming_dates.append(target_date.strftime('%Y-%m-%d'))
     
     added_count = 0
     cursor = conn.cursor()
@@ -637,6 +658,10 @@ def main():
     parser = argparse.ArgumentParser(description='Auto-update rugby games from TheSportsDB')
     parser.add_argument('--db', default='data.sqlite', help='Database file path')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--include-history', action='store_true', help='Also fetch historical endpoints (slower, more API calls)')
+    parser.add_argument('--scan-rounds', action='store_true', help='Scan eventsround endpoints to discover more fixtures (more API calls)')
+    parser.add_argument('--days-ahead', type=int, default=180, help='Only keep fixtures up to N days ahead (default: 180)')
+    parser.add_argument('--days-back', type=int, default=14, help='Also keep fixtures up to N days back (default: 14)')
     
     args = parser.parse_args()
     
@@ -668,7 +693,15 @@ def main():
             
             try:
                 # Fetch ONLY upcoming games from TheSportsDB
-                games = fetch_games_from_sportsdb(league_id, sportsdb_id, league_name)
+                games = fetch_games_from_sportsdb(
+                    league_id,
+                    sportsdb_id,
+                    league_name,
+                    include_history=args.include_history,
+                    scan_rounds=args.scan_rounds,
+                    days_ahead=args.days_ahead,
+                    days_back=args.days_back,
+                )
                 
                 if games:
                     # Update database

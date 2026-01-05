@@ -209,5 +209,46 @@ export const parseSocialEmbed = (data) => {
   return callable(data);
 };
 
+export const getHistoricalPredictions = async (data) => {
+  // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_predictions_http';
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data || {}),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  // Normalize shape to match httpsCallable: { data: ... }
+  const json = await response.json().catch(() => ({}));
+  return { data: json };
+};
+
+export const getHistoricalBacktest = async (data) => {
+  // True walk-forward backtest (unseen) - server trains only on past games per week
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_backtest_http';
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data || {}),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  const json = await response.json().catch(() => ({}));
+  return { data: json };
+};
+
 export default app;
 

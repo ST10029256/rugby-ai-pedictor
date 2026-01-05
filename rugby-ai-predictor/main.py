@@ -741,11 +741,12 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     logger.debug(f"Skipping match {doc.id}: has scores (home={match_data.get('home_score')}, away={match_data.get('away_score')})")
                     continue
                 
-                # Check if date is in the future
+                # Check if date is in the future (or today for date-only values)
                 date_event = match_data.get('date_event')
                 if date_event:
                     # Handle both datetime and string dates
                     match_date = None
+                    is_date_only = False
                     try:
                         # Check for Firestore Timestamp first (most common)
                         # Firestore Timestamp has both timestamp() and to_datetime() methods
@@ -769,6 +770,8 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                             if 'T' in date_event:
                                 match_date = datetime.fromisoformat(date_event.replace('Z', '+00:00'))
                             else:
+                                # Date-only string (YYYY-MM-DD) - treat as "all-day" for upcoming filtering
+                                is_date_only = True
                                 match_date = datetime.strptime(date_event, '%Y-%m-%d')
                                 # Make timezone-aware (assume UTC)
                                 match_date = match_date.replace(tzinfo=timezone.utc)
@@ -789,16 +792,25 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                             })
                         continue
                     
-                    # Only include FUTURE matches (no past matches)
+                    # Only include upcoming matches:
+                    # - If we have a full datetime, require it to be in the future (UTC).
+                    # - If we only have a date (YYYY-MM-DD), include today+future so it doesn't disappear right after 00:00 UTC.
                     if match_date:
-                        # Only include if match is in the future
-                        if match_date > now:
+                        should_include = False
+                        if is_date_only:
+                            should_include = match_date.date() >= now.date()
+                        else:
+                            should_include = match_date > now
+
+                        if should_include:
                             match_data['id'] = doc.id
                             # Convert date to string for JSON serialization
                             if hasattr(date_event, 'timestamp'):
                                 match_data['date_event'] = match_date.isoformat()
                             elif isinstance(date_event, datetime):
                                 match_data['date_event'] = match_date.isoformat()
+                            elif isinstance(date_event, str) and is_date_only:
+                                match_data['date_event'] = match_date.date().isoformat()
                             
                             # Collect team IDs for batch lookup
                             home_team_id = match_data.get('home_team_id')
@@ -3310,6 +3322,846 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
         logger.info("="*80)
         logger.info("=== get_league_standings_http COMPLETED ===")
         logger.info("="*80)
+
+
+
+@https_fn.on_request(timeout_sec=120, memory=1024)
+def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP endpoint for historical predictions with explicit CORS support.
+    Returns historical matches organized by year and week with AI predictions vs actual results.
+    
+    Request body:
+    {
+        "league_id": 4986,  # optional, filter by league
+        "year": "2026",     # optional, fetch a single calendar year (recommended)
+        "limit": 100        # optional, limit number of matches
+    }
+    """
+    import logging
+    import sys
+    import os
+    from datetime import datetime
+    from collections import defaultdict
+    
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    
+    logger.info("="*80)
+    logger.info("=== get_historical_predictions_http CALLED ===")
+    logger.info("="*80)
+    
+    # Handle CORS preflight (match pattern used by other HTTP functions)
+    if req.method == "OPTIONS":
+        logger.info("OPTIONS request - returning CORS preflight")
+        preflight_headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "3600",
+        }
+        return https_fn.Response("", status=204, headers=preflight_headers)
+    
+    # Define response headers with CORS for all responses
+    response_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json",
+    }
+    
+    try:
+        # Parse request data
+        data = req.get_json(silent=True) or {}
+        league_id = data.get('league_id')
+        year = data.get('year')
+        limit = data.get('limit')
+        
+        logger.info(f"Request data: league_id={league_id}, year={year}, limit={limit}")
+        
+        # Get database path
+        db_path = os.getenv("DB_PATH")
+        if not db_path:
+            db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
+            # If not found, try parent directory
+            if not os.path.exists(db_path):
+                db_path = os.path.join(os.path.dirname(__file__), "..", "data.sqlite")
+        
+        logger.info(f"Using database path: {db_path}")
+        
+        if not os.path.exists(db_path):
+            logger.error(f"Database file not found at {db_path}")
+            response_data = {
+                'error': f'Database file not found at {db_path}',
+                'matches_by_year_week': {},
+                'statistics': {},
+            }
+            return https_fn.Response(json.dumps(response_data), status=404, headers=response_headers)
+        
+        # Inline function to get historical matches with predictions
+        def get_week_number(date_str: str) -> int:
+            """Get ISO week number from date string (YYYY-MM-DD)"""
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                return date_obj.isocalendar()[1]
+            except:
+                return 0
+
+        def get_year_week_key(date_str: str) -> str:
+            """Get year-week key for grouping (e.g., '2024-W01')"""
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                year, week, _ = date_obj.isocalendar()
+                return f"{year}-W{week:02d}"
+            except:
+                return "Unknown"
+        
+        # Import needed modules
+        from prediction.db import connect
+        predictor = get_predictor()
+        
+        # Connect to database
+        conn = connect(db_path)
+        cursor = conn.cursor()
+        
+        # If year is not provided, pick the most recent year that has completed matches
+        # (and return all available years so the UI can switch years without loading everything at once).
+        available_years = []
+        selected_year = None
+        try:
+            year_query = """
+            SELECT DISTINCT substr(e.date_event, 1, 4) AS yr
+            FROM event e
+            WHERE e.home_score IS NOT NULL
+              AND e.away_score IS NOT NULL
+              AND e.date_event IS NOT NULL
+              AND e.date_event <= date('now')
+            """
+            year_params = []
+            if league_id:
+                year_query += " AND e.league_id = ?"
+                year_params.append(league_id)
+            year_query += " ORDER BY yr DESC"
+            cursor.execute(year_query, year_params)
+            available_years = [r[0] for r in cursor.fetchall() if r and r[0]]
+        except Exception as e:
+            logger.warning(f"Could not compute available years: {e}")
+            available_years = []
+
+        if year is None:
+            selected_year = available_years[0] if available_years else None
+        else:
+            selected_year = str(year)
+
+        # Query for completed matches with scores
+        query = """
+        SELECT 
+            e.id,
+            e.league_id,
+            l.name as league_name,
+            e.date_event,
+            e.home_team_id,
+            e.away_team_id,
+            e.home_score,
+            e.away_score,
+            t1.name as home_team_name,
+            t2.name as away_team_name,
+            e.season,
+            e.round,
+            e.venue,
+            e.status
+        FROM event e
+        LEFT JOIN league l ON e.league_id = l.id
+        LEFT JOIN team t1 ON e.home_team_id = t1.id
+        LEFT JOIN team t2 ON e.away_team_id = t2.id
+        WHERE e.home_score IS NOT NULL 
+        AND e.away_score IS NOT NULL
+        AND e.date_event IS NOT NULL
+        AND e.date_event <= date('now')
+        """
+        
+        params = []
+        if league_id:
+            query += " AND e.league_id = ?"
+            params.append(league_id)
+
+        if selected_year:
+            query += " AND substr(e.date_event, 1, 4) = ?"
+            params.append(selected_year)
+        
+        query += " ORDER BY e.date_event DESC, e.league_id"
+        
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        # Organize matches by year-week
+        matches_by_year_week = defaultdict(lambda: defaultdict(list))
+        all_matches = []
+        
+        correct_predictions = 0
+        total_predictions = 0
+        score_errors = []
+        
+        logger.info(f"Processing {len(results)} completed matches...")
+        
+        for row in results:
+            match_id, league_id_val, league_name, date_event, home_team_id, away_team_id, \
+            home_score, away_score, home_team_name, away_team_name, season, round_num, \
+            venue, status = row
+            
+            # Skip if missing critical data
+            if not home_team_name or not away_team_name or not date_event:
+                continue
+            
+            # Determine actual winner
+            if home_score > away_score:
+                actual_winner = 'Home'
+                actual_winner_team = home_team_name
+            elif away_score > home_score:
+                actual_winner = 'Away'
+                actual_winner_team = away_team_name
+            else:
+                actual_winner = 'Draw'
+                actual_winner_team = None
+            
+            # Generate prediction for this match
+            predicted_winner = None
+            predicted_home_score = None
+            predicted_away_score = None
+            prediction_confidence = None
+            prediction_error = None
+            
+            if predictor:
+                try:
+                    pred = predictor.predict_match(
+                        home_team=home_team_name,
+                        away_team=away_team_name,
+                        league_id=league_id_val,
+                        match_date=date_event
+                    )
+                    
+                    predicted_home_score = pred.get('predicted_home_score', 0)
+                    predicted_away_score = pred.get('predicted_away_score', 0)
+                    prediction_confidence = pred.get('confidence', 0.5)
+                    predicted_winner = pred.get('predicted_winner', 'Unknown')
+                    
+                    # Check if prediction was correct
+                    if predicted_winner == actual_winner:
+                        correct_predictions += 1
+                    total_predictions += 1
+                    
+                    # Calculate score prediction error
+                    home_error = abs(predicted_home_score - home_score)
+                    away_error = abs(predicted_away_score - away_score)
+                    prediction_error = home_error + away_error
+                    score_errors.append(prediction_error)
+                    
+                except Exception as e:
+                    logger.warning(f"Could not generate prediction for {home_team_name} vs {away_team_name} on {date_event}: {e}")
+                    predicted_winner = 'Error'
+            
+            # Get year-week key
+            year_week_key = get_year_week_key(date_event)
+            year = date_event[:4] if date_event else "Unknown"
+            week = get_week_number(date_event)
+            
+            match_data = {
+                'match_id': match_id,
+                'league_id': league_id_val,
+                'league_name': league_name or f"League {league_id_val}",
+                'date': date_event,
+                'year': year,
+                'week': week,
+                'year_week': year_week_key,
+                'season': season,
+                'round': round_num,
+                'venue': venue,
+                'status': status,
+                'home_team': home_team_name,
+                'away_team': away_team_name,
+                'home_team_id': home_team_id,
+                'away_team_id': away_team_id,
+                'actual_home_score': home_score,
+                'actual_away_score': away_score,
+                'actual_winner': actual_winner,
+                'actual_winner_team': actual_winner_team,
+                'predicted_home_score': predicted_home_score,
+                'predicted_away_score': predicted_away_score,
+                'predicted_winner': predicted_winner,
+                'prediction_confidence': prediction_confidence,
+                'prediction_error': prediction_error,
+                'prediction_correct': predicted_winner == actual_winner if predicted_winner and predicted_winner != 'Error' else None,
+                'score_difference': abs(home_score - away_score) if home_score and away_score else None,
+                'predicted_score_difference': abs(predicted_home_score - predicted_away_score) if predicted_home_score is not None and predicted_away_score is not None else None,
+            }
+            
+            matches_by_year_week[year][year_week_key].append(match_data)
+            all_matches.append(match_data)
+        
+        conn.close()
+        
+        # Calculate accuracy statistics
+        accuracy = (correct_predictions / total_predictions * 100) if total_predictions > 0 else 0
+        avg_score_error = sum(score_errors) / len(score_errors) if score_errors else None
+        
+        # Convert defaultdict to regular dict for JSON serialization
+        result = {
+            'available_years': available_years,
+            'selected_year': selected_year,
+            'matches_by_year_week': {
+                year: {
+                    week_key: matches
+                    for week_key, matches in weeks.items()
+                }
+                for year, weeks in matches_by_year_week.items()
+            },
+            'all_matches': all_matches,
+            'statistics': {
+                'total_matches': len(all_matches),
+                'total_predictions': total_predictions,
+                'correct_predictions': correct_predictions,
+                'accuracy_percentage': round(accuracy, 2),
+                'average_score_error': round(avg_score_error, 2) if avg_score_error else None,
+            },
+            'by_league': {}
+        }
+        
+        # Group by league for easier filtering
+        leagues_dict = defaultdict(list)
+        for match in all_matches:
+            leagues_dict[match['league_id']].append(match)
+        
+        for league_id_val, league_matches in leagues_dict.items():
+            league_correct = sum(1 for m in league_matches if m.get('prediction_correct') is True)
+            league_total = sum(1 for m in league_matches if m.get('prediction_correct') is not None)
+            league_accuracy = (league_correct / league_total * 100) if league_total > 0 else 0
+            
+            result['by_league'][league_id_val] = {
+                'league_name': league_matches[0]['league_name'] if league_matches else f"League {league_id_val}",
+                'total_matches': len(league_matches),
+                'total_predictions': league_total,
+                'correct_predictions': league_correct,
+                'accuracy_percentage': round(league_accuracy, 2),
+            }
+        
+        logger.info(f"Retrieved {result['statistics']['total_matches']} matches")
+        logger.info(f"Generated {result['statistics']['total_predictions']} predictions")
+        logger.info(f"Accuracy: {result['statistics'].get('accuracy_percentage', 0):.2f}%")
+        
+        # Convert any datetime objects to strings for JSON serialization
+        def convert_for_json(obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            elif isinstance(obj, dict):
+                return {k: convert_for_json(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_for_json(item) for item in obj]
+            elif isinstance(obj, (defaultdict, set)):
+                return convert_for_json(dict(obj) if isinstance(obj, defaultdict) else list(obj))
+            else:
+                return obj
+        
+        result = convert_for_json(result)
+        
+        logger.info("=== get_historical_predictions_http completed successfully ===")
+        return https_fn.Response(json.dumps(result), status=200, headers=response_headers)
+        
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"=== get_historical_predictions_http exception ===")
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Traceback: {error_trace}")
+        response_data = {
+            "error": str(e),
+            "traceback": error_trace,
+            "matches_by_year_week": {},
+            "statistics": {},
+        }
+        # Always include CORS headers even on error
+        return https_fn.Response(json.dumps(response_data), status=500, headers=response_headers)
+
+
+@https_fn.on_request(timeout_sec=540, memory=2048)
+def get_historical_backtest_http(req: https_fn.Request) -> https_fn.Response:
+    """
+    HTTP endpoint for TRUE historical evaluation via walk-forward backtest (unseen).
+
+    For each week in the selected year, trains a fresh model using only matches
+    strictly BEFORE that week, then predicts matches in that week.
+
+    Request body:
+    {
+        "league_id": 4414,      # required
+        "year": "2026",         # optional (calendar year). If omitted, uses most recent year with completed matches.
+        "days_back": 3650,      # optional, how far back training history can go (default ~10y)
+        "min_train_games": 30,  # optional
+        "refresh": false        # optional, bypass Firestore cache
+    }
+    """
+    import logging
+    import os
+    import json
+    import sqlite3
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    # Handle CORS preflight
+    if req.method == "OPTIONS":
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "3600",
+        }
+        return https_fn.Response("", status=204, headers=headers)
+
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        data = req.get_json(silent=True) or {}
+        league_id_raw = data.get("league_id")
+        if league_id_raw is None:
+            return https_fn.Response(
+                json.dumps({"error": "league_id is required"}),
+                status=400,
+                headers=headers,
+            )
+        league_id = int(league_id_raw)
+
+        year = data.get("year")
+        refresh = bool(data.get("refresh", False))
+        min_train_games = int(data.get("min_train_games", 30))
+        days_back = int(data.get("days_back", 3650))
+
+        # DB path (same logic as other endpoints)
+        db_path = os.getenv("DB_PATH")
+        if not db_path:
+            db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
+            if not os.path.exists(db_path):
+                db_path = os.path.join(os.path.dirname(__file__), "..", "data.sqlite")
+
+        if not os.path.exists(db_path):
+            return https_fn.Response(
+                json.dumps({"error": f"Database file not found at {db_path}"}),
+                status=404,
+                headers=headers,
+            )
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # Determine available years and selected year (completed matches only)
+        year_sql = """
+            SELECT DISTINCT substr(e.date_event, 1, 4) AS yr
+            FROM event e
+            WHERE e.home_score IS NOT NULL
+              AND e.away_score IS NOT NULL
+              AND e.date_event IS NOT NULL
+              AND e.date_event <= date('now')
+              AND e.league_id = ?
+            ORDER BY yr DESC
+        """
+        cur.execute(year_sql, (league_id,))
+        available_years = [r["yr"] for r in cur.fetchall() if r and r["yr"]]
+
+        selected_year = str(year) if year is not None else (available_years[0] if available_years else None)
+        if not selected_year:
+            conn.close()
+            return https_fn.Response(
+                json.dumps(
+                    {
+                        "available_years": [],
+                        "selected_year": None,
+                        "matches_by_year_week": {},
+                        "statistics": {},
+                        "error": "No completed matches found for this league",
+                    }
+                ),
+                status=200,
+                headers=headers,
+            )
+
+        # Cache in Firestore (avoid recompute)
+        try:
+            fs = get_firestore_client()
+            cache_id = f"walk_forward::{league_id}::{selected_year}"
+            cache_ref = fs.collection("backtests").document(cache_id)
+            if not refresh:
+                cached = cache_ref.get()
+                if getattr(cached, "exists", False):
+                    cached_data = cached.to_dict() or {}
+                    payload = cached_data.get("data")
+                    if isinstance(payload, dict) and payload.get("selected_year") == selected_year:
+                        conn.close()
+                        return https_fn.Response(json.dumps(payload), status=200, headers=headers)
+        except Exception as cache_err:
+            logger.warning(f"Backtest cache read failed (continuing without cache): {cache_err}")
+            fs = None
+            cache_ref = None
+
+        # Load team/league names for display
+        cur.execute("SELECT id, name FROM team")
+        team_name = {int(r["id"]): r["name"] for r in cur.fetchall() if r and r["id"] is not None}
+        cur.execute("SELECT id, name FROM league WHERE id = ?", (league_id,))
+        row = cur.fetchone()
+        league_name = row["name"] if row and row["name"] else f"League {league_id}"
+
+        # Build feature table (chronological, pre-match features).
+        # IMPORTANT: build features on a SMALL in-memory DB for this league only.
+        # The full DB can be large and may cause slowdowns or memory issues in Cloud Functions.
+        from prediction.features import build_feature_table, FeatureConfig
+        import pandas as pd
+        import xgboost as xgb
+
+        today_iso = datetime.utcnow().date().isoformat()
+        min_date_iso = (datetime.utcnow().date() - timedelta(days=days_back)).isoformat()
+
+        # Pull only completed matches for this league within the training window
+        cur.execute(
+            """
+            SELECT
+              e.id AS id,
+              e.league_id AS league_id,
+              e.season AS season,
+              e.date_event AS date_event,
+              e.timestamp AS timestamp,
+              e.home_team_id AS home_team_id,
+              e.away_team_id AS away_team_id,
+              e.home_score AS home_score,
+              e.away_score AS away_score
+            FROM event e
+            WHERE e.league_id = ?
+              AND e.home_team_id IS NOT NULL
+              AND e.away_team_id IS NOT NULL
+              AND e.date_event IS NOT NULL
+              AND e.home_score IS NOT NULL
+              AND e.away_score IS NOT NULL
+              AND date(e.date_event) >= date(?)
+              AND date(e.date_event) <= date(?)
+            ORDER BY date(e.date_event) ASC, e.timestamp ASC, e.id ASC
+            """,
+            (league_id, min_date_iso, today_iso),
+        )
+        event_rows = cur.fetchall()
+
+        # Create in-memory DB with only the columns build_feature_table needs
+        mem = sqlite3.connect(":memory:")
+        mem.execute(
+            """
+            CREATE TABLE event (
+              id INTEGER PRIMARY KEY,
+              league_id INTEGER,
+              season TEXT,
+              date_event TEXT,
+              timestamp INTEGER,
+              home_team_id INTEGER,
+              away_team_id INTEGER,
+              home_score INTEGER,
+              away_score INTEGER
+            )
+            """
+        )
+        if event_rows:
+            mem.executemany(
+                """
+                INSERT INTO event (id, league_id, season, date_event, timestamp, home_team_id, away_team_id, home_score, away_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        int(r["id"]),
+                        int(r["league_id"]),
+                        r["season"],
+                        r["date_event"],
+                        r["timestamp"],
+                        int(r["home_team_id"]),
+                        int(r["away_team_id"]),
+                        int(r["home_score"]),
+                        int(r["away_score"]),
+                    )
+                    for r in event_rows
+                ],
+            )
+        mem.commit()
+
+        config = FeatureConfig(
+            elo_priors=None,
+            elo_k=24.0,
+            neutral_mode=(league_id == 4574 or league_id == 4714),
+        )
+        df = build_feature_table(mem, config)
+        mem.close()
+
+        # Completed matches only, already filtered by query; sort just in case
+        df = df[df["home_score"].notna() & df["away_score"].notna()].copy()
+        df.sort_values(["date_event", "event_id"], inplace=True)
+
+        # Calendar year filter for the evaluation set
+        try:
+            target_year_int = int(selected_year)
+        except Exception:
+            target_year_int = None
+        if target_year_int is not None:
+            df_eval = df[df["date_event"].dt.year == target_year_int].copy()
+        else:
+            df_eval = df.copy()
+
+        if df_eval.empty:
+            conn.close()
+            payload = {
+                "available_years": available_years,
+                "selected_year": selected_year,
+                "matches_by_year_week": {},
+                "statistics": {},
+                "by_league": {},
+                "warning": "No completed matches found for selected year",
+            }
+            return https_fn.Response(json.dumps(payload), status=200, headers=headers)
+
+        # Feature columns (match training script behavior)
+        exclude_cols = {
+            "event_id",
+            "league_id",
+            "season",
+            "date_event",
+            "home_team_id",
+            "away_team_id",
+            "home_score",
+            "away_score",
+            "home_win",
+        }
+        feature_cols = [c for c in df.columns if c not in exclude_cols]
+        feature_cols = [c for c in feature_cols if not df[c].isna().all()]
+
+        # Week keys for eval matches
+        def year_week_key(ts: pd.Timestamp) -> str:
+            iso = ts.isocalendar()
+            return f"{int(iso.year)}-W{int(iso.week):02d}"
+
+        df_eval["year_week"] = df_eval["date_event"].apply(year_week_key)
+        df_eval["year"] = df_eval["date_event"].dt.strftime("%Y")
+        df_eval["week"] = df_eval["date_event"].dt.isocalendar().week.astype(int)
+
+        # Order weeks chronologically (based on first match date in week)
+        week_first_date = (
+            df_eval.groupby("year_week")["date_event"].min().sort_values()
+        )
+        week_keys = list(week_first_date.index)
+
+        matches_by_year_week = defaultdict(lambda: defaultdict(list))
+
+        total_predictions = 0
+        correct_predictions = 0
+        draws_excluded = 0
+        score_errors: list[float] = []
+        weeks_evaluated = 0
+        weeks_skipped = 0
+
+        # Model hyperparams (same defaults as training)
+        def train_models(train_df):
+            X_train = train_df[feature_cols].fillna(0).values
+            y_winner = (train_df["home_score"] > train_df["away_score"]).astype(int).values
+            y_home = train_df["home_score"].values
+            y_away = train_df["away_score"].values
+
+            clf = xgb.XGBClassifier(
+                n_estimators=200,
+                max_depth=6,
+                learning_rate=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                eval_metric="logloss",
+            )
+            clf.fit(X_train, y_winner)
+
+            reg_home = xgb.XGBRegressor(
+                n_estimators=200,
+                max_depth=6,
+                learning_rate=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                eval_metric="mae",
+            )
+            reg_home.fit(X_train, y_home)
+
+            reg_away = xgb.XGBRegressor(
+                n_estimators=200,
+                max_depth=6,
+                learning_rate=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                eval_metric="mae",
+            )
+            reg_away.fit(X_train, y_away)
+
+            return clf, reg_home, reg_away
+
+        for wk in week_keys:
+            wk_start = week_first_date.loc[wk]
+
+            # Train on all matches strictly before this week
+            train_df = df[df["date_event"] < wk_start].copy()
+            if len(train_df) < min_train_games:
+                weeks_skipped += 1
+                continue
+
+            week_df = df_eval[df_eval["year_week"] == wk].copy()
+            if week_df.empty:
+                continue
+
+            clf, reg_home, reg_away = train_models(train_df)
+            weeks_evaluated += 1
+
+            X_test = week_df[feature_cols].fillna(0).values
+            home_win_prob = clf.predict_proba(X_test)[:, 1]
+            pred_home = reg_home.predict(X_test)
+            pred_away = reg_away.predict(X_test)
+
+            for i, row in enumerate(week_df.itertuples(index=False)):
+                # row access via attributes: event_id, league_id, season, date_event, home_team_id, away_team_id, home_score, away_score, home_win, ...
+                event_id = int(getattr(row, "event_id"))
+                date_event = getattr(row, "date_event")
+                home_team_id = int(getattr(row, "home_team_id"))
+                away_team_id = int(getattr(row, "away_team_id"))
+                home_score = int(getattr(row, "home_score"))
+                away_score = int(getattr(row, "away_score"))
+
+                if home_score > away_score:
+                    actual_winner = "Home"
+                    actual_winner_team = team_name.get(home_team_id)
+                elif away_score > home_score:
+                    actual_winner = "Away"
+                    actual_winner_team = team_name.get(away_team_id)
+                else:
+                    actual_winner = "Draw"
+                    actual_winner_team = None
+
+                p = float(home_win_prob[i])
+                predicted_winner = "Home" if p >= 0.5 else "Away"
+
+                predicted_home_score = float(max(0.0, pred_home[i]))
+                predicted_away_score = float(max(0.0, pred_away[i]))
+
+                prediction_correct = None
+                if actual_winner == "Draw":
+                    draws_excluded += 1
+                else:
+                    prediction_correct = predicted_winner == actual_winner
+                    total_predictions += 1
+                    if prediction_correct:
+                        correct_predictions += 1
+
+                err = abs(predicted_home_score - home_score) + abs(predicted_away_score - away_score)
+                score_errors.append(float(err))
+
+                match_year = str(getattr(row, "year"))
+                match_week = int(getattr(row, "week"))
+                match_year_week = str(getattr(row, "year_week"))
+
+                matches_by_year_week[match_year][match_year_week].append(
+                    {
+                        "match_id": event_id,
+                        "league_id": league_id,
+                        "league_name": league_name,
+                        "date": date_event.strftime("%Y-%m-%d") if hasattr(date_event, "strftime") else str(date_event),
+                        "year": match_year,
+                        "week": match_week,
+                        "year_week": match_year_week,
+                        "home_team": team_name.get(home_team_id, f"Team {home_team_id}"),
+                        "away_team": team_name.get(away_team_id, f"Team {away_team_id}"),
+                        "home_team_id": home_team_id,
+                        "away_team_id": away_team_id,
+                        "actual_home_score": home_score,
+                        "actual_away_score": away_score,
+                        "actual_winner": actual_winner,
+                        "actual_winner_team": actual_winner_team,
+                        "predicted_home_score": predicted_home_score,
+                        "predicted_away_score": predicted_away_score,
+                        "predicted_winner": predicted_winner,
+                        "prediction_confidence": float(max(p, 1.0 - p)),
+                        "prediction_error": float(err),
+                        "prediction_correct": prediction_correct,
+                        "evaluation_mode": "walk_forward_backtest",
+                        "train_games_used": int(len(train_df)),
+                    }
+                )
+
+        conn.close()
+
+        accuracy = (correct_predictions / total_predictions * 100.0) if total_predictions > 0 else 0.0
+        avg_score_error = (sum(score_errors) / len(score_errors)) if score_errors else None
+
+        payload = {
+            "available_years": available_years,
+            "selected_year": selected_year,
+            "matches_by_year_week": {y: dict(w) for y, w in matches_by_year_week.items()},
+            "statistics": {
+                "total_matches": sum(len(v2) for v1 in matches_by_year_week.values() for v2 in v1.values()),
+                "total_predictions": total_predictions,
+                "correct_predictions": correct_predictions,
+                "accuracy_percentage": round(accuracy, 2),
+                "average_score_error": round(avg_score_error, 2) if avg_score_error is not None else None,
+                "draws_excluded": draws_excluded,
+                "weeks_evaluated": weeks_evaluated,
+                "weeks_skipped": weeks_skipped,
+                "min_train_games": min_train_games,
+                "evaluation_mode": "walk_forward_backtest",
+            },
+            "by_league": {
+                league_id: {
+                    "league_name": league_name,
+                    "total_predictions": total_predictions,
+                    "correct_predictions": correct_predictions,
+                    "accuracy_percentage": round(accuracy, 2),
+                }
+            },
+        }
+
+        # Cache the result if possible
+        try:
+            if fs is not None and cache_ref is not None:
+                try:
+                    from firebase_admin import firestore as fb_firestore  # type: ignore
+                    server_ts = fb_firestore.SERVER_TIMESTAMP
+                except Exception:
+                    server_ts = datetime.utcnow().isoformat()
+                cache_ref.set(
+                    {
+                        "league_id": league_id,
+                        "year": selected_year,
+                        "mode": "walk_forward_backtest",
+                        "data": payload,
+                        "updated_at": server_ts,
+                    },
+                    merge=True,
+                )
+        except Exception as cache_write_err:
+            logger.warning(f"Backtest cache write failed: {cache_write_err}")
+
+        return https_fn.Response(json.dumps(payload), status=200, headers=headers)
+
+    except Exception as e:
+        import traceback
+        err = traceback.format_exc()
+        logger.error(f"Error in get_historical_backtest_http: {e}\n{err}")
+        return https_fn.Response(
+            json.dumps({"error": str(e), "traceback": err}),
+            status=500,
+            headers=headers,
+        )
 
 
 @https_fn.on_call(timeout_sec=60, memory=512)
