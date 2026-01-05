@@ -678,3 +678,11 @@
 2026-01-04 22:19:37,821 - INFO - Leagues to retrain: [4446, 4414]
 2026-01-04 22:19:37,821 - INFO - 🤖 Models will be retrained to capture latest completed match results
 2026-01-04 22:19:37,821 - INFO - Saved checkpoint: 2026-01-04T22:19:37.821784
+2026-01-05 12:05:10,428 - INFO - Starting match completion detection and retraining
+2026-01-05 12:05:10,428 - INFO - Found 2 completed matches
+2026-01-05 12:05:10,428 - INFO - Completed: Stade Rochelais 66-0 RC Toulonnais (French Top 14)
+2026-01-05 12:05:10,428 - INFO - Completed: Leicester Tigers 36-28 Saracens (English Premiership Rugby)
+2026-01-05 12:05:10,429 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-01-05 12:05:10,429 - INFO - Leagues to retrain: [4430, 4414]
+2026-01-05 12:05:10,429 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-01-05 12:05:10,429 - INFO - Saved checkpoint: 2026-01-05T12:05:10.429340
