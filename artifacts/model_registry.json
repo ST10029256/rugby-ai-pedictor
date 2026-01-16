@@ -1,9 +1,9 @@
 {
-  "last_updated": "2026-01-15T23:02:14.190528",
+  "last_updated": "2026-01-16T23:05:45.495502",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2026-01-15T23:01:40.786793",
+      "trained_at": "2026-01-16T23:05:11.365398",
       "training_games": 144,
       "model_type": "xgboost",
       "performance": {
@@ -15,7 +15,7 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2026-01-15T23:01:46.206802",
+      "trained_at": "2026-01-16T23:05:16.948171",
       "training_games": 366,
       "model_type": "xgboost",
       "performance": {
@@ -27,7 +27,7 @@
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2026-01-15T23:01:51.337553",
+      "trained_at": "2026-01-16T23:05:22.246010",
       "training_games": 345,
       "model_type": "xgboost",
       "performance": {
@@ -39,7 +39,7 @@
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2026-01-15T23:01:53.905686",
+      "trained_at": "2026-01-16T23:05:24.846507",
       "training_games": 152,
       "model_type": "xgboost",
       "performance": {
@@ -51,7 +51,7 @@
     },
     "4551": {
       "name": "Super Rugby",
-      "trained_at": "2026-01-15T23:01:58.286421",
+      "trained_at": "2026-01-16T23:05:29.334937",
       "training_games": 259,
       "model_type": "xgboost",
       "performance": {
@@ -63,7 +63,7 @@
     },
     "4430": {
       "name": "French Top 14",
-      "trained_at": "2026-01-15T23:02:04.874198",
+      "trained_at": "2026-01-16T23:05:35.742956",
       "training_games": 687,
       "model_type": "xgboost",
       "performance": {
@@ -75,7 +75,7 @@
     },
     "4414": {
       "name": "English Premiership Rugby",
-      "trained_at": "2026-01-15T23:02:08.626778",
+      "trained_at": "2026-01-16T23:05:39.562462",
       "training_games": 223,
       "model_type": "xgboost",
       "performance": {
@@ -87,7 +87,7 @@
     },
     "5479": {
       "name": "Rugby Union International Friendlies",
-      "trained_at": "2026-01-15T23:02:14.184257",
+      "trained_at": "2026-01-16T23:05:45.488888",
       "training_games": 94,
       "model_type": "xgboost",
       "performance": {
@@ -99,7 +99,7 @@
     },
     "4714": {
       "name": "Six Nations Championship",
-      "trained_at": "2026-01-15T23:02:12.460510",
+      "trained_at": "2026-01-16T23:05:43.756149",
       "training_games": 240,
       "model_type": "xgboost",
       "performance": {
