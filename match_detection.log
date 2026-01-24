@@ -743,3 +743,10 @@
 2026-01-23 22:18:25,618 - INFO - Starting match completion detection and retraining
 2026-01-23 22:18:25,619 - INFO - No new completed matches found
 2026-01-23 22:18:25,619 - INFO - Saved checkpoint: 2026-01-23T22:18:25.619681
+2026-01-24 22:19:38,261 - INFO - Starting match completion detection and retraining
+2026-01-24 22:19:38,261 - INFO - Found 1 completed matches
+2026-01-24 22:19:38,261 - INFO - Completed: Gloucester 7-7 Bath Rugby (English Premiership Rugby)
+2026-01-24 22:19:38,262 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-01-24 22:19:38,262 - INFO - Leagues to retrain: [4414]
+2026-01-24 22:19:38,262 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-01-24 22:19:38,262 - INFO - Saved checkpoint: 2026-01-24T22:19:38.262485
