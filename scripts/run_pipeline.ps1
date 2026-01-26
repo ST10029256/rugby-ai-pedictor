@@ -13,13 +13,12 @@ param(
   [string]$DbPath = "data.sqlite",
   [int]$DaysAhead = 365,
   [int]$DaysBack = 14,
-  [switch]$ScanRounds = $true,
   [switch]$IncludeHistory = $false
 )
 
 Write-Host "Running enhanced_auto_update..."
+Write-Host "Note: Round scanning is now automatic for all leagues - no flag needed"
 $updateArgs = @("scripts/enhanced_auto_update.py", "--db", $DbPath, "--days-ahead", "$DaysAhead", "--days-back", "$DaysBack")
-if ($ScanRounds) { $updateArgs += "--scan-rounds" }
 if ($IncludeHistory) { $updateArgs += "--include-history" }
 python @updateArgs
 

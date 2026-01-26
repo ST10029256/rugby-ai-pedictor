@@ -51,13 +51,9 @@ jobs:
       run: |
         echo "📥 Checking for new games and upcoming fixtures..."
         echo "🏉 This will capture ALL new upcoming games and completed results"
-        # On the scheduled midnight run (and manual runs), do a deeper scan to capture as many future fixtures as possible.
-        # On push-triggered runs, keep it lighter to avoid long CI runs.
-        if [[ "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          python scripts/enhanced_auto_update.py --db data.sqlite --verbose --scan-rounds --days-ahead 365 --days-back 14
-        else
-          python scripts/enhanced_auto_update.py --db data.sqlite --verbose --days-ahead 365 --days-back 14
-        fi
+        # Round scanning is now automatic for all leagues - no need for --scan-rounds flag
+        # This ensures comprehensive fixture coverage for all leagues
+        python scripts/enhanced_auto_update.py --db data.sqlite --verbose --days-ahead 365 --days-back 14
         
     - name: Post-update duplicate cleanup
       run: |

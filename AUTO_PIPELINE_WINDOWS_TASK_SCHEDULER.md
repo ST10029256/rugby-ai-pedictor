@@ -7,7 +7,8 @@ To run it automatically on Windows, use Task Scheduler to execute `scripts/run_p
 
 - Python installed and available as `python`
 - You can run these successfully in PowerShell from the repo root:
-  - `python scripts/enhanced_auto_update.py --db data.sqlite --scan-rounds --days-ahead 365`
+  - `python scripts/enhanced_auto_update.py --db data.sqlite --days-ahead 365`
+    - Note: Round scanning is now automatic for all leagues (no `--scan-rounds` flag needed)
   - `python scripts/sync_to_firestore.py`
 - Your Firestore auth is already working (same machine/user you tested with)
 
@@ -32,10 +33,11 @@ To run it automatically on Windows, use Task Scheduler to execute `scripts/run_p
 
 ## Customize (optional)
 
-To change how far ahead it fetches fixtures, edit the task “Add arguments” like this:
+To change how far ahead it fetches fixtures, edit the task "Add arguments" like this:
 
-- Example (1 year ahead, scan rounds):
-  - `-ExecutionPolicy Bypass -File "...\\scripts\\run_pipeline.ps1" -DaysAhead 365 -ScanRounds`
+- Example (1 year ahead):
+  - `-ExecutionPolicy Bypass -File "...\\scripts\\run_pipeline.ps1" -DaysAhead 365`
+  - Note: Round scanning is automatic for all leagues - no `-ScanRounds` flag needed
 
 ## Logs
 

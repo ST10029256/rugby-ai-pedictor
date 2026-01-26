@@ -161,8 +161,10 @@ def fetch_games_from_sportsdb(
                 f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
             ])
 
-        # Optional: scan rounds to discover more fixtures (TheSportsDB sometimes won't return full seasons in one call).
-        if scan_rounds:
+        # Always scan rounds to get more upcoming fixtures (API often only returns 1-2 games from eventsnextleague)
+        # This ensures we capture all upcoming games that are only available in round-specific endpoints
+        # TheSportsDB sometimes won't return full seasons in one call, so round scanning is essential
+        if scan_rounds or True:  # Always scan rounds for all leagues to get comprehensive fixture data
             max_rounds = MAX_ROUNDS_BY_LEAGUE.get(sportsdb_id, 30)
             for season in compute_current_seasons(sportsdb_id):
                 for round_num in range(1, max_rounds + 1):
@@ -388,9 +390,19 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
     """Detect and add missing games by checking TheSportsDB website data."""
     logger.info(f"Checking for missing games in {league_name}...")
     
-    # No manual games - only use real API data
+    # For URC, try manual fixtures if API fails
+    if league_id == 4446:
+        logger.info("Checking for URC manual fixtures as fallback...")
+        manual_games = get_manual_urc_fixtures()
+        if manual_games:
+            # Use update_database_with_games to add them (handles duplicates)
+            added = update_database_with_games(conn, manual_games)
+            if added > 0:
+                logger.info(f"Added {added} URC games from manual fixtures")
+            return added
+    
+    # No manual games for other leagues - only use real API data
     missing_games_map = {
-        4446: [],  # URC
         4414: [],  # English Premiership
         4430: [],  # French Top 14
         4986: [],  # Rugby Championship
@@ -437,43 +449,31 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
     
     conn.commit()
     return added_count
+
+
+def get_manual_urc_fixtures() -> List[Dict[str, Any]]:
     """Manual URC fixtures as fallback when API fails."""
     logger.info("Using manual URC fixtures fallback")
     
     # Known URC fixtures for 2025 (these should be updated regularly)
+    # Update these dates to current/future dates
+    today = datetime.utcnow().date()
     manual_fixtures = [
-        # January 2025
-        {"date": "2025-01-03", "home": "Stormers", "away": "Ospreys"},
-        {"date": "2025-01-03", "home": "Dragons", "away": "The Sharks"},
-        {"date": "2025-01-03", "home": "Edinburgh", "away": "Ulster"},
-        {"date": "2025-01-04", "home": "Connacht", "away": "Scarlets"},
-        {"date": "2025-01-04", "home": "Benetton", "away": "Glasgow"},
-        {"date": "2025-01-04", "home": "Munster", "away": "Cardiff Blues"},
-        {"date": "2025-01-04", "home": "Bulls Super Rugby", "away": "Leinster"},
-        
-        # February 2025 (example - these should be updated with real fixtures)
-        {"date": "2025-02-07", "home": "Leinster", "away": "Munster"},
-        {"date": "2025-02-07", "home": "Ulster", "away": "Connacht"},
-        {"date": "2025-02-08", "home": "Glasgow", "away": "Edinburgh"},
-        {"date": "2025-02-08", "home": "The Sharks", "away": "Stormers"},
-        {"date": "2025-02-08", "home": "Ospreys", "away": "Dragons"},
-        {"date": "2025-02-08", "home": "Scarlets", "away": "Cardiff Blues"},
-        {"date": "2025-02-08", "home": "Benetton", "away": "Zebre"},
-        
-        # March 2025 (example - these should be updated with real fixtures)
-        {"date": "2025-03-07", "home": "Munster", "away": "Leinster"},
-        {"date": "2025-03-07", "home": "Connacht", "away": "Ulster"},
-        {"date": "2025-03-08", "home": "Edinburgh", "away": "Glasgow"},
-        {"date": "2025-03-08", "home": "Stormers", "away": "The Sharks"},
-        {"date": "2025-03-08", "home": "Dragons", "away": "Ospreys"},
-        {"date": "2025-03-08", "home": "Cardiff Blues", "away": "Scarlets"},
-        {"date": "2025-03-08", "home": "Zebre", "away": "Benetton"},
+        # Add current and upcoming fixtures here
+        # Example format:
+        # {"date": "2025-01-15", "home": "Leinster", "away": "Munster"},
+        # {"date": "2025-01-15", "home": "Ulster", "away": "Connacht"},
     ]
     
+    # Filter to only future fixtures
     games = []
     for fixture in manual_fixtures:
         try:
             event_date = datetime.strptime(fixture["date"], '%Y-%m-%d').date()
+            
+            # Only include future fixtures
+            if event_date < today:
+                continue
             
             game = {
                 'event_id': 0,  # Will be auto-generated
@@ -492,7 +492,7 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
             logger.warning(f"Error parsing manual fixture {fixture}: {e}")
             continue
     
-    logger.info(f"Added {len(games)} manual URC fixtures")
+    logger.info(f"Generated {len(games)} manual URC fixtures")
     return games
 
 def fetch_highlightly_friendlies(conn: sqlite3.Connection, league_id: int, league_name: str, sportsdb_id: int) -> int:
@@ -659,7 +659,7 @@ def main():
     parser.add_argument('--db', default='data.sqlite', help='Database file path')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
     parser.add_argument('--include-history', action='store_true', help='Also fetch historical endpoints (slower, more API calls)')
-    parser.add_argument('--scan-rounds', action='store_true', help='Scan eventsround endpoints to discover more fixtures (more API calls)')
+    parser.add_argument('--scan-rounds', action='store_true', help='[DEPRECATED] Round scanning is now automatic for all leagues to ensure comprehensive fixture coverage')
     parser.add_argument('--days-ahead', type=int, default=180, help='Only keep fixtures up to N days ahead (default: 180)')
     parser.add_argument('--days-back', type=int, default=14, help='Also keep fixtures up to N days back (default: 14)')
     
@@ -708,14 +708,21 @@ def main():
                     updated = update_database_with_games(conn, games)
                     total_updated += updated
                     logger.info(f"✅ {league_name}: Updated {updated} upcoming games")
+                    
+                    # For URC, also check manual fixtures to fill any gaps
+                    if league_id == 4446:
+                        logger.info(f"🔍 {league_name}: Checking for additional manual fixtures...")
+                        missing_added = detect_and_add_missing_games(conn, league_id, league_name)
+                        if missing_added > 0:
+                            total_updated += missing_added
+                            logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games from manual fixtures")
                 else:
                     logger.warning(f"⚠️ {league_name}: No upcoming games found from API")
-                
-                # Check for and add any missing upcoming games
-                missing_added = detect_and_add_missing_games(conn, league_id, league_name)
-                if missing_added > 0:
-                    total_updated += missing_added
-                    logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games")
+                    # Try manual fixtures as fallback (especially for URC)
+                    missing_added = detect_and_add_missing_games(conn, league_id, league_name)
+                    if missing_added > 0:
+                        total_updated += missing_added
+                        logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games from manual fixtures")
                 
                 # For International Friendlies, also fetch from Highlightly API
                 if sportsdb_id == 5479:
