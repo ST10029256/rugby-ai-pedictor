@@ -696,15 +696,18 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             matches_ref = db.collection('matches')
             
             logger.info(f"Querying matches collection for league_id={league_id}")
-            # Optimized query - filter by league_id and limit early
-            # We'll do date filtering in Python to avoid index requirements
+            # CRITICAL FIX: Increased limit significantly to capture all upcoming matches
+            # Without ordering by date, upcoming matches may be mixed with completed ones
+            # A limit of 200 was too low - many leagues have 400+ total matches
             if league_id:
                 matches_ref = matches_ref.where('league_id', '==', int(league_id))
                 logger.info(f"Applied league_id filter: {int(league_id)}")
             
-            # Reduce initial fetch - only get what we need (limit early for better performance)
-            # Most leagues won't have more than 100 upcoming matches
-            matches_ref = matches_ref.limit(200)  # Reduced from 500 to 200 for faster queries
+            # Increased limit to 1000 to ensure we capture all upcoming matches
+            # Even if a league has 400 completed matches, we'll still get the 66 upcoming ones
+            matches_ref = matches_ref.limit(1000)  # Increased from 200 to capture all upcoming matches
+            logger.info("Using limit=1000 to ensure all upcoming matches are captured")
+            
             logger.info("Starting to stream matches from Firestore...")
             
             matches = []

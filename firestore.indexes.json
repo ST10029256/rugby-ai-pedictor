@@ -46,6 +46,15 @@
   //     ]
   //   },
   // ]
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "league_id", "order": "ASCENDING" },
+        { "fieldPath": "date_event", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }
