@@ -796,3 +796,6 @@
 2026-02-01 22:23:43,702 - INFO - Leagues to retrain: [4446, 4430]
 2026-02-01 22:23:43,702 - INFO - 🤖 Models will be retrained to capture latest completed match results
 2026-02-01 22:23:43,702 - INFO - Saved checkpoint: 2026-02-01T22:23:43.702297
+2026-02-03 22:29:23,172 - INFO - Starting match completion detection and retraining
+2026-02-03 22:29:23,173 - INFO - No new completed matches found
+2026-02-03 22:29:23,173 - INFO - Saved checkpoint: 2026-02-03T22:29:23.173608
