@@ -1,18 +1,78 @@
 {
   "leagues_to_retrain": [
-    4986,
-    4446,
-    5069,
-    4574,
-    4551,
-    4430,
-    4414,
     4714,
     5479
   ],
-  "games_updated": 4,
-  "timestamp": "2026-02-07T22:54:06.269084",
-  "reason": "new_games_fetched",
-  "trigger": "comprehensive_data_update",
-  "description": "Found 4 new/updated games from TheSportsDB - retraining all models to capture latest data"
+  "completed_matches": [
+    {
+      "id": 2311333,
+      "league_id": 5479,
+      "date_event": "2026-02-07",
+      "home_team_id": 137175,
+      "away_team_id": 137136,
+      "home_score": 18,
+      "away_score": 15,
+      "home_team_name": "Italy Rugby",
+      "away_team_name": "Scotland Rugby"
+    },
+    {
+      "id": 2311090,
+      "league_id": 5479,
+      "date_event": "2026-02-07",
+      "home_team_id": 137123,
+      "away_team_id": 137141,
+      "home_score": 48,
+      "away_score": 7,
+      "home_team_name": "England Rugby",
+      "away_team_name": "Wales Rugby"
+    },
+    {
+      "id": 2311077,
+      "league_id": 4714,
+      "date_event": "2026-02-07",
+      "home_team_id": 137123,
+      "away_team_id": 137141,
+      "home_score": 48,
+      "away_score": 7,
+      "home_team_name": "England Rugby",
+      "away_team_name": "Wales Rugby"
+    },
+    {
+      "id": 2311076,
+      "league_id": 4714,
+      "date_event": "2026-02-07",
+      "home_team_id": 137175,
+      "away_team_id": 137136,
+      "home_score": 18,
+      "away_score": 15,
+      "home_team_name": "Italy Rugby",
+      "away_team_name": "Scotland Rugby"
+    }
+  ],
+  "timestamp": "2026-02-08T22:26:28.377351",
+  "reason": "completed_matches",
+  "trigger": "match_completion_detection",
+  "description": "Found 4 completed matches - retraining models to capture latest results",
+  "match_details": [
+    {
+      "league": "Rugby Union International Friendlies",
+      "match": "Italy Rugby 18-15 Scotland Rugby",
+      "date": "2026-02-07"
+    },
+    {
+      "league": "Rugby Union International Friendlies",
+      "match": "England Rugby 48-7 Wales Rugby",
+      "date": "2026-02-07"
+    },
+    {
+      "league": "Six Nations Championship",
+      "match": "England Rugby 48-7 Wales Rugby",
+      "date": "2026-02-07"
+    },
+    {
+      "league": "Six Nations Championship",
+      "match": "Italy Rugby 18-15 Scotland Rugby",
+      "date": "2026-02-07"
+    }
+  ]
 }

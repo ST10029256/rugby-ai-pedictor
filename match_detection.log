@@ -811,3 +811,13 @@
 2026-02-07 22:25:25,374 - INFO - Starting match completion detection and retraining
 2026-02-07 22:25:25,374 - INFO - No new completed matches found
 2026-02-07 22:25:25,374 - INFO - Saved checkpoint: 2026-02-07T22:25:25.374747
+2026-02-08 22:26:28,376 - INFO - Starting match completion detection and retraining
+2026-02-08 22:26:28,376 - INFO - Found 4 completed matches
+2026-02-08 22:26:28,377 - INFO - Completed: Italy Rugby 18-15 Scotland Rugby (Rugby Union International Friendlies)
+2026-02-08 22:26:28,377 - INFO - Completed: England Rugby 48-7 Wales Rugby (Rugby Union International Friendlies)
+2026-02-08 22:26:28,377 - INFO - Completed: England Rugby 48-7 Wales Rugby (Six Nations Championship)
+2026-02-08 22:26:28,377 - INFO - Completed: Italy Rugby 18-15 Scotland Rugby (Six Nations Championship)
+2026-02-08 22:26:28,377 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-02-08 22:26:28,377 - INFO - Leagues to retrain: [4714, 5479]
+2026-02-08 22:26:28,377 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-02-08 22:26:28,377 - INFO - Saved checkpoint: 2026-02-08T22:26:28.377804
