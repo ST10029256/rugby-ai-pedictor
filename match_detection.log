@@ -836,3 +836,11 @@
 2026-02-13 22:32:51,222 - INFO - Starting match completion detection and retraining
 2026-02-13 22:32:51,222 - INFO - No new completed matches found
 2026-02-13 22:32:51,222 - INFO - Saved checkpoint: 2026-02-13T22:32:51.222735
+2026-02-14 22:22:43,438 - INFO - Starting match completion detection and retraining
+2026-02-14 22:22:43,439 - INFO - Found 2 completed matches
+2026-02-14 22:22:43,439 - INFO - Completed: Highlanders Super Rugby 25-23 Crusaders Super Rugby (Super Rugby)
+2026-02-14 22:22:43,439 - INFO - Completed: New South Wales Waratahs 36-12 Queensland Reds (Super Rugby)
+2026-02-14 22:22:43,439 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-02-14 22:22:43,439 - INFO - Leagues to retrain: [4551]
+2026-02-14 22:22:43,439 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-02-14 22:22:43,440 - INFO - Saved checkpoint: 2026-02-14T22:22:43.439946
