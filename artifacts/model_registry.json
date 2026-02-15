@@ -1,9 +1,9 @@
 {
-  "last_updated": "2026-02-14T23:02:58.146439",
+  "last_updated": "2026-02-15T23:04:21.067883",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2026-02-14T23:02:21.433738",
+      "trained_at": "2026-02-15T23:03:44.515183",
       "training_games": 144,
       "model_type": "xgboost",
       "performance": {
@@ -15,7 +15,7 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2026-02-14T23:02:27.746662",
+      "trained_at": "2026-02-15T23:03:50.396094",
       "training_games": 382,
       "model_type": "xgboost",
       "performance": {
@@ -27,7 +27,7 @@
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2026-02-14T23:02:33.356333",
+      "trained_at": "2026-02-15T23:03:56.022438",
       "training_games": 345,
       "model_type": "xgboost",
       "performance": {
@@ -39,43 +39,43 @@
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2026-02-14T23:02:36.163339",
+      "trained_at": "2026-02-15T23:03:58.927040",
       "training_games": 152,
       "model_type": "xgboost",
       "performance": {
         "winner_accuracy": 0.8879569892473118,
-        "home_mae": 14.435861782023782,
-        "away_mae": 5.791725622980218,
-        "overall_mae": 10.113793702502
+        "home_mae": 14.463082520585312,
+        "away_mae": 5.792311696629775,
+        "overall_mae": 10.127697108607544
       }
     },
     "4551": {
       "name": "Super Rugby",
-      "trained_at": "2026-02-14T23:02:41.012393",
-      "training_games": 263,
+      "trained_at": "2026-02-15T23:04:03.996231",
+      "training_games": 264,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.6507982583454281,
-        "home_mae": 9.247766382340696,
-        "away_mae": 9.634412624083545,
-        "overall_mae": 9.44108950321212
+        "winner_accuracy": 0.6555152394775037,
+        "home_mae": 9.386817104888685,
+        "away_mae": 9.559203548864884,
+        "overall_mae": 9.473010326876786
       }
     },
     "4430": {
       "name": "French Top 14",
-      "trained_at": "2026-02-14T23:02:47.683277",
-      "training_games": 701,
+      "trained_at": "2026-02-15T23:04:10.791410",
+      "training_games": 706,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.7076190476190476,
-        "home_mae": 9.630762830780508,
-        "away_mae": 7.316555059245242,
-        "overall_mae": 8.473658945012875
+        "winner_accuracy": 0.7181300569373689,
+        "home_mae": 9.664286310882137,
+        "away_mae": 7.420337752647508,
+        "overall_mae": 8.542312031764823
       }
     },
     "4414": {
       "name": "English Premiership Rugby",
-      "trained_at": "2026-02-14T23:02:51.787324",
+      "trained_at": "2026-02-15T23:04:14.850165",
       "training_games": 228,
       "model_type": "xgboost",
       "performance": {
@@ -87,26 +87,26 @@
     },
     "5479": {
       "name": "Rugby Union International Friendlies",
-      "trained_at": "2026-02-14T23:02:58.140003",
-      "training_games": 96,
+      "trained_at": "2026-02-15T23:04:21.061511",
+      "training_games": 97,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.7178947368421051,
-        "home_mae": 12.297580320388079,
-        "away_mae": 12.899545679489771,
-        "overall_mae": 12.598562999938924
+        "winner_accuracy": 0.7210526315789474,
+        "home_mae": 12.683763909585696,
+        "away_mae": 11.941190670446023,
+        "overall_mae": 12.31247729001586
       }
     },
     "4714": {
       "name": "Six Nations Championship",
-      "trained_at": "2026-02-14T23:02:56.036430",
-      "training_games": 245,
+      "trained_at": "2026-02-15T23:04:19.091869",
+      "training_games": 246,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.6367346938775509,
-        "home_mae": 8.553124538733035,
-        "away_mae": 8.834704905140157,
-        "overall_mae": 8.693914721936597
+        "winner_accuracy": 0.6302040816326531,
+        "home_mae": 8.690710967149192,
+        "away_mae": 8.955704181174921,
+        "overall_mae": 8.823207574162057
       }
     }
   }
