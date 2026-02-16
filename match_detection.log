@@ -854,3 +854,11 @@
 2026-02-15 22:23:33,940 - INFO - Leagues to retrain: [4551, 4714]
 2026-02-15 22:23:33,940 - INFO - 🤖 Models will be retrained to capture latest completed match results
 2026-02-15 22:23:33,941 - INFO - Saved checkpoint: 2026-02-15T22:23:33.941055
+2026-02-16 22:28:08,976 - INFO - Starting match completion detection and retraining
+2026-02-16 22:28:08,977 - INFO - Found 2 completed matches
+2026-02-16 22:28:08,977 - INFO - Completed: Wales Rugby 12-54 France Rugby (Rugby Union International Friendlies)
+2026-02-16 22:28:08,977 - INFO - Completed: Wales Rugby 12-54 France Rugby (Six Nations Championship)
+2026-02-16 22:28:08,978 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-02-16 22:28:08,978 - INFO - Leagues to retrain: [4714, 5479]
+2026-02-16 22:28:08,978 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-02-16 22:28:08,978 - INFO - Saved checkpoint: 2026-02-16T22:28:08.978384
