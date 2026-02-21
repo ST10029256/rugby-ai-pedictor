@@ -874,3 +874,11 @@
 2026-02-20 22:25:32,393 - INFO - Starting match completion detection and retraining
 2026-02-20 22:25:32,394 - INFO - No new completed matches found
 2026-02-20 22:25:32,394 - INFO - Saved checkpoint: 2026-02-20T22:25:32.394607
+2026-02-21 22:23:10,777 - INFO - Starting match completion detection and retraining
+2026-02-21 22:23:10,777 - INFO - Found 2 completed matches
+2026-02-21 22:23:10,777 - INFO - Completed: New South Wales Waratahs 36-13 Fijian Drua (Super Rugby)
+2026-02-21 22:23:10,777 - INFO - Completed: Hurricanes Super Rugby 52-10 Moana Pasifika (Super Rugby)
+2026-02-21 22:23:10,778 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-02-21 22:23:10,778 - INFO - Leagues to retrain: [4551]
+2026-02-21 22:23:10,778 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-02-21 22:23:10,778 - INFO - Saved checkpoint: 2026-02-21T22:23:10.778516
