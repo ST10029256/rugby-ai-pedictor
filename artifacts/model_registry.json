@@ -1,9 +1,9 @@
 {
-  "last_updated": "2026-02-20T23:09:07.334372",
+  "last_updated": "2026-02-21T23:03:25.430000",
   "leagues": {
     "4986": {
       "name": "Rugby Championship",
-      "trained_at": "2026-02-20T23:08:31.584941",
+      "trained_at": "2026-02-21T23:02:50.468553",
       "training_games": 144,
       "model_type": "xgboost",
       "performance": {
@@ -15,55 +15,55 @@
     },
     "4446": {
       "name": "United Rugby Championship",
-      "trained_at": "2026-02-20T23:08:37.328924",
-      "training_games": 382,
+      "trained_at": "2026-02-21T23:02:56.046277",
+      "training_games": 383,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.6437799043062201,
-        "home_mae": 9.976049997419587,
-        "away_mae": 7.951987544903581,
-        "overall_mae": 8.964018771161584
+        "winner_accuracy": 0.6422077922077921,
+        "home_mae": 10.035493788457726,
+        "away_mae": 7.7162373084623574,
+        "overall_mae": 8.875865548460041
       }
     },
     "5069": {
       "name": "Currie Cup",
-      "trained_at": "2026-02-20T23:08:42.758028",
+      "trained_at": "2026-02-21T23:03:01.363792",
       "training_games": 345,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.5855072463768116,
-        "home_mae": 10.944450582974198,
-        "away_mae": 10.941539949610613,
-        "overall_mae": 10.942995266292407
+        "winner_accuracy": 0.6,
+        "home_mae": 10.959665129841238,
+        "away_mae": 10.949519906527755,
+        "overall_mae": 10.954592518184496
       }
     },
     "4574": {
       "name": "Rugby World Cup",
-      "trained_at": "2026-02-20T23:08:45.443408",
+      "trained_at": "2026-02-21T23:03:03.989278",
       "training_games": 152,
       "model_type": "xgboost",
       "performance": {
         "winner_accuracy": 0.8879569892473118,
-        "home_mae": 14.463082520585312,
-        "away_mae": 5.792311696629775,
-        "overall_mae": 10.127697108607544
+        "home_mae": 14.830113134886089,
+        "away_mae": 5.7569109577881665,
+        "overall_mae": 10.293512046337128
       }
     },
     "4551": {
       "name": "Super Rugby",
-      "trained_at": "2026-02-20T23:08:50.439658",
-      "training_games": 266,
+      "trained_at": "2026-02-21T23:03:08.848788",
+      "training_games": 268,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.654367575122292,
-        "home_mae": 9.685571340689982,
-        "away_mae": 9.56345435909759,
-        "overall_mae": 9.624512849893787
+        "winner_accuracy": 0.6645702306079665,
+        "home_mae": 9.379200405149318,
+        "away_mae": 9.741524922313975,
+        "overall_mae": 9.560362663731645
       }
     },
     "4430": {
       "name": "French Top 14",
-      "trained_at": "2026-02-20T23:08:56.991565",
+      "trained_at": "2026-02-21T23:03:15.467961",
       "training_games": 707,
       "model_type": "xgboost",
       "performance": {
@@ -75,7 +75,7 @@
     },
     "4414": {
       "name": "English Premiership Rugby",
-      "trained_at": "2026-02-20T23:09:00.978413",
+      "trained_at": "2026-02-21T23:03:19.413311",
       "training_games": 228,
       "model_type": "xgboost",
       "performance": {
@@ -87,26 +87,26 @@
     },
     "5479": {
       "name": "Rugby Union International Friendlies",
-      "trained_at": "2026-02-20T23:09:07.327837",
-      "training_games": 97,
+      "trained_at": "2026-02-21T23:03:25.423578",
+      "training_games": 99,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.7210526315789474,
-        "home_mae": 12.683763909585696,
-        "away_mae": 11.941190670446023,
-        "overall_mae": 12.31247729001586
+        "winner_accuracy": 0.7063157894736841,
+        "home_mae": 12.937030506856514,
+        "away_mae": 12.366269629411024,
+        "overall_mae": 12.651650068133769
       }
     },
     "4714": {
       "name": "Six Nations Championship",
-      "trained_at": "2026-02-20T23:09:05.144449",
-      "training_games": 246,
+      "trained_at": "2026-02-21T23:03:23.564909",
+      "training_games": 248,
       "model_type": "xgboost",
       "performance": {
-        "winner_accuracy": 0.6302040816326531,
-        "home_mae": 8.690710967149192,
-        "away_mae": 8.955704181174921,
-        "overall_mae": 8.823207574162057
+        "winner_accuracy": 0.6449795918367347,
+        "home_mae": 8.501255889092722,
+        "away_mae": 9.317949337344016,
+        "overall_mae": 8.909602613218368
       }
     }
   }
