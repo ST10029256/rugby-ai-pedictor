@@ -895,3 +895,12 @@
 2026-02-22 22:23:41,089 - INFO - Leagues to retrain: [4446, 4551, 4714, 5479]
 2026-02-22 22:23:41,089 - INFO - 🤖 Models will be retrained to capture latest completed match results
 2026-02-22 22:23:41,089 - INFO - Saved checkpoint: 2026-02-22T22:23:41.089447
+2026-02-23 22:39:46,043 - INFO - Starting match completion detection and retraining
+2026-02-23 22:39:46,044 - INFO - Found 3 completed matches
+2026-02-23 22:39:46,044 - INFO - Completed: Crusaders Super Rugby 24-50 ACT Brumbies (Super Rugby)
+2026-02-23 22:39:46,044 - INFO - Completed: France Rugby 33-8 Italy Rugby (Rugby Union International Friendlies)
+2026-02-23 22:39:46,044 - INFO - Completed: France Rugby 33-8 Italy Rugby (Six Nations Championship)
+2026-02-23 22:39:46,044 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-02-23 22:39:46,044 - INFO - Leagues to retrain: [4551, 4714, 5479]
+2026-02-23 22:39:46,045 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-02-23 22:39:46,045 - INFO - Saved checkpoint: 2026-02-23T22:39:46.045109
