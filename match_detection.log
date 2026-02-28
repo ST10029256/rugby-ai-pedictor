@@ -916,3 +916,11 @@
 2026-02-27 22:22:23,976 - INFO - Starting match completion detection and retraining
 2026-02-27 22:22:23,977 - INFO - No new completed matches found
 2026-02-27 22:22:23,977 - INFO - Saved checkpoint: 2026-02-27T22:22:23.977366
+2026-02-28 22:21:44,963 - INFO - Starting match completion detection and retraining
+2026-02-28 22:21:44,963 - INFO - Found 2 completed matches
+2026-02-28 22:21:44,964 - INFO - Completed: Queensland Reds 31-14 Highlanders Super Rugby (Super Rugby)
+2026-02-28 22:21:44,964 - INFO - Completed: Moana Pasifika 19-35 Western Force (Super Rugby)
+2026-02-28 22:21:44,964 - INFO - Created retraining flag file: /home/runner/work/rugby-ai-pedictor/rugby-ai-pedictor/retrain_needed.flag
+2026-02-28 22:21:44,964 - INFO - Leagues to retrain: [4551]
+2026-02-28 22:21:44,964 - INFO - 🤖 Models will be retrained to capture latest completed match results
+2026-02-28 22:21:44,964 - INFO - Saved checkpoint: 2026-02-28T22:21:44.964627
