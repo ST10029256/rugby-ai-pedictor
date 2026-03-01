@@ -11,9 +11,14 @@ on:
       - 'scripts/**'  # Trigger when update scripts change
       - 'data.sqlite'  # Trigger when database changes
 
+concurrency:
+  group: check-for-updates-main
+  cancel-in-progress: false
+
 jobs:
   check-for-updates:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: write  # Allow pushing changes back to repository
     
@@ -38,27 +43,61 @@ jobs:
         THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+        PYTHONIOENCODING: utf-8
       run: |
         echo "🔍 Checking for completed matches..."
         echo "📊 This will detect ALL completed matches from TheSportsDB"
-        python scripts/detect_completed_matches.py --db data.sqlite --verbose
+        for i in 1 2 3; do
+          python scripts/detect_completed_matches.py --db data.sqlite --verbose && break
+          [ "$i" -eq 3 ] && exit 1
+          echo "Retry $i/3 failed. Waiting before retry..."
+          sleep 10
+        done
 
     - name: Check for new games and upcoming fixtures
       env:
         THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+        PYTHONIOENCODING: utf-8
       run: |
         echo "📥 Checking for new games and upcoming fixtures..."
         echo "🏉 This will capture ALL new upcoming games and completed results"
         # Round scanning is now automatic for all leagues - no need for --scan-rounds flag
         # This ensures comprehensive fixture coverage for all leagues
-        python scripts/enhanced_auto_update.py --db data.sqlite --verbose --days-ahead 365 --days-back 14
+        for i in 1 2 3; do
+          python scripts/enhanced_auto_update.py --db data.sqlite --verbose --days-ahead 365 --days-back 90 && break
+          [ "$i" -eq 3 ] && exit 1
+          echo "Retry $i/3 failed. Waiting before retry..."
+          sleep 15
+        done
+
+    - name: Data freshness check
+      run: |
+        python - <<'PY'
+        import sqlite3
+        conn = sqlite3.connect("data.sqlite")
+        cur = conn.cursor()
+        row = cur.execute("""
+          SELECT MAX(date_event)
+          FROM event
+          WHERE home_score IS NOT NULL AND away_score IS NOT NULL
+        """).fetchone()
+        conn.close()
+        if not row or not row[0]:
+          raise SystemExit("No completed matches found in data.sqlite after update.")
+        print(f"Latest completed match date in DB: {row[0]}")
+        PY
         
     - name: Post-update duplicate cleanup
       run: |
         echo "🧹 Running post-update cleanup..."
         python cleanup_duplicates_post_update.py
+
+    - name: Copy updated DB into Functions source
+      run: |
+        echo "📦 Copying updated data.sqlite into rugby-ai-predictor/ for Cloud Functions..."
+        cp data.sqlite rugby-ai-predictor/data.sqlite
     
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
@@ -68,11 +107,31 @@ jobs:
     - name: Sync to Firestore (PWA Updates)
       env:
         GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
+        PYTHONIOENCODING: utf-8
       run: |
         echo "☁️ Syncing database to Firestore for PWA..."
         echo "📱 This ensures your PWA app is always up to date with latest games"
-        python scripts/sync_to_firestore.py --db data.sqlite --project-id rugby-ai-61fd0
+        for i in 1 2 3; do
+          python scripts/sync_to_firestore.py --db data.sqlite --project-id rugby-ai-61fd0 && break
+          [ "$i" -eq 3 ] && exit 1
+          echo "Retry $i/3 failed. Waiting before retry..."
+          sleep 10
+        done
         echo "✅ Firestore sync complete - PWA will show latest data"
+
+    - name: Deploy Firebase Functions (with updated DB)
+      env:
+        FIREBASE_CLI_EXPERIMENTS: webframeworks
+      run: |
+        echo "🚀 Deploying Firebase Functions so History endpoints use the updated DB..."
+        npm i -g firebase-tools
+        firebase --version
+        for i in 1 2 3; do
+          firebase deploy --project rugby-ai-61fd0 --only functions --non-interactive && break
+          [ "$i" -eq 3 ] && exit 1
+          echo "Retry $i/3 failed. Waiting before retry..."
+          sleep 20
+        done
         
     - name: Commit changes and trigger retraining if needed
       if: always()
