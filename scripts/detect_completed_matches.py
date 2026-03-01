@@ -9,6 +9,7 @@ import sys
 import sqlite3
 import json
 import logging
+import argparse
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import subprocess
@@ -30,6 +31,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+CHECKPOINT_FILE = os.path.join(project_root, "last_checkpoint.json")
+
 # League configurations
 LEAGUE_CONFIGS = {
     4986: {"name": "Rugby Championship"},
@@ -45,32 +48,82 @@ LEAGUE_CONFIGS = {
 
 def get_last_checkpoint() -> Optional[datetime]:
     """Get the last checkpoint timestamp"""
-    checkpoint_file = os.path.join(project_root, "last_checkpoint.json")
-    if os.path.exists(checkpoint_file):
+    if os.path.exists(CHECKPOINT_FILE):
         try:
-            with open(checkpoint_file, 'r') as f:
+            with open(CHECKPOINT_FILE, 'r') as f:
                 data = json.load(f)
                 return datetime.fromisoformat(data["last_check"])
         except Exception as e:
             logger.warning(f"Failed to read checkpoint file: {e}")
     return None
 
+
+def _read_checkpoint_payload() -> Dict[str, Any]:
+    """Read checkpoint payload from disk."""
+    if not os.path.exists(CHECKPOINT_FILE):
+        return {}
+    try:
+        with open(CHECKPOINT_FILE, "r") as f:
+            payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
+    except Exception as e:
+        logger.warning(f"Failed to read checkpoint payload: {e}")
+        return {}
+
+
+def completion_state_initialized() -> bool:
+    """Return whether completion state has been initialized at least once."""
+    payload = _read_checkpoint_payload()
+    return bool(payload.get("completion_state_initialized"))
+
 def save_checkpoint(timestamp: datetime) -> None:
     """Save checkpoint timestamp"""
-    checkpoint_file = os.path.join(project_root, "last_checkpoint.json")
     try:
-        with open(checkpoint_file, 'w') as f:
+        with open(CHECKPOINT_FILE, 'w') as f:
             json.dump({"last_check": timestamp.isoformat()}, f)
         logger.info(f"Saved checkpoint: {timestamp.isoformat()}")
     except Exception as e:
         logger.error(f"Failed to save checkpoint: {e}")
 
-def detect_completed_matches(db_path: str, last_check: Optional[datetime] = None) -> List[Dict[str, Any]]:
-    """Detect matches that have been completed since last check - comprehensive detection"""
+def load_completion_state() -> Dict[str, str]:
+    """
+    Load persisted completion state:
+      { "<event_id>": "<home_score>-<away_score>" }
+    """
+    payload = _read_checkpoint_payload()
+    raw = payload.get("completion_state")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+def save_completion_state(state: Dict[str, str]) -> None:
+    """Persist completion state in checkpoint JSON for CI-friendly commits."""
+    try:
+        payload = _read_checkpoint_payload()
+        payload["completion_state"] = state
+        payload["completion_state_initialized"] = True
+        # Preserve existing checkpoint timestamp if present.
+        if "last_check" not in payload:
+            payload["last_check"] = datetime.now().isoformat()
+        with open(CHECKPOINT_FILE, "w") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+    except Exception as e:
+        logger.error(f"Failed to save completion state: {e}")
+
+
+def detect_completed_matches(db_path: str, previous_state: Dict[str, str]) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    Detect matches that are newly completed OR whose final score changed.
+
+    Why this method:
+    - Avoids missing backfilled past fixtures (e.g., old date_event updated with new scores).
+    - Avoids relying on date_event >= checkpoint, which can skip legitimate score updates.
+    """
     conn = sqlite3.connect(db_path)
     
-    # Query for matches that have scores but were previously without scores
-    # Enhanced to capture ALL completed matches, not just recent ones
+    # Query all completed matches. We compare against persisted score state to
+    # determine what is new/changed since last run.
     query = """
     SELECT 
         e.id,
@@ -89,23 +142,25 @@ def detect_completed_matches(db_path: str, last_check: Optional[datetime] = None
     AND e.away_score IS NOT NULL
     AND e.date_event <= date('now')
     """
-    
-    if last_check:
-        query += " AND e.date_event >= ?"
-        params = (last_check.strftime('%Y-%m-%d'),)
-    else:
-        # If no last check, look at matches from last 30 days for comprehensive coverage
-        query += " AND e.date_event >= date('now', '-30 days')"
-        params = ()
-    
+
     query += " ORDER BY e.date_event DESC"
     
     cursor = conn.cursor()
-    cursor.execute(query, params)
+    cursor.execute(query)
     results = cursor.fetchall()
     
-    completed_matches = []
+    completed_matches: List[Dict[str, Any]] = []
+    current_state: Dict[str, str] = {}
+
     for row in results:
+        match_id = str(row[0])
+        score_sig = f"{row[5]}-{row[6]}"
+        current_state[match_id] = score_sig
+
+        # New completion or corrected final score -> retrain needed.
+        if previous_state.get(match_id) == score_sig:
+            continue
+
         match = {
             "id": row[0],
             "league_id": row[1],
@@ -120,14 +175,12 @@ def detect_completed_matches(db_path: str, last_check: Optional[datetime] = None
         completed_matches.append(match)
     
     conn.close()
-    return completed_matches
+    return completed_matches, current_state
 
-def get_league_retraining_status() -> tuple[Dict[int, bool], List[Dict[str, Any]]]:
+def get_league_retraining_status(db_path: str) -> tuple[Dict[int, bool], List[Dict[str, Any]], Dict[str, str]]:
     """Check which leagues need retraining based on completed matches"""
-    db_path = os.path.join(project_root, "data.sqlite")
-    last_check = get_last_checkpoint()
-    
-    completed_matches = detect_completed_matches(db_path, last_check)
+    previous_state = load_completion_state()
+    completed_matches, current_state = detect_completed_matches(db_path, previous_state)
     
     # Group by league
     leagues_with_new_matches = set()
@@ -139,7 +192,7 @@ def get_league_retraining_status() -> tuple[Dict[int, bool], List[Dict[str, Any]
     for league_id in LEAGUE_CONFIGS.keys():
         retraining_needed[league_id] = league_id in leagues_with_new_matches
     
-    return retraining_needed, completed_matches
+    return retraining_needed, completed_matches, current_state
 
 def trigger_model_retraining(leagues_to_retrain: List[int]) -> bool:
     """Trigger model retraining for specific leagues"""
@@ -258,13 +311,33 @@ def update_model_registry(completed_matches: List[Dict[str, Any]]) -> None:
 
 def main():
     """Main detection and retraining function"""
+    parser = argparse.ArgumentParser(description="Detect completed matches and trigger retraining.")
+    parser.add_argument("--db", default=os.path.join(project_root, "data.sqlite"), help="Path to SQLite DB.")
+    parser.add_argument("--verbose", action="store_true", help="Enable debug logging.")
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
     logger.info("Starting match completion detection and retraining")
+    db_path = args.db
+
+    # One-time bootstrap: initialize completion state snapshot without triggering
+    # a massive retrain on first run after upgrading detection logic.
+    if not completion_state_initialized():
+        logger.info("Completion state not initialized - bootstrapping snapshot (no retrain this run)")
+        _, current_state = detect_completed_matches(db_path, previous_state={})
+        save_completion_state(current_state)
+        save_checkpoint(datetime.now())
+        logger.info(f"Initialized completion state with {len(current_state)} completed matches")
+        return 0
     
     # Check for completed matches
-    retraining_needed, completed_matches = get_league_retraining_status()
+    retraining_needed, completed_matches, current_state = get_league_retraining_status(db_path)
     
     if not completed_matches:
         logger.info("No new completed matches found")
+        save_completion_state(current_state)
         save_checkpoint(datetime.now())
         return 0
     
@@ -305,6 +378,7 @@ def main():
         logger.info(f"Created retraining flag file: {retrain_flag_file}")
         logger.info(f"Leagues to retrain: {leagues_to_retrain}")
         logger.info("🤖 Models will be retrained to capture latest completed match results")
+        save_completion_state(current_state)
         save_checkpoint(datetime.now())
         return 0
     except Exception as e:
