@@ -9,6 +9,9 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4").strip().lower()
+ALLOW_LEGACY_MODEL_FALLBACK = os.getenv("ALLOW_LEGACY_MODEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
+
 
 def load_model_from_storage(
     league_id: int,
@@ -72,24 +75,42 @@ def load_model_from_storage(
         except Exception as list_err:
             logger.warning(f"Could not list bucket contents: {list_err}")
         
-        # Check for XGBoost models first (preferred), then optimized, then generic
-        blob_paths = [
-            # XGBoost models (preferred - trained on 900+ games)
+        # V4-first path order. Runtime-compatible V4 `.pkl` adapters can be published
+        # under these names while retaining legacy fallback support.
+        v4_blob_paths = [
+            f"models/league_{league_id}_model_maz_maxed_v4_runtime.pkl",
+            f"models/artifacts/league_{league_id}_model_maz_maxed_v4_runtime.pkl",
+            f"league_{league_id}_model_maz_maxed_v4_runtime.pkl",
+            f"artifacts/league_{league_id}_model_maz_maxed_v4_runtime.pkl",
+            f"models/league_{league_id}_model_v4.pkl",
+            f"models/artifacts/league_{league_id}_model_v4.pkl",
+            f"league_{league_id}_model_v4.pkl",
+            f"artifacts/league_{league_id}_model_v4.pkl",
+        ]
+        legacy_blob_paths = [
             f"models/league_{league_id}_model_xgboost.pkl",
             f"models/artifacts/league_{league_id}_model_xgboost.pkl",
             f"league_{league_id}_model_xgboost.pkl",
             f"artifacts/league_{league_id}_model_xgboost.pkl",
-            # Optimized models (fallback)
             f"models/league_{league_id}_model_optimized.pkl",
             f"models/artifacts_optimized/league_{league_id}_model_optimized.pkl",
             f"league_{league_id}_model_optimized.pkl",
             f"artifacts_optimized/league_{league_id}_model_optimized.pkl",
-            # Generic models (legacy fallback)
             f"models/league_{league_id}_model.pkl",
             f"models/artifacts/league_{league_id}_model.pkl",
             f"league_{league_id}_model.pkl",
-            f"artifacts/league_{league_id}_model.pkl"
+            f"artifacts/league_{league_id}_model.pkl",
         ]
+        if LIVE_MODEL_FAMILY == "v4":
+            blob_paths = v4_blob_paths + (legacy_blob_paths if ALLOW_LEGACY_MODEL_FALLBACK else [])
+        else:
+            blob_paths = legacy_blob_paths
+
+        logger.info(
+            "Model family preference=%s, legacy fallback=%s",
+            LIVE_MODEL_FAMILY,
+            "enabled" if ALLOW_LEGACY_MODEL_FALLBACK else "disabled",
+        )
         
         logger.info(f"Checking {len(blob_paths)} blob paths in Cloud Storage for league {league_id}...")
         for blob_path in blob_paths:

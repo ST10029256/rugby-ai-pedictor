@@ -1,5 +1,6 @@
 import React, { useState, useEffect, memo } from 'react';
-import { Box, CircularProgress } from '@mui/material';
+import { Box } from '@mui/material';
+import RugbyBallLoader from './RugbyBallLoader';
 import { getLeagueMetrics } from '../firebase';
 
 const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
@@ -17,14 +18,25 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
       return;
     }
 
+    const isDebugEnabled = (key) => {
+      try {
+        return typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem(key) === '1';
+      } catch {
+        return false;
+      }
+    };
+    // Enable via localStorage.setItem('debug_metrics', '1')
+    const DEBUG_METRICS = isDebugEnabled('debug_metrics');
+    const debugLog = (...args) => DEBUG_METRICS && console.log(...args);
+
     const fetchMetrics = async () => {
       try {
-        console.log(`📊 Fetching league metrics for league_id: ${leagueId}`);
+        debugLog(`📊 Fetching league metrics for league_id: ${leagueId}`);
         setMetrics(prev => ({ ...prev, loading: true }));
         const result = await getLeagueMetrics({ league_id: leagueId });
         
-        console.log('📊 League metrics API response:', result);
-        console.log('📊 Result.data:', result?.data);
+        debugLog('📊 League metrics API response:', result);
+        debugLog('📊 Result.data:', result?.data);
         
         if (result && result.data) {
           if (result.data.error) {
@@ -42,7 +54,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
             const aiRating = result.data.ai_rating || 'N/A';
             const margin = result.data.overall_mae || result.data.margin || 0;
             
-            console.log('✅ League metrics received:', {
+            debugLog('✅ League metrics received:', {
               accuracy: accuracy,
               training_games: trainingGames,
               ai_rating: aiRating,
@@ -51,13 +63,13 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
             });
             
             // Log the actual values clearly
-            console.log(`📊 Metrics for league ${leagueId}:`);
-            console.log(`   Accuracy: ${accuracy}%`);
-            console.log(`   Games Trained: ${trainingGames}`);
-            console.log(`   Margin Error: ${margin.toFixed(2)} points`);
+            debugLog(`📊 Metrics for league ${leagueId}:`);
+            debugLog(`   Accuracy: ${accuracy}%`);
+            debugLog(`   Games Trained: ${trainingGames}`);
+            debugLog(`   Margin Error: ${margin.toFixed(2)} points`);
             
             // Also log the full data object for debugging
-            console.log('   Full response data:', JSON.stringify(result.data, null, 2));
+            debugLog('   Full response data:', JSON.stringify(result.data, null, 2));
             
             setMetrics({
               accuracy: accuracy,
@@ -68,7 +80,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
             });
           }
         } else {
-          console.warn('⚠️ No data in league metrics response');
+          debugLog('⚠️ No data in league metrics response');
           setMetrics({
             accuracy: 0,
             trainingGames: 0,
@@ -79,11 +91,14 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
         }
       } catch (error) {
         console.error('❌ Exception fetching league metrics:', error);
-        console.error('Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        });
+        // Keep details only when debugging.
+        if (DEBUG_METRICS) {
+          console.error('Error details:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+          });
+        }
         setMetrics({
           accuracy: 0,
           trainingGames: 0,
@@ -99,8 +114,17 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
 
   if (metrics.loading) {
     return (
-      <Box className="custom-metrics-container" sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '150px' }}>
-        <CircularProgress size={40} sx={{ color: '#10b981' }} />
+      <Box sx={{ 
+        width: '100%',
+        minHeight: { xs: '200px', sm: '240px' },
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        py: 3,
+        boxSizing: 'border-box',
+      }}>
+        <RugbyBallLoader size={100} color="#10b981" compact label="Loading metrics..." />
       </Box>
     );
   }

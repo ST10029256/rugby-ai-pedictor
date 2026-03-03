@@ -18,8 +18,9 @@ if project_root not in sys.path:
 
 def upload_models_to_storage(
     bucket_name: str = 'rugby-ai-61fd0.firebasestorage.app',
-    models_dir: str = 'artifacts_optimized',
-    dry_run: bool = False
+    models_dir: str = 'artifacts',
+    dry_run: bool = False,
+    only_v4: bool = True,
 ) -> List[str]:
     """
     Upload all model files to Cloud Storage
@@ -36,18 +37,25 @@ def upload_models_to_storage(
         print(f"Error: Models directory not found: {models_dir}")
         return []
     
-    # Find all .pkl files
+    # Find all supported model/report artifacts.
+    # V4 runtime assets are primarily .pt + .pkl (meta) plus .json reports.
     model_files = []
+    allowed_ext = ('.pkl', '.json', '.pt')
     for root, dirs, files in os.walk(models_dir):
         for file in files:
-            if file.endswith('.pkl') or file.endswith('.json'):
-                model_files.append(os.path.join(root, file))
+            if not file.endswith(allowed_ext):
+                continue
+            full_path = os.path.join(root, file)
+            if only_v4 and 'v4' not in file.lower():
+                continue
+            model_files.append(full_path)
     
     if not model_files:
         print(f"No model files found in {models_dir}")
         return []
     
-    print(f"Found {len(model_files)} model files to upload")
+    mode_text = "V4-only" if only_v4 else "all supported artifacts"
+    print(f"Found {len(model_files)} model files to upload ({mode_text})")
     
     if dry_run:
         print("\n[DRY RUN] Would upload:")
@@ -87,10 +95,15 @@ def upload_models_to_storage(
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description="Upload ML models to Cloud Storage")
+    parser = argparse.ArgumentParser(description="Upload ML model artifacts to Cloud Storage")
     parser.add_argument('--bucket', default='rugby-ai-61fd0.firebasestorage.app', help='Cloud Storage bucket name')
-    parser.add_argument('--models-dir', default='artifacts_optimized', help='Directory containing models')
+    parser.add_argument('--models-dir', default='artifacts', help='Directory containing model artifacts')
     parser.add_argument('--dry-run', action='store_true', help='Dry run (no upload)')
+    parser.add_argument(
+        '--include-legacy',
+        action='store_true',
+        help='Include non-v4 artifacts (default behavior uploads only files with v4 in filename)',
+    )
     
     args = parser.parse_args()
     
@@ -104,7 +117,8 @@ def main():
     uploaded = upload_models_to_storage(
         bucket_name=args.bucket,
         models_dir=args.models_dir,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
+        only_v4=not args.include_legacy,
     )
     
     if not args.dry_run:

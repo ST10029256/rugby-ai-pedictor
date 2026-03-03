@@ -19,6 +19,411 @@ try:
 except ImportError:
     FirestoreTimestamp = None
 
+
+def _sqlite_has_table(db_path: str, table_name: str) -> bool:
+    """Return True if SQLite DB exists and contains `table_name`."""
+    try:
+        if not db_path or not os.path.exists(db_path):
+            return False
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+                (table_name,),
+            )
+            return cur.fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        return int(value)
+    except Exception:
+        return None
+
+
+def _parse_firestore_date(date_event: Any) -> Optional[datetime]:
+    """Best-effort conversion of Firestore date field to a `datetime`."""
+    try:
+        if date_event is None:
+            return None
+        # Firestore Timestamp-like object
+        if hasattr(date_event, "to_datetime"):
+            return date_event.to_datetime()
+        if isinstance(date_event, datetime):
+            return date_event
+        if isinstance(date_event, str):
+            raw = date_event.strip()
+            if not raw:
+                return None
+            # Handle trailing Z and plain date strings
+            raw = raw.replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(raw)
+            except Exception:
+                # Try date-only (YYYY-MM-DD)
+                try:
+                    return datetime.fromisoformat(raw + "T00:00:00")
+                except Exception:
+                    return None
+        return None
+    except Exception:
+        return None
+
+
+def _build_firestore_news_feed(
+    league_id: Any,
+    limit: int = 50,
+    days_ahead: int = 7,
+    days_back: int = 7,
+) -> Dict[str, Any]:
+    """
+    Firestore-based fallback for the News tab.
+
+    Returns:
+      {
+        "news": [<news item dict>],
+        "debug": {...}
+      }
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Use a local timezone for "today" semantics (matches stay visible on game day)
+    from datetime import timezone
+    import os as _os
+    try:
+        from zoneinfo import ZoneInfo  # py3.9+
+    except Exception:
+        ZoneInfo = None
+
+    tz_name = _os.getenv("LOCAL_TIMEZONE", "Africa/Johannesburg")
+    local_tz = ZoneInfo(tz_name) if ZoneInfo else timezone.utc
+    now_utc = datetime.now(timezone.utc)
+    today_local = now_utc.astimezone(local_tz).date()
+    cutoff_future = now_utc + timedelta(days=days_ahead)
+    cutoff_past = now_utc - timedelta(days=days_back)
+
+    league_id_int = _coerce_int(league_id)
+    # In league-specific mode, be more forgiving so the News tab doesn't go empty.
+    if league_id_int is not None:
+        days_ahead = max(days_ahead, 30)
+        days_back = max(days_back, 30)
+        cutoff_future = now_utc + timedelta(days=days_ahead)
+        cutoff_past = now_utc - timedelta(days=days_back)
+
+    db = get_firestore_client()
+    matches_ref = db.collection("matches")
+    if league_id_int is not None:
+        matches_ref = matches_ref.where("league_id", "==", league_id_int)
+
+    # Keep this query simple to avoid index issues; filter by date in Python.
+    matches_ref = matches_ref.limit(1000)
+
+    total_checked = 0
+    upcoming_matches: list[dict] = []
+    recent_matches: list[dict] = []
+    team_ids: set[int] = set()
+    # Build form + head-to-head from scored matches so previews aren't all 50%.
+    # Wider historical window for form because some leagues have gaps.
+    form_days = 180 if league_id_int is not None else 60
+    form_cutoff_past = now_utc - timedelta(days=form_days)
+    team_form_raw: dict[int, list[tuple[datetime, int, int]]] = {}
+    # key: (min_team_id, max_team_id) -> list[(dt, home_score, away_score, home_team_id)]
+    h2h_raw: dict[tuple[int, int], list[tuple[datetime, int, int, int]]] = {}
+
+    for doc in matches_ref.stream():
+        total_checked += 1
+        m = doc.to_dict() or {}
+
+        # Safety: enforce league match in code too
+        if league_id_int is not None:
+            if _coerce_int(m.get("league_id")) != league_id_int:
+                continue
+
+        dt = _parse_firestore_date(m.get("date_event"))
+        if not dt:
+            continue
+
+        # Normalize to aware UTC for comparisons
+        if dt.tzinfo is None:
+            dt_utc = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt_utc = dt.astimezone(timezone.utc)
+
+        home_id = _coerce_int(m.get("home_team_id"))
+        away_id = _coerce_int(m.get("away_team_id"))
+        if home_id:
+            team_ids.add(home_id)
+        if away_id:
+            team_ids.add(away_id)
+
+        # Capture scored matches for recent form / head-to-head.
+        hs = m.get("home_score")
+        aws = m.get("away_score")
+        try:
+            hs_i = int(hs) if hs is not None else None
+            aws_i = int(aws) if aws is not None else None
+        except Exception:
+            hs_i = None
+            aws_i = None
+
+        if (
+            home_id
+            and away_id
+            and hs_i is not None
+            and aws_i is not None
+            and form_cutoff_past <= dt_utc < now_utc
+        ):
+            # Team form (normalize into team_score/opponent_score)
+            team_form_raw.setdefault(home_id, []).append((dt_utc, hs_i, aws_i))
+            team_form_raw.setdefault(away_id, []).append((dt_utc, aws_i, hs_i))
+
+            # Head-to-head store original orientation
+            a, b = (home_id, away_id) if home_id < away_id else (away_id, home_id)
+            h2h_raw.setdefault((a, b), []).append((dt_utc, hs_i, aws_i, home_id))
+
+        # Upcoming logic: keep anything from "today" onwards in local timezone
+        dt_local_date = dt_utc.astimezone(local_tz).date()
+        is_upcoming_window = (dt_local_date >= today_local) and (dt_utc <= cutoff_future)
+        is_recent_window = (cutoff_past <= dt_utc < now_utc)
+
+        doc_id = doc.id
+        match_id_val: Any = _coerce_int(doc_id) if str(doc_id).isdigit() else doc_id
+        m_norm = {
+            "doc_id": doc_id,
+            "match_id": match_id_val,
+            "league_id": league_id_int if league_id_int is not None else _coerce_int(m.get("league_id")),
+            "date_dt_utc": dt_utc,
+            "date_event": dt_utc.isoformat(),
+            "home_team_id": home_id,
+            "away_team_id": away_id,
+            "home_score": m.get("home_score"),
+            "away_score": m.get("away_score"),
+            "venue": m.get("venue") or m.get("strVenue") or None,
+        }
+
+        if is_upcoming_window:
+            upcoming_matches.append(m_norm)
+        elif is_recent_window and m.get("home_score") is not None and m.get("away_score") is not None:
+            recent_matches.append(m_norm)
+
+    # Finalize forms (latest 5)
+    team_form: dict[int, list[tuple[int, int]]] = {}
+    for tid, rows in team_form_raw.items():
+        rows_sorted = sorted(rows, key=lambda x: x[0], reverse=True)
+        team_form[tid] = [(r[1], r[2]) for r in rows_sorted[:5]]
+
+    # Finalize head-to-head (latest 5)
+    h2h: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
+    for key, rows in h2h_raw.items():
+        rows_sorted = sorted(rows, key=lambda x: x[0], reverse=True)
+        h2h[key] = [(r[1], r[2], r[3]) for r in rows_sorted[:5]]
+
+    # Batch lookup team names
+    team_names: dict[int, str] = {}
+    if team_ids:
+        try:
+            teams_ref = db.collection("teams")
+            team_ids_list = list(team_ids)
+            for i in range(0, len(team_ids_list), 10):
+                batch = team_ids_list[i : i + 10]
+                for tdoc in teams_ref.where("id", "in", batch).stream():
+                    t = tdoc.to_dict() or {}
+                    tid = _coerce_int(t.get("id"))
+                    if tid is not None:
+                        team_names[tid] = t.get("name") or f"Team {tid}"
+        except Exception as e:
+            logger.warning(f"Firestore team name lookup failed (fallback to IDs): {e}")
+
+    # Sort and build news items
+    upcoming_matches.sort(key=lambda x: x["date_dt_utc"])
+    recent_matches.sort(key=lambda x: x["date_dt_utc"], reverse=True)
+
+    news: list[dict] = []
+
+    # Prefer upcoming previews; if none, show recent recaps
+    if upcoming_matches:
+        for m in upcoming_matches[: max(0, min(limit, 100))]:
+            home_name = team_names.get(m["home_team_id"] or -1, f"Team {m['home_team_id']}" if m["home_team_id"] else "Home")
+            away_name = team_names.get(m["away_team_id"] or -1, f"Team {m['away_team_id']}" if m["away_team_id"] else "Away")
+            home_id = m["home_team_id"]
+            away_id = m["away_team_id"]
+
+            home_form = team_form.get(home_id, []) if home_id else []
+            away_form = team_form.get(away_id, []) if away_id else []
+
+            def _win_rate(form: list[tuple[int, int]]) -> float:
+                if not form:
+                    return 0.0
+                return sum(1 for s, o in form if s > o) / len(form)
+
+            def _avg_scored(form: list[tuple[int, int]]) -> float:
+                if not form:
+                    return 0.0
+                return sum(s for s, _ in form) / len(form)
+
+            home_wr = _win_rate(home_form)
+            away_wr = _win_rate(away_form)
+            home_avg = _avg_scored(home_form)
+            away_avg = _avg_scored(away_form)
+
+            # Simple strength model (same spirit as NewsService fallback)
+            def _strength(wr: float, avg_pts: float, has_form: bool) -> float:
+                if not has_form:
+                    return 0.5
+                return (wr * 0.6) + (min(avg_pts / 50.0, 1.0) * 0.4)
+
+            home_strength = _strength(home_wr, home_avg, bool(home_form))
+            away_strength = _strength(away_wr, away_avg, bool(away_form))
+            total_strength = home_strength + away_strength
+            home_prob = (home_strength / total_strength) if total_strength > 0 else 0.5
+            home_prob = max(0.01, min(0.99, float(home_prob)))
+
+            favored = home_name if home_prob >= 0.5 else away_name
+            confidence = max(home_prob, 1.0 - home_prob)
+            if confidence >= 0.62:
+                title = f"{favored} favored ({confidence*100:.0f}%)"
+            elif confidence >= 0.56:
+                title = f"{favored} slight edge ({confidence*100:.0f}%)"
+            else:
+                title = f"{home_name} vs {away_name}: tight contest expected"
+
+            # Head-to-head
+            head_to_head: list[tuple[int, int, int]] = []
+            if home_id and away_id:
+                a, b = (home_id, away_id) if home_id < away_id else (away_id, home_id)
+                head_to_head = h2h.get((a, b), [])
+
+            # Build more "newsly" content
+            content_parts: list[str] = []
+            content_parts.append(f"{home_name} host {away_name}.")
+            if home_form:
+                content_parts.append(f"{home_name} last {len(home_form)}: {home_wr*100:.0f}% wins, {home_avg:.1f} pts/game.")
+            if away_form:
+                content_parts.append(f"{away_name} last {len(away_form)}: {away_wr*100:.0f}% wins, {away_avg:.1f} pts/game.")
+            if head_to_head:
+                # Count wins for the listed home_team_id orientation
+                home_h2h_wins = 0
+                for hs_i, as_i, h_id in head_to_head:
+                    # If match stored with home_team_id==home_id, hs_i is home team's points
+                    if h_id == home_id:
+                        if hs_i > as_i:
+                            home_h2h_wins += 1
+                    else:
+                        # Our home team was away in that meeting
+                        if as_i > hs_i:
+                            home_h2h_wins += 1
+                content_parts.append(f"Head-to-head: {home_name} won {home_h2h_wins}/{len(head_to_head)} recent meetings.")
+            content_parts.append(f"Model edge: {home_prob*100:.0f}% {home_name} win chance.")
+
+            content = " ".join(content_parts)
+
+            clickable_stats = [
+                {
+                    "label": f"Win Probability (Home): {home_prob*100:.1f}%",
+                    "explanation": "Estimated from recent win rate and points scored (Firestore fallback model).",
+                }
+            ]
+            if home_form:
+                clickable_stats.append(
+                    {
+                        "label": f"{home_name} form: {home_wr*100:.0f}% wins",
+                        "explanation": f"Last {len(home_form)} scored games in this league window.",
+                    }
+                )
+            if away_form:
+                clickable_stats.append(
+                    {
+                        "label": f"{away_name} form: {away_wr*100:.0f}% wins",
+                        "explanation": f"Last {len(away_form)} scored games in this league window.",
+                    }
+                )
+            news.append(
+                {
+                    "id": f"fs_preview_{m['match_id']}",
+                    "type": "match_preview",
+                    "title": title,
+                    "content": content,
+                    "timestamp": m["date_event"],
+                    "league_id": m["league_id"],
+                    "match_id": m["match_id"],
+                    "impact_score": 0.0,
+                    "related_stats": {
+                        "home_team": home_name,
+                        "away_team": away_name,
+                        "home_team_id": home_id,
+                        "away_team_id": away_id,
+                        "venue": m.get("venue"),
+                        "date_event": m["date_event"],
+                        "win_probability": home_prob,
+                        "home_form": home_form,
+                        "away_form": away_form,
+                        "head_to_head": head_to_head,
+                    },
+                    "clickable_stats": clickable_stats,
+                }
+            )
+    else:
+        for m in recent_matches[: max(0, min(limit, 100))]:
+            home_name = team_names.get(m["home_team_id"] or -1, f"Team {m['home_team_id']}" if m["home_team_id"] else "Home")
+            away_name = team_names.get(m["away_team_id"] or -1, f"Team {m['away_team_id']}" if m["away_team_id"] else "Away")
+            hs = m.get("home_score")
+            aw = m.get("away_score")
+            try:
+                hs_i = int(hs)
+                aw_i = int(aw)
+            except Exception:
+                hs_i = hs
+                aw_i = aw
+            title = f"{home_name} {hs_i}-{aw_i} {away_name}"
+            content = f"Recent result: {home_name} {hs_i} - {aw_i} {away_name}."
+            news.append(
+                {
+                    "id": f"fs_recap_{m['match_id']}",
+                    "type": "match_recap",
+                    "title": title,
+                    "content": content,
+                    "timestamp": m["date_event"],
+                    "league_id": m["league_id"],
+                    "match_id": m["match_id"],
+                    "related_stats": {
+                        "home_team": home_name,
+                        "away_team": away_name,
+                        "home_score": hs_i,
+                        "away_score": aw_i,
+                        "home_team_id": m["home_team_id"],
+                        "away_team_id": m["away_team_id"],
+                        "date_event": m["date_event"],
+                    },
+                }
+            )
+
+    # Newest first for UI
+    news.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return {
+        "news": news[:limit],
+        "debug": {
+            "data_source": "firestore",
+            "league_id": league_id,
+            "league_id_int": league_id_int,
+            "total_checked": total_checked,
+            "upcoming_found": len(upcoming_matches),
+            "recent_found": len(recent_matches),
+            "returned": min(len(news), limit),
+            "timezone": tz_name,
+        },
+    }
+
 if TYPE_CHECKING:
     from prediction.hybrid_predictor import MultiLeaguePredictor
     from prediction.enhanced_predictor import EnhancedRugbyPredictor
@@ -53,6 +458,8 @@ def _get_league_mappings():
 # Initialize predictors (lazy loading - will be imported when needed)
 _predictor = None
 _enhanced_predictor = None
+LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4")
+LIVE_MODEL_CHANNEL = os.getenv("LIVE_MODEL_CHANNEL", "prod_100")
 
 
 def get_predictor():
@@ -136,7 +543,7 @@ def get_enhanced_predictor():
     return _enhanced_predictor
 
 
-def get_news_service(predictor=None):
+def get_news_service(predictor=None, db_path: Optional[str] = None):
     """Get or create NewsService instance with API clients"""
     import logging
     logger = logging.getLogger(__name__)
@@ -146,7 +553,7 @@ def get_news_service(predictor=None):
     from prediction.sportsdb_client import TheSportsDBClient
     from prediction.config import load_config
     
-    db_path = os.getenv("DB_PATH")
+    db_path = db_path or os.getenv("DB_PATH")
     if not db_path:
         # Try multiple possible paths
         possible_paths = [
@@ -156,14 +563,17 @@ def get_news_service(predictor=None):
             "/tmp/data.sqlite",  # Firebase Functions temp directory
         ]
         for path in possible_paths:
-            if os.path.exists(path):
-                db_path = path
-                logger.info(f"Found database at: {path}")
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                db_path = abs_path
+                logger.info(f"Found database at: {abs_path}")
                 break
         else:
             # Default to same directory as main.py
             db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
             logger.warning(f"Database not found in any expected location, using default: {db_path}")
+    else:
+        db_path = os.path.abspath(db_path)
     
     logger.info(f"NewsService using database path: {db_path}, exists: {os.path.exists(db_path) if db_path else False}")
     
@@ -382,11 +792,14 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         predicted_winner = home_team
                     elif predicted_winner == 'Away':
                         predicted_winner = away_team
+                    elif predicted_winner == 'Draw':
+                        predicted_winner = 'Draw'
                     
                     # Safety check: if predicted_winner doesn't match scores, use score-based winner
                     if predicted_winner:
                         if (predicted_winner == home_team and home_score <= away_score) or \
-                           (predicted_winner == away_team and away_score <= home_score):
+                           (predicted_winner == away_team and away_score <= home_score) or \
+                           (predicted_winner == 'Draw' and home_score != away_score):
                             # Mismatch detected - use score-based winner
                             predicted_winner = score_based_winner
                     else:
@@ -407,6 +820,9 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'home_win_prob': prediction.get('home_win_prob'),
                         'confidence': prediction.get('confidence'),
                         'prediction_type': prediction.get('prediction_type', 'AI Only'),
+                        'model_type': prediction.get('model_type', LIVE_MODEL_FAMILY),
+                        'model_family': prediction.get('model_family', LIVE_MODEL_FAMILY),
+                        'model_channel': prediction.get('model_channel', LIVE_MODEL_CHANNEL),
                         'created_at': firestore.SERVER_TIMESTAMP,
                     }
                     
@@ -425,6 +841,9 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
         except Exception as save_error:
             logger.warning(f"Error saving prediction: {save_error}")
         
+        prediction.setdefault('model_type', LIVE_MODEL_FAMILY)
+        prediction.setdefault('model_family', LIVE_MODEL_FAMILY)
+        prediction.setdefault('model_channel', LIVE_MODEL_CHANNEL)
         logger.info("=== predict_match completed successfully ===")
         return prediction
         
@@ -607,11 +1026,14 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                         predicted_winner = home_team
                     elif predicted_winner == 'Away':
                         predicted_winner = away_team
+                    elif predicted_winner == 'Draw':
+                        predicted_winner = 'Draw'
                     
                     # Safety check: if predicted_winner doesn't match scores, use score-based winner
                     if predicted_winner:
                         if (predicted_winner == home_team and home_score <= away_score) or \
-                           (predicted_winner == away_team and away_score <= home_score):
+                           (predicted_winner == away_team and away_score <= home_score) or \
+                           (predicted_winner == 'Draw' and home_score != away_score):
                             # Mismatch detected - use score-based winner
                             predicted_winner = score_based_winner
                     else:
@@ -632,6 +1054,9 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                         'home_win_prob': prediction.get('home_win_prob'),
                         'confidence': prediction.get('confidence'),
                         'prediction_type': prediction.get('prediction_type', 'AI Only'),
+                        'model_type': prediction.get('model_type', LIVE_MODEL_FAMILY),
+                        'model_family': prediction.get('model_family', LIVE_MODEL_FAMILY),
+                        'model_channel': prediction.get('model_channel', LIVE_MODEL_CHANNEL),
                         'created_at': firestore.SERVER_TIMESTAMP,
                     }
                     
@@ -650,6 +1075,9 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
         except Exception as save_error:
             logger.warning(f"Error saving prediction: {save_error}")
         
+        prediction.setdefault('model_type', LIVE_MODEL_FAMILY)
+        prediction.setdefault('model_family', LIVE_MODEL_FAMILY)
+        prediction.setdefault('model_channel', LIVE_MODEL_CHANNEL)
         logger.info("=== predict_match_http completed successfully ===")
         headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
         return https_fn.Response(json.dumps(prediction), status=200, headers=headers)
@@ -711,9 +1139,21 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             logger.info("Starting to stream matches from Firestore...")
             
             matches = []
-            # Use UTC-aware datetime for comparison with Firestore Timestamps
+            # Use UTC-aware datetime for comparison with Firestore Timestamps,
+            # but evaluate "today" in a local timezone so matches don't disappear during game day.
             from datetime import timezone
-            now = datetime.now(timezone.utc)
+            import os
+            try:
+                from zoneinfo import ZoneInfo  # py3.9+
+            except Exception:
+                ZoneInfo = None
+
+            tz_name = os.getenv("LOCAL_TIMEZONE", "Africa/Johannesburg")
+            local_tz = ZoneInfo(tz_name) if ZoneInfo else timezone.utc
+
+            now_utc = datetime.now(timezone.utc)
+            now_local = now_utc.astimezone(local_tz)
+            today_local = now_local.date()
             total_checked = 0
             with_scores = 0
             past_dates = 0
@@ -738,13 +1178,9 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     logger.debug(f"Skipping match {doc.id}: league_id mismatch ({match_league_id} != {int(league_id)})")
                     continue  # Skip matches from other leagues
                 
-                # Only include matches without scores (upcoming matches)
-                if match_data.get('home_score') is not None or match_data.get('away_score') is not None:
-                    with_scores += 1
-                    logger.debug(f"Skipping match {doc.id}: has scores (home={match_data.get('home_score')}, away={match_data.get('away_score')})")
-                    continue
-                
-                # Check if date is in the future (or today for date-only values)
+                # Check if date is today or in the future (LOCAL TIMEZONE).
+                # IMPORTANT: Do NOT hide matches just because they already have scores on game day
+                # (users want to see live scores and final scores until midnight).
                 date_event = match_data.get('date_event')
                 if date_event:
                     # Handle both datetime and string dates
@@ -772,12 +1208,14 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                             # Try parsing ISO format or common date formats
                             if 'T' in date_event:
                                 match_date = datetime.fromisoformat(date_event.replace('Z', '+00:00'))
+                                if match_date.tzinfo is None:
+                                    match_date = match_date.replace(tzinfo=timezone.utc)
                             else:
                                 # Date-only string (YYYY-MM-DD) - treat as "all-day" for upcoming filtering
                                 is_date_only = True
+                                # Interpret date-only as local date at midnight so it stays visible all day locally.
                                 match_date = datetime.strptime(date_event, '%Y-%m-%d')
-                                # Make timezone-aware (assume UTC)
-                                match_date = match_date.replace(tzinfo=timezone.utc)
+                                match_date = match_date.replace(tzinfo=local_tz)
                         else:
                             # Try to convert unknown type
                             raise ValueError(f"Unknown date type: {type(date_event)}")
@@ -795,17 +1233,25 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                             })
                         continue
                     
-                    # Only include upcoming matches:
-                    # - If we have a full datetime, require it to be in the future (UTC).
-                    # - If we only have a date (YYYY-MM-DD), include today+future so it doesn't disappear right after 00:00 UTC.
+                    # Include matches that are on/after *today* (local timezone).
+                    # This keeps game-day matches visible all day, including live/final scores,
+                    # and they will only disappear after local midnight.
                     if match_date:
                         should_include = False
-                        if is_date_only:
-                            should_include = match_date.date() >= now.date()
-                        else:
-                            should_include = match_date > now
+                        try:
+                            if is_date_only:
+                                match_local_date = match_date.date()
+                            else:
+                                match_local_date = match_date.astimezone(local_tz).date()
+                            should_include = match_local_date >= today_local
+                        except Exception:
+                            # Fallback: if timezone conversion fails, use UTC date
+                            should_include = match_date.date() >= now_utc.date()
 
                         if should_include:
+                            # Track how many included matches already have scores (live/final today)
+                            if match_data.get('home_score') is not None or match_data.get('away_score') is not None:
+                                with_scores += 1
                             match_data['id'] = doc.id
                             # Convert date to string for JSON serialization
                             if hasattr(date_event, 'timestamp'):
@@ -829,7 +1275,8 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                             matches_without_teams.append(match_data)
                         else:
                             past_dates += 1
-                            days_ago = (now - match_date).days
+                            # Compare against UTC "now" for logging only
+                            days_ago = (now_utc - match_date.astimezone(timezone.utc)).days if match_date.tzinfo else (now_utc.replace(tzinfo=None) - match_date).days
                             logger.debug(f"Skipping match {doc.id}: past date ({days_ago} days ago, {match_date.isoformat()})")
                     else:
                         no_date += 1
@@ -1085,8 +1532,8 @@ def get_leagues(req: https_fn.CallableRequest) -> Dict[str, Any]:
             cursor.execute("""
                 SELECT e.league_id, COUNT(*) as match_count
                 FROM event e
-                WHERE e.date_event >= date('now')
-                AND e.date_event <= date('now', '+7 days')
+                WHERE date(e.date_event) >= date('now')
+                AND date(e.date_event) <= date('now', '+7 days')
                 AND e.home_team_id IS NOT NULL
                 AND e.away_team_id IS NOT NULL
                 GROUP BY e.league_id
@@ -1100,8 +1547,8 @@ def get_leagues(req: https_fn.CallableRequest) -> Dict[str, Any]:
             cursor.execute("""
                 SELECT e.league_id, COUNT(*) as match_count
                 FROM event e
-                WHERE e.date_event >= date('now', '-7 days')
-                AND e.date_event < date('now')
+                WHERE date(e.date_event) >= date('now', '-7 days')
+                AND date(e.date_event) < date('now')
                 AND e.home_score IS NOT NULL
                 AND e.away_score IS NOT NULL
                 AND e.home_team_id IS NOT NULL
@@ -1272,7 +1719,7 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
     logger.setLevel(logging.DEBUG)
     
     try:
-        logger.info("=== get_league_metrics called (XGBoost v2) ===")
+        logger.info("=== get_league_metrics called (V4-first) ===")
         data = req.data or {}
         league_id = data.get('league_id')
         
@@ -1336,7 +1783,9 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                             'ai_rating': league_metric.get('ai_rating', 'N/A'),
                             'overall_mae': round(overall_mae, 2) if overall_mae > 0 else 0.0,
                             'trained_at': league_metric.get('trained_at'),
-                            'model_type': model_type
+                            'model_type': model_type,
+                            'model_family': league_metric.get('model_family', model_type or LIVE_MODEL_FAMILY),
+                            'model_channel': league_metric.get('model_channel', LIVE_MODEL_CHANNEL),
                         }
                 else:
                     # Get margin from performance data if available in league_metrics
@@ -1364,15 +1813,19 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'ai_rating': league_metric.get('ai_rating', 'N/A'),
                         'overall_mae': round(overall_mae, 2) if overall_mae > 0 else 0.0,
                         'trained_at': league_metric.get('trained_at'),
-                        'model_type': model_type
+                        'model_type': model_type,
+                        'model_family': league_metric.get('model_family', model_type or LIVE_MODEL_FAMILY),
+                        'model_channel': league_metric.get('model_channel', LIVE_MODEL_CHANNEL),
                     }
             
-            # Fallback: Try XGBoost registry document first (preferred)
-            logger.info("Trying model_registry/xgboost...")
-            registry_ref = db.collection('model_registry').document('xgboost')
-            registry_doc = registry_ref.get()
+            # Fallback registry lookup (V4 first, then legacy docs).
+            for registry_doc_name in ['v4', 'xgboost', 'optimized']:
+                logger.info(f"Trying model_registry/{registry_doc_name}...")
+                registry_ref = db.collection('model_registry').document(registry_doc_name)
+                registry_doc = registry_ref.get()
+                if not registry_doc.exists:
+                    continue
             
-            if registry_doc.exists:
                 registry = registry_doc.to_dict()
                 league_data = registry.get('leagues', {}).get(league_id_str)
                 
@@ -1398,7 +1851,10 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     # Get margin from performance data
                     overall_mae = performance.get('overall_mae', 0.0)
                     
-                    logger.info(f"Found XGBoost league data in registry: accuracy={accuracy}, games={training_games}, margin={overall_mae}")
+                    logger.info(
+                        f"Found league data in registry/{registry_doc_name}: accuracy={accuracy}, "
+                        f"games={training_games}, margin={overall_mae}"
+                    )
                     return {
                         'league_id': league_id,
                         'accuracy': round(accuracy, 1),
@@ -1406,49 +1862,9 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'ai_rating': ai_rating,
                         'overall_mae': round(overall_mae, 2),
                         'trained_at': league_data.get('trained_at'),
-                        'model_type': league_data.get('model_type', 'xgboost')
-                    }
-            
-            # Fallback: Try optimized registry document (backward compatibility)
-            logger.info("Trying model_registry/optimized...")
-            registry_ref = db.collection('model_registry').document('optimized')
-            registry_doc = registry_ref.get()
-            
-            if registry_doc.exists:
-                registry = registry_doc.to_dict()
-                league_data = registry.get('leagues', {}).get(league_id_str)
-                
-                if league_data:
-                    performance = league_data.get('performance', {})
-                    accuracy = performance.get('winner_accuracy', 0.0) * 100
-                    training_games = league_data.get('training_games', 0)
-                    
-                    # Calculate AI rating based on accuracy
-                    if accuracy >= 80:
-                        ai_rating = '9/10'
-                    elif accuracy >= 75:
-                        ai_rating = '8/10'
-                    elif accuracy >= 70:
-                        ai_rating = '7/10'
-                    elif accuracy >= 65:
-                        ai_rating = '6/10'
-                    elif accuracy >= 60:
-                        ai_rating = '5/10'
-                    else:
-                        ai_rating = '4/10'
-                    
-                    # Get margin from performance data
-                    overall_mae = performance.get('overall_mae', 0.0)
-                    
-                    logger.info(f"Found optimized league data in registry: accuracy={accuracy}, games={training_games}, margin={overall_mae}")
-                    return {
-                        'league_id': league_id,
-                        'accuracy': round(accuracy, 1),
-                        'training_games': training_games,
-                        'ai_rating': ai_rating,
-                        'overall_mae': round(overall_mae, 2),
-                        'trained_at': league_data.get('trained_at'),
-                        'model_type': league_data.get('model_type', 'stacking')
+                        'model_type': league_data.get('model_type', registry_doc_name),
+                        'model_family': league_data.get('model_family', league_data.get('model_type', registry_doc_name)),
+                        'model_channel': league_data.get('model_channel', LIVE_MODEL_CHANNEL),
                     }
         except Exception as firestore_error:
             logger.warning(f"Error loading from Firestore: {firestore_error}")
@@ -1515,7 +1931,9 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'ai_rating': ai_rating,
                         'overall_mae': round(overall_mae, 2),
                         'trained_at': league_data.get('trained_at'),
-                        'model_type': league_data.get('model_type', model_type_preference if 'model_type_preference' in locals() else 'unknown')
+                        'model_type': league_data.get('model_type', model_type_preference if 'model_type_preference' in locals() else 'unknown'),
+                        'model_family': league_data.get('model_family', league_data.get('model_type', LIVE_MODEL_FAMILY)),
+                        'model_channel': league_data.get('model_channel', LIVE_MODEL_CHANNEL),
                     }
         except Exception as storage_error:
             logger.warning(f"Error loading from storage: {storage_error}")
@@ -1578,7 +1996,9 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
                                 'ai_rating': ai_rating,
                                 'overall_mae': round(overall_mae, 2),
                                 'trained_at': league_data.get('trained_at'),
-                                'model_type': model_type
+                                'model_type': model_type,
+                                'model_family': league_data.get('model_family', model_type or LIVE_MODEL_FAMILY),
+                                'model_channel': league_data.get('model_channel', LIVE_MODEL_CHANNEL),
                             }
             except Exception as file_error:
                 logger.debug(f"Error loading from {registry_path}: {file_error}")
@@ -1586,7 +2006,10 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
         
         # Default fallback if no data found
         logger.warning(f"⚠️ No metrics found for league_id {league_id_str} in any source. Returning defaults.")
-        logger.warning(f"   To fix this, run: python scripts/upload_model_registry_to_firestore.py")
+        logger.warning(
+            "   To fix this, run: python scripts/publish_v4_metrics_to_firestore.py "
+            "--report artifacts/maz_maxed_v4_metrics_latest.json"
+        )
         return {
             'league_id': league_id,
             'accuracy': 0.0,
@@ -1594,7 +2017,9 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
             'ai_rating': 'N/A',
             'overall_mae': 0.0,
             'trained_at': None,
-            'model_type': 'unknown'
+            'model_type': 'unknown',
+            'model_family': LIVE_MODEL_FAMILY,
+            'model_channel': LIVE_MODEL_CHANNEL,
         }
         
     except Exception as e:
@@ -2527,7 +2952,7 @@ def test_email_config(req: https_fn.CallableRequest) -> Dict[str, Any]:
         }
 
 
-@https_fn.on_call(timeout_sec=60, memory=512)
+@https_fn.on_call(timeout_sec=60, memory=512, secrets=["TWITTER_BEARER_TOKEN"])
 def get_news_feed(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Get personalized news feed
@@ -2553,11 +2978,26 @@ def get_news_feed(req: https_fn.CallableRequest) -> Dict[str, Any]:
         
         # Initialize news service with API clients
         db_path = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "data.sqlite"))
+        db_path = os.path.abspath(db_path) if db_path else db_path
         logger.info(f"Using database path: {db_path}")
         logger.info(f"Database exists: {os.path.exists(db_path)}")
-        
-        predictor = get_predictor() if os.path.exists(db_path) else None
-        news_service = get_news_service(predictor=predictor)
+
+        # If SQLite is missing/unhealthy, fall back to Firestore so News still works.
+        sqlite_ok = bool(db_path) and os.path.exists(db_path) and _sqlite_has_table(db_path, "event")
+        if not sqlite_ok:
+            fs = _build_firestore_news_feed(league_id=league_id, limit=int(limit) if limit is not None else 50)
+            return {
+                'success': True,
+                'news': fs.get('news', []),
+                'count': len(fs.get('news', [])),
+                'debug': fs.get('debug', {}),
+                'warning': 'SQLite not available; used Firestore fallback for news.'
+            }
+
+        # Ensure all downstream components use the same DB path
+        os.environ["DB_PATH"] = db_path
+        predictor = get_predictor()
+        news_service = get_news_service(predictor=predictor, db_path=db_path)
         
         logger.info(f"Getting news feed: user_id={user_id}, league_id={league_id}, followed_teams={followed_teams}, followed_leagues={followed_leagues}, limit={limit}")
         
@@ -2578,7 +3018,13 @@ def get_news_feed(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {
             'success': True,
             'news': news_data,
-            'count': len(news_data)
+            'count': len(news_data),
+            'debug': {
+                'data_source': 'sqlite',
+                'db_path': db_path,
+                'db_exists': os.path.exists(db_path) if db_path else False,
+                'sqlite_has_event_table': _sqlite_has_table(db_path, "event") if db_path else False,
+            }
         }
     except Exception as e:
         logger.error(f"Error in get_news_feed: {e}")
@@ -2607,15 +3053,36 @@ def get_trending_topics(req: https_fn.CallableRequest) -> Dict[str, Any]:
         data = req.data or {}
         limit = data.get('limit', 10)
         league_id = data.get('league_id')  # NEW: League-specific trending topics
-        
-        # Initialize news service with API clients
-        news_service = get_news_service()
+
+        # Prefer SQLite-backed trending; fall back to Firestore when SQLite isn't available.
+        db_path = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "data.sqlite"))
+        db_path = os.path.abspath(db_path) if db_path else db_path
+        sqlite_ok = bool(db_path) and os.path.exists(db_path) and _sqlite_has_table(db_path, "event")
+        if not sqlite_ok:
+            # Minimal Firestore fallback: reuse news feed debug and provide empty topics rather than failing.
+            fs = _build_firestore_news_feed(league_id=league_id, limit=0)
+            return {
+                'success': True,
+                'topics': [],
+                'count': 0,
+                'debug': fs.get('debug', {}),
+                'warning': 'SQLite not available; trending topics unavailable (Firestore fallback active).'
+            }
+
+        os.environ["DB_PATH"] = db_path
+        news_service = get_news_service(db_path=db_path)
         topics = news_service.get_trending_topics(limit=limit, league_id=league_id)  # NEW: Pass league_id
         
         return {
             'success': True,
             'topics': topics,
-            'count': len(topics)
+            'count': len(topics),
+            'debug': {
+                'data_source': 'sqlite',
+                'db_path': db_path,
+                'db_exists': os.path.exists(db_path) if db_path else False,
+                'sqlite_has_event_table': _sqlite_has_table(db_path, "event") if db_path else False,
+            }
         }
     except Exception as e:
         logger.error(f"Error in get_trending_topics: {e}")
@@ -2625,7 +3092,7 @@ def get_trending_topics(req: https_fn.CallableRequest) -> Dict[str, Any]:
         }
 
 
-@https_fn.on_request(timeout_sec=300, memory=512)
+@https_fn.on_request(timeout_sec=300, memory=512, secrets=["TWITTER_BEARER_TOKEN"])
 def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for news feed with explicit CORS support.
@@ -2705,7 +3172,32 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
                 logger.warning(f"⚠️ Database not found in any expected location, using default: {db_path}")
         
         logger.info(f"Final database path: {db_path}, exists: {os.path.exists(db_path) if db_path else False}")
+
+        # If SQLite is missing/unhealthy, serve Firestore-based news so the UI isn't empty.
+        sqlite_ok = bool(db_path) and os.path.exists(db_path) and _sqlite_has_table(db_path, "event")
+        if not sqlite_ok:
+            fs = _build_firestore_news_feed(league_id=league_id, limit=int(limit) if limit is not None else 50)
+            response_data = {
+                'success': True,
+                'news': fs.get('news', []),
+                'count': len(fs.get('news', [])),
+                'debug': {
+                    **fs.get('debug', {}),
+                    'db_path': db_path,
+                    'db_exists': os.path.exists(db_path) if db_path else False,
+                    'sqlite_has_event_table': False,
+                },
+                'warning': 'SQLite not available; used Firestore fallback for news.'
+            }
+            headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json",
+            }
+            return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
         
+        # Ensure all downstream components use the same DB path
+        os.environ["DB_PATH"] = db_path
+
         predictor = None
         try:
             if db_path and os.path.exists(db_path):
@@ -2715,7 +3207,7 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
             predictor = None
         
         try:
-            news_service = get_news_service(predictor=predictor)
+            news_service = get_news_service(predictor=predictor, db_path=db_path)
             
             # Test database connection
             try:
@@ -2753,82 +3245,126 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
             logger.info(f"  user_id={user_id}, followed_teams={followed_teams}, followed_leagues={followed_leagues}")
             
             # Test database query directly before calling news service
+            league_id_int = _coerce_int(league_id)
+            sqlite_league_total = None
+            sqlite_upcoming_7d = None
+            sqlite_recent_30d = None
+            sqlite_min_date_event = None
+            sqlite_max_date_event = None
+            used_firestore_fallback = False
+            firestore_fallback_reason = None
             try:
                 import sqlite3
                 test_conn = sqlite3.connect(db_path)
                 test_cursor = test_conn.cursor()
                 
+                if league_id_int is not None:
+                    test_cursor.execute(
+                        "SELECT COUNT(*) FROM event WHERE league_id = ?",
+                        (league_id_int,),
+                    )
+                    sqlite_league_total = int(test_cursor.fetchone()[0] or 0)
+                    test_cursor.execute(
+                        "SELECT MIN(date_event), MAX(date_event) FROM event WHERE league_id = ?",
+                        (league_id_int,),
+                    )
+                    row = test_cursor.fetchone()
+                    if row:
+                        sqlite_min_date_event, sqlite_max_date_event = row[0], row[1]
+
                 # Check upcoming matches for this league
                 test_cursor.execute("""
                     SELECT COUNT(*) FROM event 
                     WHERE league_id = ? 
-                    AND date_event >= date('now') 
-                    AND date_event <= date('now', '+7 days')
+                    AND date(date_event) >= date('now') 
+                    AND date(date_event) <= date('now', '+7 days')
                     AND home_team_id IS NOT NULL 
                     AND away_team_id IS NOT NULL
-                """, (league_id,))
-                upcoming_count = test_cursor.fetchone()[0]
-                logger.info(f"  Direct DB query: {upcoming_count} upcoming matches for league {league_id}")
+                """, (league_id_int if league_id_int is not None else league_id,))
+                sqlite_upcoming_7d = int(test_cursor.fetchone()[0] or 0)
+                logger.info(f"  Direct DB query: {sqlite_upcoming_7d} upcoming matches (7d) for league {league_id}")
                 
                 # Check recent matches
                 test_cursor.execute("""
                     SELECT COUNT(*) FROM event 
                     WHERE league_id = ? 
-                    AND date_event >= date('now', '-7 days')
-                    AND date_event < date('now')
+                    AND date(date_event) >= date('now', '-30 days')
+                    AND date(date_event) < date('now')
                     AND home_score IS NOT NULL 
                     AND away_score IS NOT NULL
                     AND home_team_id IS NOT NULL 
                     AND away_team_id IS NOT NULL
-                """, (league_id,))
-                recent_count = test_cursor.fetchone()[0]
-                logger.info(f"  Direct DB query: {recent_count} recent matches for league {league_id}")
+                """, (league_id_int if league_id_int is not None else league_id,))
+                sqlite_recent_30d = int(test_cursor.fetchone()[0] or 0)
+                logger.info(f"  Direct DB query: {sqlite_recent_30d} recent matches (30d) for league {league_id}")
                 
                 test_conn.close()
             except Exception as db_test_error:
                 logger.warning(f"  Database test query failed: {db_test_error}")
             
-            news_items = news_service.get_news_feed(
-                user_id=user_id,
-                followed_teams=followed_teams,
-                followed_leagues=followed_leagues,
-                league_id=league_id,  # NEW: Filter by specific league
-                limit=limit
-            )
-            logger.info(f"get_news_feed returned {len(news_items)} items")
-            
-            if len(news_items) == 0:
-                logger.warning("="*80)
-                logger.warning(f"⚠️⚠️⚠️ NO NEWS ITEMS RETURNED FOR LEAGUE {league_id}! ⚠️⚠️⚠️")
-                logger.warning("="*80)
-                logger.warning(f"  This might indicate:")
-                logger.warning(f"  1. No upcoming matches in the next 7 days for this league")
-                logger.warning(f"  2. Date filtering issue (check date('now') vs actual dates)")
-                logger.warning(f"  3. Database doesn't have matches for this league")
-                logger.warning(f"  4. News service queries are failing silently")
-                logger.warning("="*80)
-            
-            # Convert to dict format
-            logger.info(f"Converting {len(news_items)} news items to dict format...")
-            news_data = []
-            for i, item in enumerate(news_items):
-                try:
-                    item_dict = item.to_dict()
-                    news_data.append(item_dict)
-                    if i < 3:  # Log first 3 items
-                        logger.info(f"  Item {i+1}: type={item_dict.get('type')}, league_id={item_dict.get('league_id')}, title={item_dict.get('title', '')[:50]}")
-                except Exception as convert_error:
-                    logger.error(f"  Error converting item {i+1} to dict: {convert_error}")
-            
-            logger.info(f"✅ Converted {len(news_data)} items to dict format")
-            
-            # Log first few items for debugging
-            if len(news_data) > 0:
-                logger.info(f"📰 Sample news items (first 3):")
-                for i, item in enumerate(news_data[:3], 1):
-                    logger.info(f"  {i}. [{item.get('type')}] {item.get('title', '')[:50]}... (league_id: {item.get('league_id')})")
+            # If SQLite DB is present but has no usable data for this league, fall back to Firestore
+            # (this commonly happens when the bundled SQLite doesn't include a league, or date parsing fails).
+            if league_id_int is not None:
+                if sqlite_league_total == 0:
+                    used_firestore_fallback = True
+                    firestore_fallback_reason = "sqlite_no_matches_for_league"
+                elif (sqlite_upcoming_7d == 0) and (sqlite_recent_30d == 0):
+                    used_firestore_fallback = True
+                    firestore_fallback_reason = "sqlite_no_upcoming_or_recent_for_league_or_date_parse_issue"
+
+            if used_firestore_fallback:
+                fs = _build_firestore_news_feed(
+                    league_id=league_id_int,
+                    limit=int(limit) if limit is not None else 50,
+                )
+                news_data = fs.get("news", []) or []
+                news_items = []  # for downstream debug calculations
+                logger.warning(
+                    f"Using Firestore fallback for news (league_id={league_id_int}, reason={firestore_fallback_reason}). "
+                    f"Returned {len(news_data)} items."
+                )
             else:
-                logger.warning("📰 No news items to display!")
+                news_items = news_service.get_news_feed(
+                    user_id=user_id,
+                    followed_teams=followed_teams,
+                    followed_leagues=followed_leagues,
+                    league_id=league_id,  # NEW: Filter by specific league
+                    limit=limit
+                )
+                logger.info(f"get_news_feed returned {len(news_items)} items")
+                
+                if len(news_items) == 0:
+                    logger.warning("="*80)
+                    logger.warning(f"⚠️⚠️⚠️ NO NEWS ITEMS RETURNED FOR LEAGUE {league_id}! ⚠️⚠️⚠️")
+                    logger.warning("="*80)
+                    logger.warning(f"  This might indicate:")
+                    logger.warning(f"  1. No upcoming matches in the next 7 days for this league")
+                    logger.warning(f"  2. Date filtering issue (check date('now') vs actual dates)")
+                    logger.warning(f"  3. Database doesn't have matches for this league")
+                    logger.warning(f"  4. News service queries are failing silently")
+                    logger.warning("="*80)
+                
+                # Convert to dict format
+                logger.info(f"Converting {len(news_items)} news items to dict format...")
+                news_data = []
+                for i, item in enumerate(news_items):
+                    try:
+                        item_dict = item.to_dict()
+                        news_data.append(item_dict)
+                        if i < 3:  # Log first 3 items
+                            logger.info(f"  Item {i+1}: type={item_dict.get('type')}, league_id={item_dict.get('league_id')}, title={item_dict.get('title', '')[:50]}")
+                    except Exception as convert_error:
+                        logger.error(f"  Error converting item {i+1} to dict: {convert_error}")
+                
+                logger.info(f"✅ Converted {len(news_data)} items to dict format")
+                
+                # Log first few items for debugging
+                if len(news_data) > 0:
+                    logger.info(f"📰 Sample news items (first 3):")
+                    for i, item in enumerate(news_data[:3], 1):
+                        logger.info(f"  {i}. [{item.get('type')}] {item.get('title', '')[:50]}... (league_id: {item.get('league_id')})")
+                else:
+                    logger.warning("📰 No news items to display!")
         except Exception as feed_error:
             logger.error(f"Error getting news feed: {feed_error}")
             import traceback
@@ -2846,12 +3382,20 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
             'debug': {
                 'db_path': db_path,
                 'db_exists': os.path.exists(db_path) if db_path else False,
+                'sqlite_has_event_table': _sqlite_has_table(db_path, "event") if db_path else False,
+                'data_source': 'firestore' if 'used_firestore_fallback' in locals() and used_firestore_fallback else 'sqlite',
                 'league_id': league_id,
                 'predictor_available': predictor is not None,
                 'request_league_id': league_id,
                 'request_limit': limit,
                 'news_items_count': len(news_data),
-                'news_service_returned': news_service_count
+                'news_service_returned': news_service_count,
+                'sqlite_league_total': sqlite_league_total if 'sqlite_league_total' in locals() else None,
+                'sqlite_upcoming_7d': sqlite_upcoming_7d if 'sqlite_upcoming_7d' in locals() else None,
+                'sqlite_recent_30d': sqlite_recent_30d if 'sqlite_recent_30d' in locals() else None,
+                'sqlite_min_date_event': sqlite_min_date_event if 'sqlite_min_date_event' in locals() else None,
+                'sqlite_max_date_event': sqlite_max_date_event if 'sqlite_max_date_event' in locals() else None,
+                'firestore_fallback_reason': firestore_fallback_reason if 'firestore_fallback_reason' in locals() else None,
             }
         }
         
@@ -2951,7 +3495,30 @@ def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
                 logger.warning(f"⚠️ Database not found in any expected location, using default: {db_path}")
         
         logger.info(f"Final database path: {db_path}, exists: {os.path.exists(db_path) if db_path else False}")
+
+        sqlite_ok = bool(db_path) and os.path.exists(db_path) and _sqlite_has_table(db_path, "event")
+        if not sqlite_ok:
+            response_data = {
+                'success': True,
+                'topics': [],
+                'count': 0,
+                'debug': {
+                    'data_source': 'firestore',
+                    'db_path': db_path,
+                    'db_exists': os.path.exists(db_path) if db_path else False,
+                    'sqlite_has_event_table': False,
+                    'league_id': league_id,
+                },
+                'warning': 'SQLite not available; trending topics unavailable (Firestore fallback active).'
+            }
+            headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json",
+            }
+            return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
         
+        os.environ["DB_PATH"] = db_path
+
         predictor = None
         try:
             if db_path and os.path.exists(db_path):
@@ -2961,7 +3528,7 @@ def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
             predictor = None
         
         try:
-            news_service = get_news_service(predictor=predictor)
+            news_service = get_news_service(predictor=predictor, db_path=db_path)
         except Exception as ns_error:
             logger.error(f"Could not initialize news service: {ns_error}")
             # Return empty topics instead of failing
@@ -2993,8 +3560,10 @@ def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
             'topics': topics,
             'count': len(topics),
             'debug': {
+                'data_source': 'sqlite',
                 'db_path': db_path,
                 'db_exists': os.path.exists(db_path) if db_path else False,
+                'sqlite_has_event_table': _sqlite_has_table(db_path, "event") if db_path else False,
                 'league_id': league_id
             }
         }
@@ -3034,7 +3603,7 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
     """
     import logging
     import json
-    from datetime import datetime
+    from datetime import datetime, timedelta
     logger = logging.getLogger(__name__)
     
     logger.info("="*80)
@@ -3061,7 +3630,24 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
         logger.info(f"Request data: {json.dumps(data, indent=2)}")
         
         highlightly_league_id = data.get('league_id')
+        sportsdb_league_id = data.get('sportsdb_league_id')
+        client_league_name = data.get('league_name')
+        license_key = data.get('license_key')
+        force_refresh = bool(data.get('force_refresh', False))
+        cache_ttl_seconds_raw = data.get('cache_ttl_seconds')
         logger.info(f"Extracted league_id: {highlightly_league_id} (type: {type(highlightly_league_id)})")
+        logger.info(f"Optional sportsdb_league_id: {sportsdb_league_id} (type: {type(sportsdb_league_id)})")
+        if client_league_name:
+            logger.info(f"Optional league_name: {client_league_name}")
+        if license_key:
+            logger.info("Optional license_key provided (used for client caching).")
+
+        # Standings cache TTL (server-side). Clamp to keep Firestore load reasonable.
+        try:
+            cache_ttl_seconds = int(cache_ttl_seconds_raw) if cache_ttl_seconds_raw is not None else 21600  # 6h
+        except Exception:
+            cache_ttl_seconds = 21600
+        cache_ttl_seconds = max(900, min(cache_ttl_seconds, 86400))  # 15 min .. 24h
         
         if not highlightly_league_id:
             logger.error("❌ Missing league_id in request")
@@ -3114,19 +3700,115 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
             }
             return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
         
-        # Try current year only (2025)
-        current_year = datetime.now().year
-        logger.info(f"📅 Current year: {current_year}")
-        logger.info(f"🔍 Will try season: {current_year} only")
+        # Season handling:
+        # Many rugby competitions span two calendar years (e.g. 2025/26) but the API expects
+        # the *start year* (e.g. 2025). If we only try the current calendar year we will 404
+        # for URC / Premiership / Top14 etc early in the year.
+        requested_season = data.get("season")
+        now_utc = datetime.utcnow()
+        current_year = now_utc.year
+        current_month = now_utc.month
+
+        # Highlightly league IDs that typically span Aug/Sept -> May/Jun and are keyed by start-year.
+        CROSS_YEAR_STANDINGS_LEAGUES = {
+            65460,  # United Rugby Championship
+            11847,  # English Premiership Rugby
+            14400,  # French Top 14
+        }
+
+        # Rugby World Cup (59503) is held every 4 years - 2023, 2019, 2015, 2011, etc.
+        RUGBY_WORLD_CUP_LEAGUE_ID = 59503
+
+        def _dedupe_keep_order(items):
+            seen = set()
+            out = []
+            for x in items:
+                if x in seen:
+                    continue
+                seen.add(x)
+                out.append(x)
+            return out
+
+        def _candidate_standings_seasons(league_id: int) -> list:
+            # If the caller explicitly requests a season, honor it first.
+            if requested_season is not None:
+                try:
+                    return [int(requested_season)]
+                except (TypeError, ValueError):
+                    logger.warning(f"Invalid requested season {requested_season}; falling back to auto season detection")
+
+            # Rugby World Cup: held every 4 years. Try recent tournament years first.
+            if league_id == RUGBY_WORLD_CUP_LEAGUE_ID:
+                return [2023, 2019, 2015, 2011, 2007]
+
+            # Cross-year leagues (URC, Premiership, Top 14): Jan-Jun belong to previous season start-year.
+            if league_id in CROSS_YEAR_STANDINGS_LEAGUES:
+                primary = current_year - 1 if current_month <= 6 else current_year
+                return _dedupe_keep_order([primary, primary - 1, primary + 1, current_year, current_year - 1])
+
+            # Default for most comps: try current year first, then nearby.
+            return _dedupe_keep_order([current_year, current_year - 1, current_year + 1, current_year - 2])
+
+        # Compute seasons to try (ordered)
+        try:
+            league_id_int = int(highlightly_league_id)
+        except Exception:
+            league_id_int = highlightly_league_id
+
+        seasons_to_try = _candidate_standings_seasons(league_id_int) if isinstance(league_id_int, int) else [current_year, current_year - 1]
+        logger.info(f"📅 Now (UTC): {now_utc.isoformat()} | year={current_year}, month={current_month}")
+        logger.info(f"🔍 Will try seasons (in order): {seasons_to_try}")
         
         standings = None
         successful_season = None
         last_error = None
+        cache_hit = False
+        stale_cache_payload = None  # last known cached payload (even if expired)
+
+        # Firestore cache for standings (prevents Highlightly rate-limits)
+        fs_cache = None
+        cache_collection = None
+        try:
+            fs_cache = get_firestore_client()
+            cache_collection = fs_cache.collection("standings_cache_v1")
+        except Exception as cache_init_err:
+            logger.warning(f"Standings cache init failed (continuing without cache): {cache_init_err}")
+            fs_cache = None
+            cache_collection = None
         
-        # Only try current year (2025)
-        for year in [current_year]:
+        for year in seasons_to_try:
             logger.info(f"\n--- Trying season {year} ---")
             try:
+                # Cache check BEFORE hitting Highlightly API.
+                if cache_collection is not None and not force_refresh and isinstance(league_id_int, int):
+                    try:
+                        cache_doc_id = f"hl::{int(highlightly_league_id)}::season::{int(year)}"
+                        cache_ref = cache_collection.document(cache_doc_id)
+                        cached = cache_ref.get()
+                        cached_data = cached.to_dict() if getattr(cached, "exists", False) else None
+                        if isinstance(cached_data, dict) and isinstance(cached_data.get("standings"), dict):
+                            expires_at = cached_data.get("expires_at")
+                            is_fresh = False
+                            try:
+                                if isinstance(expires_at, str):
+                                    exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                                    is_fresh = datetime.utcnow() <= exp_dt.replace(tzinfo=None)
+                            except Exception:
+                                is_fresh = False
+
+                            if is_fresh:
+                                standings = cached_data.get("standings")
+                                successful_season = int(year)
+                                cache_hit = True
+                                logger.info(f"✅ Standings cache HIT for league={highlightly_league_id}, season={year}")
+                                break
+                            else:
+                                # Keep last stale cache as fallback if we get rate-limited.
+                                stale_cache_payload = cached_data.get("standings") or stale_cache_payload
+                                logger.info(f"🕰️ Standings cache STALE for league={highlightly_league_id}, season={year} (will revalidate)")
+                    except Exception as cache_read_err:
+                        logger.warning(f"Standings cache read failed (continuing): {cache_read_err}")
+
                 logger.info(f"Calling client.get_standings(league_id={highlightly_league_id}, season={year})...")
                 standings = client.get_standings(league_id=highlightly_league_id, season=year)
                 logger.info(f"✅ API call completed for season {year}")
@@ -3252,19 +3934,260 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                         teams_count = len(group.get('standings', [])) + len(group.get('teams', []))
                         total_teams += teams_count
                 logger.info(f"   Total teams: {total_teams}")
+
+                # Enrich standings with team logos (luxury UI) using TheSportsDB:
+                # Frontend passes `sportsdb_league_id` (TheSportsDB league id like 4446 for URC).
+                # We fetch all teams once and map badges to the standings teams by name.
+                try:
+                    sportsdb_id_int = int(sportsdb_league_id) if sportsdb_league_id is not None else None
+                except Exception:
+                    sportsdb_id_int = None
+
+                if sportsdb_id_int:
+                    try:
+                        import re
+                        from prediction.config import load_config
+                        from prediction.sportsdb_client import TheSportsDBClient
+
+                        def _norm_team_name(s: str) -> str:
+                            s2 = (s or "").strip().lower()
+                            s2 = re.sub(r"[^a-z0-9]+", " ", s2)
+                            s2 = re.sub(r"\s+", " ", s2).strip()
+                            return s2
+
+                        def _name_variants(name: str) -> list:
+                            """Generate variants for fuzzy matching (e.g. 'Glasgow Warriors RFC' -> ['glasgow warriors rfc','glasgow warriors','glasgow'])."""
+                            n = _norm_team_name(name)
+                            if not n:
+                                return []
+                            out = [n]
+                            for suffix in (" rugby", " rfc", " rugby club", " rugby union"):
+                                if n.endswith(suffix):
+                                    shortened = n[: -len(suffix)].strip()
+                                    if shortened:
+                                        out.append(shortened)
+                            words = n.split()
+                            if len(words) > 1:
+                                out.append(words[0])
+                            if len(words) >= 2:
+                                out.append(" ".join(words[:2]))
+                            return list(dict.fromkeys(out))
+
+                        def _find_logo(standings_name: str, logos_by_norm: dict) -> Optional[str]:
+                            """Try exact, overrides, then fuzzy match to resolve logo."""
+                            from prediction.config import STANDINGS_TEAM_OVERRIDES
+                            sn = _norm_team_name(standings_name)
+                            if not sn:
+                                return None
+                            variants = _name_variants(standings_name)
+                            for v in variants:
+                                if v in logos_by_norm:
+                                    return logos_by_norm[v]
+                            overrides = STANDINGS_TEAM_OVERRIDES.get(sn) or []
+                            for alt in overrides:
+                                if alt in logos_by_norm:
+                                    return logos_by_norm[alt]
+                                for v in _name_variants(alt):
+                                    if v in logos_by_norm:
+                                        return logos_by_norm[v]
+                            if len(sn) < 3:
+                                return None
+                            best_url = None
+                            best_len = 0
+                            for key, url in logos_by_norm.items():
+                                if len(key) < 3:
+                                    continue
+                                if sn == key or sn in key or key in sn:
+                                    ln = min(len(sn), len(key))
+                                    if ln > best_len:
+                                        best_len = ln
+                                        best_url = url
+                            return best_url
+
+                        # Cache in Firestore to avoid calling TheSportsDB on every request
+                        logos_by_norm: Dict[str, str] = {}
+                        cache_used = False
+                        try:
+                            fs = get_firestore_client()
+                            cache_doc_id = f"league::{sportsdb_id_int}::v3"
+                            cache_ref = fs.collection("team_logo_cache").document(cache_doc_id)
+                            cached = cache_ref.get()
+                            cached_data = cached.to_dict() if getattr(cached, "exists", False) else None
+                            if isinstance(cached_data, dict):
+                                cached_logos = cached_data.get("logos_by_norm")
+                                fetched_at = cached_data.get("fetched_at")
+                                # TTL: 7 days
+                                is_fresh = False
+                                try:
+                                    if isinstance(fetched_at, str):
+                                        fetched_dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+                                        is_fresh = (datetime.utcnow() - fetched_dt).days < 7
+                                except Exception:
+                                    is_fresh = False
+                                if isinstance(cached_logos, dict) and cached_logos and is_fresh:
+                                    logos_by_norm = {str(k): str(v) for k, v in cached_logos.items() if k and v}
+                                    cache_used = True
+                                    logger.info(f"✅ Using cached team logos for sportsdb_league_id={sportsdb_id_int} ({len(logos_by_norm)} logos)")
+                        except Exception as cache_err:
+                            logger.warning(f"Team logo cache read failed (continuing without cache): {cache_err}")
+                            fs = None
+                            cache_ref = None
+
+                        if not logos_by_norm:
+                            cfg = load_config()
+                            sportsdb = TheSportsDBClient(
+                                base_url=cfg.base_url,
+                                api_key=cfg.api_key,
+                                rate_limit_rpm=cfg.rate_limit_rpm,
+                            )
+                            teams_api = sportsdb.get_teams(sportsdb_id_int) or []
+                            if not teams_api and client_league_name:
+                                found = sportsdb.find_rugby_league(client_league_name)
+                                if found:
+                                    tsdb_id = found.get("idLeague")
+                                    if tsdb_id:
+                                        teams_api = sportsdb.get_teams(tsdb_id) or []
+                                        logger.info(f"Resolved TheSportsDB league via find_rugby_league: id={tsdb_id}")
+                            for t in teams_api:
+                                try:
+                                    name = t.get("strTeam") or ""
+                                    alt = t.get("strAlternate") or ""
+                                    badge = t.get("strTeamBadge") or t.get("strTeamLogo") or t.get("strTeamJersey") or ""
+                                    if not badge:
+                                        continue
+                                    for v in _name_variants(name) if name else []:
+                                        logos_by_norm[v] = badge
+                                    if alt:
+                                        for part in str(alt).split(","):
+                                            part = part.strip()
+                                            if part:
+                                                for v in _name_variants(part):
+                                                    logos_by_norm[v] = badge
+                                except Exception:
+                                    continue
+                            logger.info(f"Fetched {len(teams_api)} teams from TheSportsDB for league {sportsdb_id_int}; mapped logos={len(logos_by_norm)}")
+
+                            # Write cache
+                            try:
+                                if cache_ref is not None:
+                                    cache_ref.set(
+                                        {
+                                            "sportsdb_league_id": sportsdb_id_int,
+                                            "league_name": client_league_name,
+                                            "logos_by_norm": logos_by_norm,
+                                            "fetched_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                                            "source": "thesportsdb_lookup_all_teams",
+                                        },
+                                        merge=True,
+                                    )
+                            except Exception as cache_write_err:
+                                logger.warning(f"Team logo cache write failed: {cache_write_err}")
+
+                        # Merge logos into standings structure (mutate in-place)
+                        if logos_by_norm:
+                            applied = 0
+                            missed_names = []
+                            for g in groups:
+                                if not isinstance(g, dict):
+                                    continue
+                                for list_key in ("standings", "teams"):
+                                    rows = g.get(list_key)
+                                    if not isinstance(rows, list):
+                                        continue
+                                    for row in rows:
+                                        if not isinstance(row, dict):
+                                            continue
+                                        team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
+                                        name = None
+                                        if team_obj:
+                                            name = team_obj.get("name") or team_obj.get("team_name") or team_obj.get("strTeam")
+                                        if not name:
+                                            name = row.get("name") or row.get("team_name") or row.get("strTeam")
+                                        if not name:
+                                            continue
+                                        logo = _find_logo(str(name), logos_by_norm)
+                                        if not logo and not cache_used:
+                                            missed_names.append(str(name))
+                                        if logo:
+                                            if team_obj is not None:
+                                                team_obj.setdefault("logo", logo)
+                                                team_obj.setdefault("badge", logo)
+                                            row.setdefault("logo", logo)
+                                            applied += 1
+                            if missed_names and not cache_used:
+                                cfg = load_config()
+                                sportsdb = TheSportsDBClient(base_url=cfg.base_url, api_key=cfg.api_key, rate_limit_rpm=cfg.rate_limit_rpm)
+                                for nm in missed_names[:8]:
+                                    try:
+                                        searched = sportsdb.search_teams(nm)
+                                        for t in searched[:3]:
+                                            badge = t.get("strTeamBadge") or t.get("strTeamLogo") or ""
+                                            if not badge:
+                                                continue
+                                            ts_name = t.get("strTeam") or ""
+                                            if _norm_team_name(nm) in _norm_team_name(ts_name) or _norm_team_name(ts_name) in _norm_team_name(nm):
+                                                for g in groups:
+                                                    if not isinstance(g, dict):
+                                                        continue
+                                                    for rows in (g.get("standings") or [], g.get("teams") or []):
+                                                        for row in rows:
+                                                            if not isinstance(row, dict):
+                                                                continue
+                                                            team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
+                                                            rn = (team_obj or {}).get("name") or (team_obj or {}).get("team_name") or row.get("name") or row.get("team_name") or ""
+                                                            if rn and _norm_team_name(rn) == _norm_team_name(nm):
+                                                                if team_obj is not None:
+                                                                    team_obj.setdefault("logo", badge)
+                                                                    team_obj.setdefault("badge", badge)
+                                                                row.setdefault("logo", badge)
+                                                                applied += 1
+                                                                break
+                                                break
+                                    except Exception:
+                                        continue
+                            logger.info(f"✅ Applied {applied} team logos into standings payload (cache_used={cache_used})")
+                        else:
+                            logger.warning(f"No logos mapped for sportsdb_league_id={sportsdb_id_int}; standings will render initials")
+
+                    except Exception as logo_err:
+                        logger.warning(f"Standings logo enrichment failed (continuing without logos): {logo_err}")
+
+                # Write standings cache (after enrichment) so future requests skip Highlightly.
+                if cache_collection is not None and not cache_hit and not force_refresh and isinstance(successful_season, int):
+                    try:
+                        cache_doc_id = f"hl::{int(highlightly_league_id)}::season::{int(successful_season)}"
+                        cache_ref = cache_collection.document(cache_doc_id)
+                        expires_dt = datetime.utcnow().replace(microsecond=0) + timedelta(seconds=cache_ttl_seconds)
+                        cache_ref.set(
+                            {
+                                "highlightly_league_id": int(highlightly_league_id),
+                                "sportsdb_league_id": int(sportsdb_league_id) if str(sportsdb_league_id).isdigit() else sportsdb_league_id,
+                                "league_name": client_league_name,
+                                "season": int(successful_season),
+                                "standings": standings,
+                                "fetched_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                                "expires_at": expires_dt.isoformat() + "Z",
+                                "source": "highlightly",
+                            },
+                            merge=True,
+                        )
+                        logger.info(f"✅ Wrote standings cache doc {cache_doc_id} (ttl={cache_ttl_seconds}s)")
+                    except Exception as cache_write_err:
+                        logger.warning(f"Standings cache write failed: {cache_write_err}")
             
             response_data = {
                 'success': True,
                 'standings': standings,
                 'season': successful_season,
-                'league_id': highlightly_league_id
+                'league_id': highlightly_league_id,
+                'cache_hit': cache_hit,
             }
             logger.info(f"✅ Returning success response (status 200)")
             return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
         else:
             logger.warning(f"⚠️ NO STANDINGS FOUND")
             logger.warning(f"   League ID: {highlightly_league_id}")
-            logger.warning(f"   Tried season: {current_year}")
+            logger.warning(f"   Tried seasons: {seasons_to_try}")
             
             # Check if rate limited
             error_msg = None
@@ -3277,8 +4200,26 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
             if is_rate_limited:
                 error_msg = f'API rate limit exceeded. Please try again in a few minutes. (League ID: {highlightly_league_id})'
                 logger.error(f"   ❌ RATE LIMITED - API quota exceeded")
+                # If we have stale cache, return it rather than erroring.
+                if isinstance(stale_cache_payload, dict):
+                    logger.warning("Returning STALE cached standings due to rate limit.")
+                    response_data = {
+                        'success': True,
+                        'standings': stale_cache_payload,
+                        'season': None,
+                        'league_id': highlightly_league_id,
+                        'cache_hit': True,
+                        'cache_stale': True,
+                        'warning': error_msg,
+                    }
+                    return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
+            elif highlightly_league_id == RUGBY_WORLD_CUP_LEAGUE_ID:
+                error_msg = (
+                    'Rugby World Cup is a tournament held every 4 years (e.g. 2023, 2019, 2015). '
+                    'Standings data may not be available for this competition from the current data source.'
+                )
             else:
-                error_msg = f'No standings data available for league {highlightly_league_id} (tried season {current_year})'
+                error_msg = f'No standings data available for league {highlightly_league_id} (tried seasons {seasons_to_try})'
                 if last_error:
                     logger.warning(f"   Last error: {last_error}")
                     error_msg += f'. Last error: {str(last_error)}'
@@ -3289,7 +4230,7 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                 'standings': None,
                 'rate_limited': is_rate_limited,
                 'debug': {
-                    'tried_seasons': [current_year],
+                    'tried_seasons': seasons_to_try,
                     'last_error': str(last_error) if last_error else None,
                     'league_id': highlightly_league_id
                 }
@@ -3425,18 +4366,16 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         conn = connect(db_path)
         cursor = conn.cursor()
         
-        # If year is not provided, pick the most recent year that has completed matches
-        # (and return all available years so the UI can switch years without loading everything at once).
+        # If year is not provided, pick a sensible default year and return all available years
+        # so the UI can switch years without loading everything at once.
         available_years = []
         selected_year = None
+        year_summary = {}
         try:
             year_query = """
             SELECT DISTINCT substr(e.date_event, 1, 4) AS yr
             FROM event e
-            WHERE e.home_score IS NOT NULL
-              AND e.away_score IS NOT NULL
-              AND e.date_event IS NOT NULL
-              AND e.date_event <= date('now')
+            WHERE e.date_event IS NOT NULL
             """
             year_params = []
             if league_id:
@@ -3449,8 +4388,51 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             logger.warning(f"Could not compute available years: {e}")
             available_years = []
 
+        # Build a lightweight year summary (total matches vs completed matches).
+        # This helps the UI explain why a year exists (scheduled games) but has 0 completed.
+        try:
+            sum_sql = """
+                SELECT
+                    substr(e.date_event, 1, 4) AS yr,
+                    COUNT(1) AS total,
+                    SUM(CASE WHEN e.home_score IS NOT NULL AND e.away_score IS NOT NULL AND date(e.date_event) <= date('now') THEN 1 ELSE 0 END) AS completed
+                FROM event e
+                WHERE e.date_event IS NOT NULL
+            """
+            sum_params = []
+            if league_id:
+                sum_sql += " AND e.league_id = ?"
+                sum_params.append(league_id)
+            sum_sql += " GROUP BY yr ORDER BY yr DESC"
+            cursor.execute(sum_sql, sum_params)
+            for r in cursor.fetchall() or []:
+                try:
+                    yr = r[0]
+                    if not yr:
+                        continue
+                    year_summary[str(yr)] = {
+                        "total": int(r[1] or 0),
+                        "completed": int(r[2] or 0),
+                    }
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"Could not compute year summary: {e}")
+            year_summary = {}
+
+        # Prefer current calendar year when available (but keep Rugby World Cup on tournament years).
+        now_utc = datetime.utcnow()
+        current_year = str(now_utc.year)
         if year is None:
-            selected_year = available_years[0] if available_years else None
+            if str(league_id) == "4574":
+                for y in ["2023", "2019", "2015", "2011", "2007"]:
+                    if y in available_years:
+                        selected_year = y
+                        break
+                if selected_year is None:
+                    selected_year = available_years[0] if available_years else None
+            else:
+                selected_year = current_year if current_year in available_years else (available_years[0] if available_years else None)
         else:
             selected_year = str(year)
 
@@ -3461,6 +4443,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             e.league_id,
             l.name as league_name,
             e.date_event,
+            e.timestamp,
             e.home_team_id,
             e.away_team_id,
             e.home_score,
@@ -3478,7 +4461,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         WHERE e.home_score IS NOT NULL 
         AND e.away_score IS NOT NULL
         AND e.date_event IS NOT NULL
-        AND e.date_event <= date('now')
+        AND date(e.date_event) <= date('now')
         """
         
         params = []
@@ -3487,10 +4470,16 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             params.append(league_id)
 
         if selected_year:
-            query += " AND substr(e.date_event, 1, 4) = ?"
-            params.append(selected_year)
+            try:
+                yr = int(str(selected_year).strip()[:4])
+                prev_yr = str(yr - 1)
+                query += " AND (substr(e.date_event, 1, 4) = ? OR substr(e.date_event, 1, 4) = ?)"
+                params.extend([str(yr), prev_yr])
+            except (ValueError, TypeError):
+                query += " AND substr(e.date_event, 1, 4) = ?"
+                params.append(str(selected_year))
         
-        query += " ORDER BY e.date_event DESC, e.league_id"
+        query += " ORDER BY e.date_event ASC, e.league_id"
         
         if limit:
             query += " LIMIT ?"
@@ -3499,7 +4488,37 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         cursor.execute(query, params)
         results = cursor.fetchall()
         
-        # Organize matches by year-week
+        # Compute league round for matches missing round (season-based: Week 1 = first week of season)
+        def _compute_league_rounds(rows):
+            """Group matches into rounds by matchday (within 10 days = same round). Week 1 = first week of season."""
+            from datetime import datetime
+            round_assignments = {}
+            prev_date = None
+            current_round = 0
+            day_threshold = 4
+            season_gap_days = 90
+            for r in rows:
+                mid, _, _, date_event = r[0], r[1], r[2], r[3]
+                if not date_event:
+                    continue
+                try:
+                    dt = datetime.strptime(date_event[:10], '%Y-%m-%d')
+                except Exception:
+                    continue
+                key = (mid, date_event[:10] if date_event else '')
+                if prev_date is None:
+                    current_round = 1
+                elif (dt - prev_date).days > season_gap_days:
+                    current_round = 1
+                elif (dt - prev_date).days > day_threshold:
+                    current_round += 1
+                round_assignments[key] = current_round
+                prev_date = dt
+            return round_assignments
+        
+        league_rounds = _compute_league_rounds(results) if results else {}
+        
+        # Organize matches by year and round (not ISO week)
         matches_by_year_week = defaultdict(lambda: defaultdict(list))
         all_matches = []
         
@@ -3510,7 +4529,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         logger.info(f"Processing {len(results)} completed matches...")
         
         for row in results:
-            match_id, league_id_val, league_name, date_event, home_team_id, away_team_id, \
+            match_id, league_id_val, league_name, date_event, kickoff_ts, home_team_id, away_team_id, \
             home_score, away_score, home_team_name, away_team_name, season, round_num, \
             venue, status = row
             
@@ -3550,36 +4569,63 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                     prediction_confidence = pred.get('confidence', 0.5)
                     predicted_winner = pred.get('predicted_winner', 'Unknown')
                     
-                    # Check if prediction was correct
-                    if predicted_winner == actual_winner:
-                        correct_predictions += 1
-                    total_predictions += 1
-                    
-                    # Calculate score prediction error
                     home_error = abs(predicted_home_score - home_score)
                     away_error = abs(predicted_away_score - away_score)
                     prediction_error = home_error + away_error
-                    score_errors.append(prediction_error)
+                    if not selected_year or date_event[:4] == selected_year:
+                        if predicted_winner == actual_winner:
+                            correct_predictions += 1
+                        total_predictions += 1
+                        score_errors.append(prediction_error)
                     
                 except Exception as e:
                     logger.warning(f"Could not generate prediction for {home_team_name} vs {away_team_name} on {date_event}: {e}")
                     predicted_winner = 'Error'
             
-            # Get year-week key
-            year_week_key = get_year_week_key(date_event)
             year = date_event[:4] if date_event else "Unknown"
+            # Prefer API round when valid (1-30); else use computed league round
+            key = (match_id, date_event[:10] if date_event else '')
+            try:
+                api_r = int(str(round_num or '').strip()) if round_num is not None else None
+                use_api = api_r is not None and 1 <= api_r <= 30
+            except (ValueError, TypeError):
+                use_api = False
+            effective_round = round_num if use_api else league_rounds.get(key)
+            if effective_round is None:
+                effective_round = league_rounds.get(key)
+            # Group key: round-based (e.g. "1", "2") for display
+            round_key = str(effective_round) if effective_round is not None else get_year_week_key(date_event)
+            year_week_key = round_key
             week = get_week_number(date_event)
+
+            # Prefer full timestamp (kickoff) when available. If we only have midnight UTC,
+            # treat as unknown kickoff time to avoid showing a fixed local time (e.g. 02:00).
+            def _has_meaningful_time(v: Any) -> bool:
+                try:
+                    s = str(v or "")
+                except Exception:
+                    return False
+                if "T" not in s:
+                    return False
+                # matches "...T00:00..." (with optional seconds/ms and timezone)
+                return ("T00:00" not in s)
+
+            kickoff_at = kickoff_ts if (kickoff_ts and _has_meaningful_time(kickoff_ts)) else None
+            status_norm = str(status or "").upper()
+            went_to_extra_time = ("AET" in status_norm) or ("EXTRA" in status_norm) or ("ET" in status_norm and "SET" not in status_norm)
             
             match_data = {
                 'match_id': match_id,
                 'league_id': league_id_val,
                 'league_name': league_name or f"League {league_id_val}",
                 'date': date_event,
+                'kickoff_at': kickoff_at,
+                'went_to_extra_time': went_to_extra_time,
                 'year': year,
                 'week': week,
                 'year_week': year_week_key,
                 'season': season,
-                'round': round_num,
+                'round': effective_round,
                 'venue': venue,
                 'status': status,
                 'home_team': home_team_name,
@@ -3601,7 +4647,8 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             }
             
             matches_by_year_week[year][year_week_key].append(match_data)
-            all_matches.append(match_data)
+            if not selected_year or year == selected_year:
+                all_matches.append(match_data)
         
         conn.close()
         
@@ -3613,6 +4660,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         result = {
             'available_years': available_years,
             'selected_year': selected_year,
+            'year_summary': year_summary,
             'matches_by_year_week': {
                 year: {
                     week_key: matches
@@ -3763,31 +4811,107 @@ def get_historical_backtest_http(req: https_fn.Request) -> https_fn.Response:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Determine available years and selected year (completed matches only)
+        # Determine available years (include scheduled games too) and selected year.
         year_sql = """
             SELECT DISTINCT substr(e.date_event, 1, 4) AS yr
             FROM event e
-            WHERE e.home_score IS NOT NULL
-              AND e.away_score IS NOT NULL
-              AND e.date_event IS NOT NULL
-              AND e.date_event <= date('now')
+            WHERE e.date_event IS NOT NULL
               AND e.league_id = ?
             ORDER BY yr DESC
         """
         cur.execute(year_sql, (league_id,))
         available_years = [r["yr"] for r in cur.fetchall() if r and r["yr"]]
 
-        selected_year = str(year) if year is not None else (available_years[0] if available_years else None)
+        # Year summary (total vs completed). Helps UI explain missing “completed” years.
+        year_summary = {}
+        try:
+            cur.execute(
+                """
+                SELECT
+                  substr(e.date_event, 1, 4) AS yr,
+                  COUNT(1) AS total,
+                  SUM(CASE WHEN e.home_score IS NOT NULL AND e.away_score IS NOT NULL AND date(e.date_event) <= date('now') THEN 1 ELSE 0 END) AS completed
+                FROM event e
+                WHERE e.league_id = ?
+                  AND e.date_event IS NOT NULL
+                GROUP BY yr
+                ORDER BY yr DESC
+                """,
+                (league_id,),
+            )
+            for r in cur.fetchall() or []:
+                yr = r["yr"] if isinstance(r, sqlite3.Row) else r[0]
+                total = r["total"] if isinstance(r, sqlite3.Row) else r[1]
+                completed = r["completed"] if isinstance(r, sqlite3.Row) else r[2]
+                if yr:
+                    year_summary[str(yr)] = {"total": int(total or 0), "completed": int(completed or 0)}
+        except Exception as e:
+            logger.warning(f"Could not compute year summary: {e}")
+            year_summary = {}
+
+        now_utc = datetime.utcnow()
+        current_year = str(now_utc.year)
+
+        if year is not None:
+            selected_year = str(year)
+        else:
+            # Rugby World Cup: prefer tournament years.
+            if league_id == 4574:
+                selected_year = None
+                for y in ["2023", "2019", "2015", "2011", "2007"]:
+                    if y in available_years:
+                        selected_year = y
+                        break
+                if not selected_year:
+                    selected_year = available_years[0] if available_years else None
+            else:
+                selected_year = current_year if current_year in available_years else (available_years[0] if available_years else None)
+
         if not selected_year:
             conn.close()
             return https_fn.Response(
                 json.dumps(
                     {
-                        "available_years": [],
+                        "available_years": available_years,
                         "selected_year": None,
+                        "year_summary": year_summary,
                         "matches_by_year_week": {},
                         "statistics": {},
-                        "error": "No completed matches found for this league",
+                        "error": "No matches found for this league",
+                    }
+                ),
+                status=200,
+                headers=headers,
+            )
+
+        # If there are no completed matches for this league/year yet, return an empty payload (still 200)
+        # so the UI can show the year and a friendly message.
+        cur.execute(
+            """
+            SELECT COUNT(1) AS cnt
+            FROM event e
+            WHERE e.league_id = ?
+              AND e.date_event IS NOT NULL
+              AND e.home_score IS NOT NULL
+              AND e.away_score IS NOT NULL
+              AND date(e.date_event) <= date('now')
+              AND substr(e.date_event, 1, 4) = ?
+            """,
+            (league_id, selected_year),
+        )
+        row_cnt = cur.fetchone()
+        completed_cnt = int(row_cnt["cnt"]) if row_cnt and row_cnt["cnt"] is not None else 0
+        if completed_cnt == 0:
+            conn.close()
+            return https_fn.Response(
+                json.dumps(
+                    {
+                        "available_years": available_years,
+                        "selected_year": selected_year,
+                        "year_summary": year_summary,
+                        "matches_by_year_week": {},
+                        "statistics": {},
+                        "error": f"No completed matches found for {selected_year} yet",
                     }
                 ),
                 status=200,
@@ -3795,9 +4919,10 @@ def get_historical_backtest_http(req: https_fn.Request) -> https_fn.Response:
             )
 
         # Cache in Firestore (avoid recompute)
+        # Invalidate cache when it has no matches but DB now has completed games (e.g. 2026 games added after initial cache)
         try:
             fs = get_firestore_client()
-            cache_id = f"walk_forward::{league_id}::{selected_year}"
+            cache_id = f"walk_forward_v4::{league_id}::{selected_year}"
             cache_ref = fs.collection("backtests").document(cache_id)
             if not refresh:
                 cached = cache_ref.get()
@@ -3805,8 +4930,16 @@ def get_historical_backtest_http(req: https_fn.Request) -> https_fn.Response:
                     cached_data = cached.to_dict() or {}
                     payload = cached_data.get("data")
                     if isinstance(payload, dict) and payload.get("selected_year") == selected_year:
-                        conn.close()
-                        return https_fn.Response(json.dumps(payload), status=200, headers=headers)
+                        mbyw = payload.get("matches_by_year_week") or {}
+                        year_matches = mbyw.get(selected_year) if isinstance(mbyw, dict) else {}
+                        total_cached = sum(len(v) if isinstance(v, list) else 0 for v in (year_matches or {}).values()) if isinstance(year_matches, dict) else 0
+                        has_cached_matches = total_cached > 0 and not payload.get("error")
+                        if has_cached_matches:
+                            conn.close()
+                            return https_fn.Response(json.dumps(payload), status=200, headers=headers)
+                        # Cache has no matches for this year - re-check DB; if we now have completed games, bypass cache
+                        if completed_cnt > 0:
+                            logger.info(f"Backtest cache invalidated for {selected_year}: cache empty but DB has {completed_cnt} completed matches")
         except Exception as cache_err:
             logger.warning(f"Backtest cache read failed (continuing without cache): {cache_err}")
             fs = None
@@ -4053,19 +5186,23 @@ def get_historical_backtest_http(req: https_fn.Request) -> https_fn.Response:
                     actual_winner_team = None
 
                 p = float(home_win_prob[i])
-                predicted_winner = "Home" if p >= 0.5 else "Away"
-
                 predicted_home_score = float(max(0.0, pred_home[i]))
                 predicted_away_score = float(max(0.0, pred_away[i]))
+                # Winner must match predicted scores - avoid classifier/regression mismatch (e.g. scores say Lions, classifier says Sharks)
+                # Allow AI to predict Draw when scores are equal
+                if predicted_home_score > predicted_away_score:
+                    predicted_winner = "Home"
+                elif predicted_away_score > predicted_home_score:
+                    predicted_winner = "Away"
+                else:
+                    predicted_winner = "Draw"
 
-                prediction_correct = None
+                prediction_correct = predicted_winner == actual_winner
+                total_predictions += 1
+                if prediction_correct:
+                    correct_predictions += 1
                 if actual_winner == "Draw":
                     draws_excluded += 1
-                else:
-                    prediction_correct = predicted_winner == actual_winner
-                    total_predictions += 1
-                    if prediction_correct:
-                        correct_predictions += 1
 
                 err = abs(predicted_home_score - home_score) + abs(predicted_away_score - away_score)
                 score_errors.append(float(err))
@@ -4102,6 +5239,49 @@ def get_historical_backtest_http(req: https_fn.Request) -> https_fn.Response:
                     }
                 )
 
+        # Include previous year's matches for round continuity (season 2025–May 2026: Dec R8 -> Jan R9)
+        try:
+            prev_year = str(int(selected_year) - 1) if selected_year else None
+            if prev_year:
+                cur.execute(
+                    """
+                    SELECT e.id, e.date_event, e.home_team_id, e.away_team_id, e.home_score, e.away_score
+                    FROM event e
+                    WHERE e.league_id = ?
+                      AND e.home_team_id IS NOT NULL
+                      AND e.away_team_id IS NOT NULL
+                      AND e.date_event IS NOT NULL
+                      AND e.home_score IS NOT NULL
+                      AND e.away_score IS NOT NULL
+                      AND date(e.date_event) <= date('now')
+                      AND substr(e.date_event, 1, 4) = ?
+                    ORDER BY date(e.date_event) ASC
+                    """,
+                    (league_id, prev_year),
+                )
+                for r in cur.fetchall() or []:
+                    eid = int(r["id"])
+                    dt_str = r["date_event"] or ""
+                    dt = pd.to_datetime(dt_str) if dt_str else None
+                    if dt is None:
+                        continue
+                    iso = dt.isocalendar()
+                    yw = f"{int(iso.year)}-W{int(iso.week):02d}"
+                    yr = str(iso.year)
+                    matches_by_year_week[yr][yw].append({
+                        "match_id": eid,
+                        "date": dt_str[:10] if len(dt_str) >= 10 else dt_str,
+                        "home_team": team_name.get(int(r["home_team_id"]), f"Team {r['home_team_id']}"),
+                        "away_team": team_name.get(int(r["away_team_id"]), f"Team {r['away_team_id']}"),
+                        "actual_home_score": int(r["home_score"]),
+                        "actual_away_score": int(r["away_score"]),
+                        "year": yr,
+                        "year_week": yw,
+                        "week": int(iso.week),
+                    })
+        except Exception as prev_err:
+            logger.warning(f"Could not add prev year matches for round continuity: {prev_err}")
+
         conn.close()
 
         accuracy = (correct_predictions / total_predictions * 100.0) if total_predictions > 0 else 0.0
@@ -4112,7 +5292,7 @@ def get_historical_backtest_http(req: https_fn.Request) -> https_fn.Response:
             "selected_year": selected_year,
             "matches_by_year_week": {y: dict(w) for y, w in matches_by_year_week.items()},
             "statistics": {
-                "total_matches": sum(len(v2) for v1 in matches_by_year_week.values() for v2 in v1.values()),
+                "total_matches": total_predictions,
                 "total_predictions": total_predictions,
                 "correct_predictions": correct_predictions,
                 "accuracy_percentage": round(accuracy, 2),
