@@ -24,7 +24,8 @@ class EnhancedRugbyPredictor:
             4574: "Rugby World Cup",
             4551: "Super Rugby",
             4430: "French Top 14",
-            4414: "English Premiership Rugby"
+            4414: "English Premiership Rugby",
+            4714: "Six Nations Championship"
         }
     
     def get_enhanced_prediction(self, 

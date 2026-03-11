@@ -21,3 +21,47 @@ share/
 # *.pkl  # Commented out - trained models needed for deployment
 *.csv
 
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebaserc.local
+
+# Google Cloud credentials (NEVER commit these!)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!firebase.json
+!firestore.indexes.json
+!firestore.rules
+!storage.rules
+gha-creds-*.json
+*-creds-*.json
+*credentials*.json
+*service-account*.json
+
+# Node modules
+node_modules/
+public/node_modules/
+functions/node_modules/
+
+# React build
+public/build/
+public/.env.local
+public/.env.development.local
+public/.env.test.local
+public/.env.production.local
+
+# Python virtual environment
+venv/
+ENV/
+env/
+
+# Large video files (exceed GitHub's 100MB limit)
+*.mov
+*.mp4
+public/public/*.mov
+public/public/*.mp4
+public/*.mov

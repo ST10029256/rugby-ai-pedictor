@@ -8,10 +8,13 @@ on:
     types:
       - completed
   push:
+    branches:
+      - main
     paths:
       - 'data.sqlite'  # Trigger when database is updated
       - 'retrain_needed.flag'  # Trigger when retraining flag is created
-      - 'artifacts_optimized/**'  # Trigger when models are updated
+      - 'artifacts/**'  # Trigger when models are updated
+      - 'scripts/**'  # Trigger when scripts change
   pull_request:
     paths:
       - 'data.sqlite'
@@ -21,6 +24,7 @@ jobs:
   retrain-models:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       contents: write  # Allow pushing changes back to repository
     
@@ -39,6 +43,8 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        # V4 training requires PyTorch; use CPU wheels in CI.
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
         
     - name: Check if retraining is needed
       id: check-retrain
@@ -53,13 +59,43 @@ jobs:
           exit 0
         fi
         
-    - name: Retrain models
+    - name: Retrain V4 eval (80/20)
       if: steps.check-retrain.outputs.retrain_needed == 'true'
       env:
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
       run: |
-        echo "🤖 Retraining AI models with optimized training..."
-        python scripts/train_models_optimized.py
+        echo "🤖 Retraining V4 evaluation metrics (walk-forward 80/20) for all leagues..."
+        python scripts/maz_boss_maxed_v4.py --all-leagues --walk-forward --wf-start-train 80 --wf-step 20 --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 64 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 20 --finetune-epochs 12 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.25 --ranking-loss-weight 0.10 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --confidence-variance-threshold 40 --save-v4-models --save-global-pretrained --save-report --log-level INFO
+
+    - name: Retrain V4 production brain (100% completed)
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      env:
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+      run: |
+        echo "🧠 Retraining V4 production brain (train-all-completed)..."
+        python scripts/maz_boss_maxed_v4.py --all-leagues --train-all-completed --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 64 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 20 --finetune-epochs 12 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.25 --ranking-loss-weight 0.10 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --save-v4-models --save-global-pretrained --save-report --log-level INFO
+    
+    - name: Authenticate to Google Cloud
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    
+    - name: Upload models to Cloud Storage
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      run: |
+        echo "☁️ Uploading retrained V4 artifacts to Cloud Storage..."
+        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts
+        echo "✅ V4 artifacts uploaded"
+    
+    - name: Publish V4 metrics to Firestore
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      env:
+        GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
+      run: |
+        echo "📊 Publishing V4 metrics to Firestore..."
+        python scripts/publish_v4_metrics_to_firestore.py --report artifacts/maz_maxed_v4_metrics_latest.json --prod-report artifacts/maz_maxed_v4_prod_latest.json --project-id rugby-ai-61fd0
+        echo "✅ V4 league metrics updated in Firestore"
         
     - name: Clean up retraining flag
       if: always()
@@ -74,6 +110,11 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
+        
+        # Remove any credential files that might have been created
+        git rm -f --cached gha-creds-*.json *-creds-*.json *credentials*.json *service-account*.json 2>/dev/null || true
+        
+        # Add specific files only (exclude credentials)
         git add data.sqlite artifacts/ artifacts_optimized/ last_checkpoint.json
         if git diff --staged --quiet; then
           echo "No changes to commit"
@@ -81,17 +122,6 @@ jobs:
           git commit -m "Auto-retrain: Updated AI models with new data [skip ci]"
           git push
         fi
-        
-    - name: Trigger Streamlit Cloud Redeploy
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      run: |
-        echo "🚀 Triggering Streamlit Cloud redeployment..."
-        # Create a timestamp file to force Streamlit redeploy
-        echo "# Auto-redeploy trigger: $(date)" > .streamlit_redeploy_trigger
-        git add .streamlit_redeploy_trigger
-        git commit -m "Trigger Streamlit redeploy: Models updated $(date) [skip ci]"
-        git push
-        echo "✅ Streamlit Cloud redeployment triggered successfully"
         
     - name: Upload training logs
       if: steps.check-retrain.outputs.retrain_needed == 'true'

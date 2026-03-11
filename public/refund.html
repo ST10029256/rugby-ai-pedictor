@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Refund Policy - Rugby AI Predictor">
+    <meta name="keywords" content="rugby, analytics, predictions, AI, refund policy">
+    <title>Refund Policy - Rugby AI Predictor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background: #0a0a0a;
+            overflow-x: hidden;
+        }
+
+        /* Navigation */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+            padding: 1rem 2rem;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-brand {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #f9fafb;
+            text-decoration: none;
+            background: linear-gradient(135deg, #f9fafb 0%, #86efac 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-brand img {
+            -webkit-text-fill-color: initial;
+            background: none;
+            -webkit-background-clip: initial;
+            background-clip: initial;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: #d1d5db;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .nav-links a:hover {
+            color: #86efac;
+        }
+
+        .btn-nav {
+            padding: 0.5rem 1.5rem;
+            background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+            color: white;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .btn-nav:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(34, 197, 94, 0.4);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 60vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            position: relative;
+            overflow: hidden;
+            padding-top: 80px;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+
+        .hero-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            color: #f9fafb;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #f9fafb 0%, #86efac 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+        }
+
+        .tagline {
+            font-size: 1.5rem;
+            color: #d1d5db;
+            margin-bottom: 2rem;
+            font-weight: 300;
+        }
+
+        /* Content Section */
+        .content-section {
+            padding: 6rem 2rem;
+            background: #ffffff;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .last-updated {
+            color: #64748b;
+            margin-bottom: 3rem;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .section {
+            margin-bottom: 3rem;
+        }
+
+        h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        h3 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        p {
+            color: #475569;
+            margin-bottom: 1rem;
+            line-height: 1.8;
+            font-size: 1rem;
+        }
+
+        ul, ol {
+            color: #475569;
+            margin-left: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.75rem;
+            line-height: 1.8;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border: 2px solid #22c55e;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .highlight-box p {
+            color: #166534;
+            font-weight: 500;
+        }
+
+        /* Footer */
+        .footer {
+            background: #0a0a0a;
+            padding: 4rem 2rem 2rem;
+            text-align: center;
+            color: #94a3b8;
+        }
+
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .footer-link {
+            color: #94a3b8;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .footer-link:hover {
+            color: #22c55e;
+        }
+
+        .footer-copyright {
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .tagline {
+                font-size: 1.2rem;
+            }
+
+            .content-section {
+                padding: 4rem 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <a href="index.html" class="nav-brand"><img src="public/rugby_emoji.png" alt="Rugby Ball" style="width: 24px; height: 24px;" /> Rugby AI Predictor</a>
+        <ul class="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="about.html">About</a></li>
+            <li><a href="subscribe.html">Subscribe</a></li>
+            <li><a href="terms.html">Terms</a></li>
+            <li><a href="privacy.html">Privacy</a></li>
+            <li><a href="refund.html">Refund</a></li>
+            <li><a href="https://rugby-ai-61fd0.web.app" class="btn-nav">Launch App</a></li>
+        </ul>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Refund Policy</h1>
+            <p class="tagline">Our commitment to your satisfaction</p>
+        </div>
+    </section>
+
+    <!-- Content Section -->
+    <section class="content-section">
+        <div class="container">
+            <p class="last-updated">Last Updated: December 2024</p>
+
+            <div class="section">
+                <h2>1. Overview</h2>
+                <p>
+                    This Refund Policy outlines the terms and conditions under which refunds may be issued for subscriptions to Rugby AI Predictor. Please read this policy carefully before making a purchase.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>2. Subscription Refund Eligibility</h2>
+                
+                <div class="highlight-box">
+                    <p>
+                        <strong>7-Day Money-Back Guarantee:</strong> We offer a 7-day money-back guarantee for all new subscriptions. If you are not satisfied with the Service within 7 days of your initial purchase, you may request a full refund.
+                    </p>
+                </div>
+
+                <h3>2.1 Eligible Refund Requests</h3>
+                <p>Refunds may be issued in the following circumstances:</p>
+                <ul>
+                    <li><strong>Within 7 Days of Purchase:</strong> Full refund available for any reason</li>
+                    <li><strong>Service Failure:</strong> If the Service is unavailable or non-functional for an extended period (more than 48 hours) due to technical issues on our end</li>
+                    <li><strong>Duplicate Charges:</strong> If you were charged multiple times for the same subscription</li>
+                    <li><strong>Unauthorized Purchase:</strong> If your payment method was used without your authorization</li>
+                </ul>
+
+                <h3>2.2 Non-Refundable Situations</h3>
+                <p>Refunds will NOT be issued in the following cases:</p>
+                <ul>
+                    <li>After the 7-day money-back guarantee period has expired</li>
+                    <li>If you have violated our Terms of Service</li>
+                    <li>If you have shared or transferred your license key to another user</li>
+                    <li>For partial subscription periods (e.g., mid-month cancellations)</li>
+                    <li>If you simply changed your mind after the 7-day period</li>
+                    <li>For subscription renewals (only initial purchases are eligible for the 7-day guarantee)</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>3. How to Request a Refund</h2>
+                <p>To request a refund, please follow these steps:</p>
+                <ol>
+                    <li>Contact us using the email address associated with your subscription</li>
+                    <li>Include the following information in your request:
+                        <ul>
+                            <li>Your email address used for the subscription</li>
+                            <li>Your license key (if available)</li>
+                            <li>Date of purchase</li>
+                            <li>Reason for refund request</li>
+                            <li>Transaction ID or payment confirmation (if available)</li>
+                        </ul>
+                    </li>
+                    <li>We will review your request and respond within 5-7 business days</li>
+                </ol>
+                <p>
+                    Refund requests should be sent to the email address provided in your subscription confirmation email or through the contact method available in the Service.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>4. Refund Processing</h2>
+                <h3>4.1 Processing Time</h3>
+                <p>
+                    Once your refund request is approved:
+                </p>
+                <ul>
+                    <li>Refunds will be processed within 5-10 business days</li>
+                    <li>The refund will be issued to the original payment method used for the purchase</li>
+                    <li>You will receive a confirmation email once the refund has been processed</li>
+                </ul>
+
+                <h3>4.2 Refund Amount</h3>
+                <p>
+                    For eligible refunds within the 7-day guarantee period, you will receive a full refund of the subscription fee paid. No partial refunds will be issued for unused portions of the subscription period.
+                </p>
+
+                <h3>4.3 License Key Deactivation</h3>
+                <p>
+                    Upon approval of a refund, your license key will be immediately deactivated, and you will lose access to premium features. The license key cannot be reactivated after a refund has been processed.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>5. Subscription Cancellation</h2>
+                <p>
+                    <strong>Important:</strong> Canceling your subscription is different from requesting a refund:
+                </p>
+                <ul>
+                    <li><strong>Cancellation:</strong> Stops future renewals but does not provide a refund for the current billing period</li>
+                    <li><strong>Refund:</strong> Returns your payment and deactivates your license key</li>
+                </ul>
+                <p>
+                    You may cancel your subscription at any time through your account settings or by contacting us. Cancellation will take effect at the end of your current billing period. No refunds will be provided for the remaining subscription period unless you are within the 7-day guarantee window.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>6. Chargebacks and Disputes</h2>
+                <p>
+                    If you initiate a chargeback or dispute with your payment provider instead of contacting us directly, we reserve the right to:
+                </p>
+                <ul>
+                    <li>Immediately deactivate your license key</li>
+                    <li>Permanently ban your account from future subscriptions</li>
+                    <li>Challenge the chargeback with evidence of service delivery</li>
+                </ul>
+                <p>
+                    We strongly encourage you to contact us directly first to resolve any issues before initiating a chargeback. We are committed to resolving customer concerns fairly and promptly.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>7. Special Circumstances</h2>
+                <h3>7.1 Technical Issues</h3>
+                <p>
+                    If you experience persistent technical issues that prevent you from using the Service, please contact our support team. We will work with you to resolve the issue. If the problem cannot be resolved and significantly impacts your ability to use the Service, we may consider a refund on a case-by-case basis, even outside the 7-day guarantee period.
+                </p>
+
+                <h3>7.2 Service Discontinuation</h3>
+                <p>
+                    In the unlikely event that we discontinue the Service, we will provide prorated refunds for the unused portion of your subscription period.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>8. Currency and Payment Methods</h2>
+                <p>
+                    Refunds will be issued in the same currency and to the same payment method used for the original purchase. If the original payment method is no longer available, we will work with you to arrange an alternative refund method.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>9. Changes to Refund Policy</h2>
+                <p>
+                    We reserve the right to modify this Refund Policy at any time. Changes will be effective immediately upon posting on this page. For existing subscribers, the refund policy in effect at the time of purchase will apply to their subscription.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>10. Contact Information</h2>
+                <p>
+                    If you have any questions about this Refund Policy or need to request a refund, please contact us through the Service or via the contact information provided in your subscription confirmation email.
+                </p>
+                <p>
+                    We aim to respond to all refund requests within 5-7 business days and process approved refunds within 5-10 business days.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="index.html" class="footer-link">Home</a>
+                <a href="about.html" class="footer-link">About</a>
+                <a href="subscribe.html" class="footer-link">Subscribe</a>
+                <a href="terms.html" class="footer-link">Terms of Service</a>
+                <a href="privacy.html" class="footer-link">Privacy Policy</a>
+                <a href="refund.html" class="footer-link">Refund Policy</a>
+            </div>
+            <div class="footer-copyright">
+                <p>&copy; 2024 Rugby AI Predictor. All rights reserved.</p>
+                <p style="margin-top: 0.5rem; font-size: 0.9rem;">
+                    Advanced rugby analytics and match prediction platform. For entertainment and analytical purposes only.
+                </p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

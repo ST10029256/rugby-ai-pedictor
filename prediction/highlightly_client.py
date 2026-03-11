@@ -10,13 +10,22 @@ logger = logging.getLogger(__name__)
 class HighlightlyRugbyAPI:
     """Highlightly Rugby API client for enhanced rugby data"""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, use_rapidapi: bool = False):
         self.api_key = api_key
-        self.base_url = "https://rugby.highlightly.net"
-        self.headers = {
-            "x-rapidapi-key": api_key,
-            "x-rapidapi-host": "rugby-highlights-api.p.rapidapi.com"
-        }
+        self.use_rapidapi = use_rapidapi
+        
+        if use_rapidapi:
+            self.base_url = "https://rugby-highlights-api.p.rapidapi.com"
+            self.headers = {
+                "x-rapidapi-key": api_key,
+                "x-rapidapi-host": "rugby-highlights-api.p.rapidapi.com"
+            }
+        else:
+            self.base_url = "https://rugby.highlightly.net"
+            self.headers = {
+                "x-rapidapi-key": api_key,
+                "x-rapidapi-host": "rugby-highlights-api.p.rapidapi.com"
+            }
     
     def get_leagues(self, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
         """Get all available rugby leagues"""
@@ -73,6 +82,57 @@ class HighlightlyRugbyAPI:
             return response.json()
         except Exception as e:
             logger.error(f"Error fetching match details for {match_id}: {e}")
+            return {}
+    
+    def get_match_lineups(self, match_id: int) -> Dict[str, Any]:
+        """Get team lineups for a specific match
+        
+        Returns lineups for both home and away teams including:
+        - Player names, positions, jersey numbers, country, birth date, height
+        - Starting lineup (initialLineup) and substitutes (substitutions)
+        
+        According to OpenAPI spec, lineups are included in match details response.
+        Structure: { "home": { "initialLineup": [...], "substitutions": [...] }, 
+                     "away": { "initialLineup": [...], "substitutions": [...] } }
+        
+        Note: Lineups may be null if not available yet (e.g., match hasn't started).
+        """
+        try:
+            # Get match details (lineups are included in the response)
+            match_details = self.get_match_details(match_id)
+            
+            # Match details returns an array, get first item
+            if isinstance(match_details, list) and len(match_details) > 0:
+                match_data = match_details[0]
+            elif isinstance(match_details, dict):
+                match_data = match_details
+            else:
+                logger.warning(f"Unexpected match details format for {match_id}")
+                return {}
+            
+            # Extract lineups from match details
+            lineups = match_data.get('lineups')
+            
+            if lineups is None:
+                logger.info(f"Lineups not available yet for match {match_id} (may be null if match hasn't started)")
+                return {'match_id': match_id, 'lineups': None, 'available': False}
+            
+            if isinstance(lineups, dict):
+                # Structure: { "home": { "initialLineup": [...], "substitutions": [...] }, 
+                #               "away": { "initialLineup": [...], "substitutions": [...] } }
+                return {
+                    'match_id': match_id,
+                    'lineups': lineups,
+                    'available': True,
+                    'home_players': len(lineups.get('home', {}).get('initialLineup', [])) + len(lineups.get('home', {}).get('substitutions', [])),
+                    'away_players': len(lineups.get('away', {}).get('initialLineup', [])) + len(lineups.get('away', {}).get('substitutions', []))
+                }
+            else:
+                logger.warning(f"Unexpected lineups format for match {match_id}: {type(lineups)}")
+                return {'match_id': match_id, 'lineups': lineups, 'available': True}
+                
+        except Exception as e:
+            logger.error(f"Error fetching lineups for match {match_id}: {e}")
             return {}
     
     def get_odds(self, 
@@ -165,11 +225,76 @@ class HighlightlyRugbyAPI:
                 headers=self.headers,
                 params={"leagueId": league_id, "season": season}
             )
+            
+            # Check for rate limiting before raising
+            if response.status_code == 429:
+                rate_limit_info = {
+                    "_rate_limited": True,
+                    "_rate_limit_headers": {}
+                }
+                # Extract rate limit headers if available
+                for header in ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 
+                              'Retry-After', 'X-RateLimit-Reset-After']:
+                    if header in response.headers:
+                        rate_limit_info["_rate_limit_headers"][header] = response.headers[header]
+                
+                logger.warning(f"Rate limited (429) for league {league_id}, season {season}")
+                if rate_limit_info["_rate_limit_headers"]:
+                    logger.warning(f"Rate limit info: {rate_limit_info['_rate_limit_headers']}")
+                
+                return {"groups": [], "league": {}, **rate_limit_info}
+            
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            # Add rate limit flag if response is empty (might be rate limited)
+            if isinstance(result, dict) and not result.get('groups') and not result.get('league'):
+                result["_rate_limited"] = True
+            return result
+        except requests.exceptions.HTTPError as e:
+            if e.response and e.response.status_code == 429:
+                rate_limit_info = {
+                    "_rate_limited": True,
+                    "_rate_limit_headers": {}
+                }
+                # Extract rate limit headers if available
+                for header in ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 
+                              'Retry-After', 'X-RateLimit-Reset-After']:
+                    if header in e.response.headers:
+                        rate_limit_info["_rate_limit_headers"][header] = e.response.headers[header]
+                
+                logger.warning(f"Rate limited (429) for league {league_id}, season {season}")
+                if rate_limit_info["_rate_limit_headers"]:
+                    logger.warning(f"Rate limit info: {rate_limit_info['_rate_limit_headers']}")
+                
+                return {"groups": [], "league": {}, **rate_limit_info}
+            logger.error(f"Error fetching standings: {e}")
+            return {"groups": [], "league": {}, "_error": str(e)}
         except Exception as e:
             logger.error(f"Error fetching standings: {e}")
-            return {"groups": [], "league": {}}
+            return {"groups": [], "league": {}, "_error": str(e)}
+    
+    def get_news(self, 
+                 league_id: Optional[int] = None,
+                 league_name: Optional[str] = None,
+                 team_id: Optional[int] = None,
+                 match_id: Optional[int] = None,
+                 limit: int = 50) -> Dict[str, Any]:
+        """Get rugby news
+        
+        ⚠️ NOTE: Highlightly API does NOT have dedicated news endpoints per OpenAPI spec.
+        This method is a placeholder for future implementation or alternative news sources.
+        
+        For news, consider:
+        - Using SportDevs API (if subscribed) - has news endpoints
+        - Using match details predictions/descriptions
+        - Integrating with a separate news API
+        """
+        logger.warning("Highlightly API does not have news endpoints. Consider using SportDevs API or alternative news sources.")
+        return {
+            "data": [],
+            "message": "Highlightly API does not provide news endpoints per OpenAPI spec. Use SportDevs API or alternative sources.",
+            "alternative": "Check match details for predictions and descriptions"
+        }
 
 def test_highlightly_api():
     """Test the Highlightly API integration"""

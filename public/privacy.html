@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Privacy Policy - Rugby AI Predictor">
+    <meta name="keywords" content="rugby, analytics, predictions, AI, privacy policy">
+    <title>Privacy Policy - Rugby AI Predictor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background: #0a0a0a;
+            overflow-x: hidden;
+        }
+
+        /* Navigation */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+            padding: 1rem 2rem;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-brand {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #f9fafb;
+            text-decoration: none;
+            background: linear-gradient(135deg, #f9fafb 0%, #86efac 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-brand img {
+            -webkit-text-fill-color: initial;
+            background: none;
+            -webkit-background-clip: initial;
+            background-clip: initial;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: #d1d5db;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .nav-links a:hover {
+            color: #86efac;
+        }
+
+        .btn-nav {
+            padding: 0.5rem 1.5rem;
+            background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+            color: white;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .btn-nav:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(34, 197, 94, 0.4);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 60vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            position: relative;
+            overflow: hidden;
+            padding-top: 80px;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+
+        .hero-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            color: #f9fafb;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #f9fafb 0%, #86efac 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+        }
+
+        .tagline {
+            font-size: 1.5rem;
+            color: #d1d5db;
+            margin-bottom: 2rem;
+            font-weight: 300;
+        }
+
+        /* Content Section */
+        .content-section {
+            padding: 6rem 2rem;
+            background: #ffffff;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .last-updated {
+            color: #64748b;
+            margin-bottom: 3rem;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .section {
+            margin-bottom: 3rem;
+        }
+
+        h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        h3 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        p {
+            color: #475569;
+            margin-bottom: 1rem;
+            line-height: 1.8;
+            font-size: 1rem;
+        }
+
+        ul, ol {
+            color: #475569;
+            margin-left: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.75rem;
+            line-height: 1.8;
+        }
+
+        /* Footer */
+        .footer {
+            background: #0a0a0a;
+            padding: 4rem 2rem 2rem;
+            text-align: center;
+            color: #94a3b8;
+        }
+
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .footer-link {
+            color: #94a3b8;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .footer-link:hover {
+            color: #22c55e;
+        }
+
+        .footer-copyright {
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .tagline {
+                font-size: 1.2rem;
+            }
+
+            .content-section {
+                padding: 4rem 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <a href="index.html" class="nav-brand"><img src="public/rugby_emoji.png" alt="Rugby Ball" style="width: 24px; height: 24px;" /> Rugby AI Predictor</a>
+        <ul class="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="about.html">About</a></li>
+            <li><a href="subscribe.html">Subscribe</a></li>
+            <li><a href="terms.html">Terms</a></li>
+            <li><a href="privacy.html">Privacy</a></li>
+            <li><a href="refund.html">Refund</a></li>
+            <li><a href="https://rugby-ai-61fd0.web.app" class="btn-nav">Launch App</a></li>
+        </ul>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Privacy Policy</h1>
+            <p class="tagline">How we collect, use, and protect your information</p>
+        </div>
+    </section>
+
+    <!-- Content Section -->
+    <section class="content-section">
+        <div class="container">
+            <p class="last-updated">Last Updated: December 2024</p>
+
+            <div class="section">
+                <h2>1. Introduction</h2>
+                <p>
+                    Rugby AI Predictor ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our Service.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>2. Information We Collect</h2>
+                <h3>2.1 Information You Provide</h3>
+                <p>We collect information that you provide directly to us, including:</p>
+                <ul>
+                    <li><strong>Email Address:</strong> Used for account creation, license key delivery, and communication</li>
+                    <li><strong>Name:</strong> Used for personalization and account management</li>
+                    <li><strong>Payment Information:</strong> Processed securely through third-party payment processors (we do not store full payment card details)</li>
+                    <li><strong>License Key:</strong> Generated and stored to manage your subscription access</li>
+                </ul>
+
+                <h3>2.2 Automatically Collected Information</h3>
+                <p>When you use our Service, we may automatically collect:</p>
+                <ul>
+                    <li>Device information (browser type, operating system)</li>
+                    <li>Usage data (pages visited, features used, time spent)</li>
+                    <li>IP address (for security and analytics purposes)</li>
+                    <li>Cookies and similar tracking technologies</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>3. How We Use Your Information</h2>
+                <p>We use the collected information for the following purposes:</p>
+                <ul>
+                    <li>To provide, maintain, and improve our Service</li>
+                    <li>To process your subscription and manage your account</li>
+                    <li>To send you license keys and subscription-related communications</li>
+                    <li>To respond to your inquiries and provide customer support</li>
+                    <li>To detect, prevent, and address technical issues and security threats</li>
+                    <li>To analyze usage patterns and improve user experience</li>
+                    <li>To comply with legal obligations</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>4. Data Storage and Security</h2>
+                <h3>4.1 Data Storage</h3>
+                <p>
+                    Your data is stored securely using industry-standard cloud infrastructure (Firebase/Google Cloud Platform). We implement appropriate technical and organizational measures to protect your personal information.
+                </p>
+
+                <h3>4.2 Security Measures</h3>
+                <p>We employ various security measures to protect your information:</p>
+                <ul>
+                    <li>Encryption of data in transit (HTTPS/TLS)</li>
+                    <li>Secure authentication and authorization systems</li>
+                    <li>Regular security audits and updates</li>
+                    <li>Access controls and monitoring</li>
+                </ul>
+                <p>
+                    However, no method of transmission over the Internet or electronic storage is 100% secure. While we strive to use commercially acceptable means to protect your information, we cannot guarantee absolute security.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>5. Information Sharing and Disclosure</h2>
+                <p>We do not sell, trade, or rent your personal information to third parties. We may share your information only in the following circumstances:</p>
+                <ul>
+                    <li><strong>Service Providers:</strong> With trusted third-party service providers who assist us in operating our Service (e.g., payment processors, email services, cloud hosting)</li>
+                    <li><strong>Legal Requirements:</strong> When required by law, court order, or government regulation</li>
+                    <li><strong>Protection of Rights:</strong> To protect our rights, property, or safety, or that of our users</li>
+                    <li><strong>Business Transfers:</strong> In connection with a merger, acquisition, or sale of assets (with notice to users)</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>6. Cookies and Tracking Technologies</h2>
+                <p>
+                    We use cookies and similar tracking technologies to track activity on our Service and store certain information. Cookies are files with a small amount of data that may include an anonymous unique identifier.
+                </p>
+                <p>We use cookies for:</p>
+                <ul>
+                    <li>Remembering your preferences and settings</li>
+                    <li>Analyzing Service usage and performance</li>
+                    <li>Providing personalized content</li>
+                </ul>
+                <p>
+                    You can instruct your browser to refuse all cookies or to indicate when a cookie is being sent. However, if you do not accept cookies, you may not be able to use some portions of our Service.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>7. Your Rights and Choices</h2>
+                <p>Depending on your location, you may have certain rights regarding your personal information:</p>
+                <ul>
+                    <li><strong>Access:</strong> Request access to your personal information</li>
+                    <li><strong>Correction:</strong> Request correction of inaccurate information</li>
+                    <li><strong>Deletion:</strong> Request deletion of your personal information</li>
+                    <li><strong>Data Portability:</strong> Request a copy of your data in a portable format</li>
+                    <li><strong>Opt-Out:</strong> Unsubscribe from marketing communications (account-related emails will still be sent)</li>
+                </ul>
+                <p>
+                    To exercise these rights, please contact us using the information provided in your subscription confirmation email or through the Service.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>8. Data Retention</h2>
+                <p>
+                    We retain your personal information for as long as necessary to provide the Service and fulfill the purposes outlined in this Privacy Policy, unless a longer retention period is required or permitted by law.
+                </p>
+                <p>
+                    When you cancel your subscription, we will retain your information for a reasonable period to comply with legal obligations, resolve disputes, and enforce our agreements. License keys and subscription records may be retained for accounting and legal purposes.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>9. Children's Privacy</h2>
+                <p>
+                    Our Service is not intended for individuals under the age of 18. We do not knowingly collect personal information from children. If you are a parent or guardian and believe your child has provided us with personal information, please contact us immediately.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>10. International Data Transfers</h2>
+                <p>
+                    Your information may be transferred to and processed in countries other than your country of residence. These countries may have data protection laws that differ from those in your country. By using our Service, you consent to the transfer of your information to these countries.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>11. Changes to This Privacy Policy</h2>
+                <p>
+                    We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last Updated" date. We may also notify you via email of material changes.
+                </p>
+                <p>
+                    You are advised to review this Privacy Policy periodically for any changes. Changes to this Privacy Policy are effective when they are posted on this page.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>12. Contact Us</h2>
+                <p>
+                    If you have any questions about this Privacy Policy or our data practices, please contact us through the Service or via the contact information provided in your subscription confirmation email.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="index.html" class="footer-link">Home</a>
+                <a href="about.html" class="footer-link">About</a>
+                <a href="subscribe.html" class="footer-link">Subscribe</a>
+                <a href="terms.html" class="footer-link">Terms of Service</a>
+                <a href="privacy.html" class="footer-link">Privacy Policy</a>
+                <a href="refund.html" class="footer-link">Refund Policy</a>
+            </div>
+            <div class="footer-copyright">
+                <p>&copy; 2024 Rugby AI Predictor. All rights reserved.</p>
+                <p style="margin-top: 0.5rem; font-size: 0.9rem;">
+                    Advanced rugby analytics and match prediction platform. For entertainment and analytical purposes only.
+                </p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

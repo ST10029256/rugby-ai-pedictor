@@ -13,6 +13,74 @@ from typing import Dict, Optional, Tuple, Any
 from prediction.features import build_feature_table, FeatureConfig
 from prediction.sportdevs_client import SportDevsClient, extract_odds_features
 
+# Try to import joblib for loading compressed models
+try:
+    import joblib
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    joblib = None
+    JOBLIB_AVAILABLE = False
+
+# Firestore support (lazy import)
+_firestore_client = None
+
+def get_firestore_client():
+    """Get or create Firestore client (lazy initialization)"""
+    global _firestore_client
+    if _firestore_client is None:
+        try:
+            from firebase_admin import firestore  # type: ignore
+            from firebase_admin import initialize_app  # type: ignore
+            try:
+                initialize_app()
+            except ValueError:
+                pass  # Already initialized
+            _firestore_client = firestore.client()
+        except ImportError:
+            # Fallback: try google.cloud.firestore directly
+            try:
+                from google.cloud import firestore as gcp_firestore  # type: ignore
+                _firestore_client = gcp_firestore.Client()
+            except ImportError:
+                raise ImportError("Firestore not available. Install firebase-admin or google-cloud-firestore")
+    return _firestore_client
+
+def get_team_id_from_firestore(team_name: str) -> Optional[int]:
+    """
+    Get team ID from Firestore by team name (case-insensitive)
+    
+    Args:
+        team_name: Team name to search for
+        
+    Returns:
+        Team ID if found, None otherwise
+    """
+    try:
+        db = get_firestore_client()
+        teams_ref = db.collection('teams')
+        
+        team_name_lower = team_name.lower()
+        
+        # Strategy 1: Try exact match first (most efficient)
+        teams = teams_ref.where('name', '==', team_name).limit(1).stream()
+        for doc in teams:
+            data = doc.to_dict()
+            return data.get('id')
+        
+        # Strategy 2: Try case-insensitive search by fetching and filtering
+        # Since we have 177 teams, this is manageable
+        all_teams = teams_ref.limit(200).stream()  # Limit to avoid timeout
+        for doc in all_teams:
+            data = doc.to_dict()
+            doc_name = data.get('name', '')
+            if doc_name.lower() == team_name_lower:
+                return data.get('id')
+        
+        return None
+    except Exception as e:
+        print(f"Error querying Firestore for team '{team_name}': {e}")
+        return None
+
 class HybridPredictor:
     """Hybrid predictor combining AI models with live bookmaker odds"""
     
@@ -21,9 +89,23 @@ class HybridPredictor:
         self.db_path = db_path
         self.sportdevs_client = SportDevsClient(sportdevs_api_key)
         
-        # Load trained model
-        with open(model_path, 'rb') as f:
-            self.model_data = pickle.load(f)
+        # Load trained model - try joblib first (compressed), then pickle
+        try:
+            if JOBLIB_AVAILABLE and joblib is not None:
+                self.model_data = joblib.load(model_path)
+            else:
+                with open(model_path, 'rb') as f:
+                    self.model_data = pickle.load(f)
+        except (ValueError, pickle.UnpicklingError) as e:
+            # If joblib fails or pickle fails, try the other
+            if JOBLIB_AVAILABLE and joblib is not None:
+                try:
+                    with open(model_path, 'rb') as f:
+                        self.model_data = pickle.load(f)
+                except Exception:
+                    raise ValueError(f"Failed to load model with both joblib and pickle: {e}")
+            else:
+                raise ValueError(f"Failed to load model: {e}")
         
         self.clf_model = self.model_data['models']['clf']
         self.reg_home_model = self.model_data['models']['reg_home']
@@ -40,6 +122,20 @@ class HybridPredictor:
         """Get prediction from trained AI model"""
         
         # Build features for this match
+        # Note: build_feature_table currently only supports SQLite
+        # For Firestore, we'll need to create a Firestore adapter or use cached features
+        if self.db_path == 'firestore':
+            # For now, use a simplified approach: return default prediction
+            # TODO: Implement Firestore support in build_feature_table
+            print("  Warning: Firestore feature building not yet implemented, using default prediction")
+            return {
+                'home_win_prob': 0.5,
+                'predicted_home_score': 25,
+                'predicted_away_score': 20,
+                'confidence': 0.3
+            }
+        
+        # Use SQLite (backward compatibility)
         conn = sqlite3.connect(self.db_path)
         config = FeatureConfig(
             elo_priors=None,
@@ -82,10 +178,13 @@ class HybridPredictor:
         
         X = np.array(feature_vector).reshape(1, -1)
         
-        # Get predictions
+        # Get predictions (raw, no adjustments yet)
         home_win_prob = self.clf_model.predict_proba(X)[0, 1]
         predicted_home_score = max(0, self.reg_home_model.predict(X)[0])
         predicted_away_score = max(0, self.reg_away_model.predict(X)[0])
+        
+        # Note: Score adjustment based on classifier will be done in hybrid_predict
+        # only when method is "AI Only" (no odds). This keeps raw predictions here.
         
         # Confidence based on probability
         confidence = max(home_win_prob, 1 - home_win_prob)
@@ -175,17 +274,69 @@ class HybridPredictor:
         hybrid_confidence = (effective_ai_weight * ai_pred['confidence'] + 
                             effective_odds_weight * bookmaker_pred['confidence'])
         
+        # Determine winner from hybrid probability (classifier + odds, more accurate)
+        predicted_winner = 'Home' if hybrid_home_prob > 0.5 else 'Away'
+        
+        # Adjust scores to match predicted winner ONLY when using AI-only (no odds)
+        # This preserves classifier accuracy for AI-only predictions
+        predicted_home_score = ai_pred['predicted_home_score']
+        predicted_away_score = ai_pred['predicted_away_score']
+        
+        if effective_odds_weight == 0.0:  # AI-only mode
+            # Classifier is more accurate at predicting winners (66-90% accuracy)
+            # Adjust scores to match classifier's winner prediction
+            classifier_home_wins = ai_pred['home_win_prob'] > 0.5
+            score_based_home_wins = predicted_home_score > predicted_away_score
+            score_margin = abs(predicted_home_score - predicted_away_score)
+            total_score = predicted_home_score + predicted_away_score
+            
+            if classifier_home_wins != score_based_home_wins:
+                # Scores and classifier disagree - adjust scores to match classifier
+                if classifier_home_wins:
+                    # Classifier says home wins, but scores show away winning
+                    min_margin = max(1.0, score_margin * 0.5)  # At least half the original margin
+                    predicted_home_score = (total_score + min_margin) / 2
+                    predicted_away_score = (total_score - min_margin) / 2
+                else:
+                    # Classifier says away wins, but scores show home winning
+                    min_margin = max(1.0, score_margin * 0.5)
+                    predicted_away_score = (total_score + min_margin) / 2
+                    predicted_home_score = (total_score - min_margin) / 2
+                
+                # Ensure scores are non-negative and rounded
+                predicted_home_score = max(0, round(predicted_home_score))
+                predicted_away_score = max(0, round(predicted_away_score))
+                
+                # Final check: ensure winner is correct
+                if classifier_home_wins:
+                    if predicted_home_score <= predicted_away_score:
+                        predicted_home_score = predicted_away_score + 1
+                else:
+                    if predicted_away_score <= predicted_home_score:
+                        predicted_away_score = predicted_home_score + 1
+            
+            # Handle ties: use classifier to break tie
+            elif predicted_home_score == predicted_away_score:
+                if classifier_home_wins:
+                    predicted_home_score = predicted_away_score + 1
+                else:
+                    predicted_away_score = predicted_home_score + 1
+            
+            # Update ai_pred with adjusted scores
+            ai_pred['predicted_home_score'] = predicted_home_score
+            ai_pred['predicted_away_score'] = predicted_away_score
+        
         prediction = {
             'ai_prediction': ai_pred,
             'bookmaker_prediction': bookmaker_pred,
             'hybrid_home_win_prob': float(hybrid_home_prob),
             'hybrid_away_win_prob': float(1 - hybrid_home_prob),
             'hybrid_confidence': float(hybrid_confidence),
-            'predicted_winner': 'Home' if hybrid_home_prob > 0.5 else 'Away',
-            'predicted_score': f"{ai_pred['predicted_home_score']:.0f}-{ai_pred['predicted_away_score']:.0f}",
+            'predicted_winner': predicted_winner,  # Use probability-based winner (more accurate)
+            'predicted_score': f"{predicted_home_score:.0f}-{predicted_away_score:.0f}",
             'ai_weight': ai_weight,
             'odds_weight': odds_weight,
-            'method': 'hybrid'
+            'method': 'AI Only (No Odds)' if effective_odds_weight == 0.0 else 'hybrid'
         }
         
         print(f"     HYBRID: Home win {hybrid_home_prob:.1%}, Confidence: {hybrid_confidence:.1%}")
@@ -256,37 +407,61 @@ class HybridPredictor:
                 f"({self.league_name}), but requested league {league_id}"
             )
         
-        # Get team IDs from database
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Try to find teams by name (case-insensitive)
-        cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (home_team,))
-        home_result = cursor.fetchone()
-        if not home_result:
+        # Get team IDs from database (SQLite or Firestore)
+        if self.db_path == 'firestore':
+            # Use Firestore
+            home_team_id = get_team_id_from_firestore(home_team)
+            if home_team_id is None:
+                raise ValueError(f"Home team '{home_team}' not found in Firestore")
+            
+            away_team_id = get_team_id_from_firestore(away_team)
+            if away_team_id is None:
+                raise ValueError(f"Away team '{away_team}' not found in Firestore")
+        else:
+            # Use SQLite (backward compatibility)
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Try to find teams by name (case-insensitive)
+            cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (home_team,))
+            home_result = cursor.fetchone()
+            if not home_result:
+                conn.close()
+                raise ValueError(f"Home team '{home_team}' not found in database")
+            home_team_id = home_result[0]
+            
+            cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (away_team,))
+            away_result = cursor.fetchone()
+            if not away_result:
+                conn.close()
+                raise ValueError(f"Away team '{away_team}' not found in database")
+            away_team_id = away_result[0]
+            
             conn.close()
-            raise ValueError(f"Home team '{home_team}' not found in database")
-        home_team_id = home_result[0]
-        
-        cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (away_team,))
-        away_result = cursor.fetchone()
-        if not away_result:
-            conn.close()
-            raise ValueError(f"Away team '{away_team}' not found in database")
-        away_team_id = away_result[0]
-        
-        conn.close()
         
         # Get hybrid prediction
         prediction = self.smart_ensemble(home_team_id, away_team_id, match_date, match_id)
         
         # Format output to match expected structure
         home_win_prob = prediction.get('hybrid_home_win_prob', prediction.get('home_win_prob', 0.5))
+        predicted_home_score = prediction.get('ai_prediction', {}).get('predicted_home_score', 0)
+        predicted_away_score = prediction.get('ai_prediction', {}).get('predicted_away_score', 0)
+        
+        # Determine winner from classifier probability (more accurate than scores)
+        # Scores have already been adjusted in get_ai_prediction to match classifier
+        predicted_winner = 'Home' if home_win_prob > 0.5 else 'Away'
+        
+        # Final safety check: ensure scores match the predicted winner
+        # This should already be done in get_ai_prediction, but double-check
+        if predicted_winner == 'Home' and predicted_home_score <= predicted_away_score:
+            predicted_home_score = predicted_away_score + 1.0
+        elif predicted_winner == 'Away' and predicted_away_score <= predicted_home_score:
+            predicted_away_score = predicted_home_score + 1.0
         
         return {
-            'predicted_winner': 'Home' if home_win_prob > 0.5 else 'Away',
-            'predicted_home_score': prediction.get('ai_prediction', {}).get('predicted_home_score', 0),
-            'predicted_away_score': prediction.get('ai_prediction', {}).get('predicted_away_score', 0),
+            'predicted_winner': predicted_winner,
+            'predicted_home_score': float(predicted_home_score),
+            'predicted_away_score': float(predicted_away_score),
             'confidence': prediction.get('hybrid_confidence', prediction.get('confidence', 0.5)),
             'home_win_prob': home_win_prob,
             'away_win_prob': 1.0 - home_win_prob,
@@ -302,50 +477,105 @@ class MultiLeaguePredictor:
     """Wrapper class that manages multiple HybridPredictor instances for different leagues"""
     
     def __init__(self, db_path: str = 'data.sqlite', sportdevs_api_key: Optional[str] = None, 
-                 artifacts_dir: str = 'artifacts'):
+                 artifacts_dir: str = 'artifacts', storage_bucket: Optional[str] = None):
         """
         Initialize multi-league predictor
         
         Args:
-            db_path: Path to SQLite database
+            db_path: Path to SQLite database (or 'firestore' to use Firestore)
             sportdevs_api_key: SportDevs API key (optional, can use default)
             artifacts_dir: Directory containing model files (default: 'artifacts')
+            storage_bucket: Cloud Storage bucket name (if None, only uses local filesystem)
         """
         self.db_path = db_path
         self.artifacts_dir = artifacts_dir
         self.artifacts_optimized_dir = 'artifacts_optimized'
+        self.storage_bucket = storage_bucket or os.getenv('MODEL_STORAGE_BUCKET')
         self.sportdevs_api_key = sportdevs_api_key or os.getenv('SPORTDEVS_API_KEY', '')
         self._predictors: Dict[int, HybridPredictor] = {}
     
     def _get_predictor(self, league_id: int) -> HybridPredictor:
         """Get or create predictor for a specific league"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.DEBUG)
+        
+        logger.info(f"=== _get_predictor called for league {league_id} ===")
+        
         if league_id in self._predictors:
+            logger.info(f"✅ Using cached predictor for league {league_id}")
             return self._predictors[league_id]
         
-        # Try optimized model first, then regular model
-        # Check both artifacts_optimized and artifacts directories
-        model_paths = [
-            os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model_optimized.pkl'),
-            os.path.join(self.artifacts_dir, f'league_{league_id}_model_optimized.pkl'),
-            os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model.pkl'),
-            os.path.join(self.artifacts_dir, f'league_{league_id}_model.pkl')
-        ]
+        logger.info(f"Creating new predictor for league {league_id}")
+        logger.info(f"storage_bucket={self.storage_bucket}, db_path={self.db_path}")
         
+        # Try to load model using storage_loader (supports Cloud Storage and local)
         model_path = None
-        for path in model_paths:
-            if os.path.exists(path):
-                model_path = path
-                break
+        try:
+            from .storage_loader import load_model_from_storage_or_local
+            logger.info("storage_loader imported, calling load_model_from_storage_or_local...")
+            model_path = load_model_from_storage_or_local(
+                league_id=league_id,
+                bucket_name=self.storage_bucket,
+                local_artifacts_dir=self.artifacts_optimized_dir,
+                local_artifacts_alt=self.artifacts_dir
+            )
+            logger.info(f"✅ Model loaded from storage_loader: {model_path}")
+        except ImportError as import_err:
+            logger.warning(f"storage_loader import failed: {import_err}, falling back to local-only search")
+            # Fallback to local-only search
+            # Prefer XGBoost models if available, then optimized, then regular
+            model_paths = [
+                os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model_xgboost.pkl'),
+                os.path.join(self.artifacts_dir, f'league_{league_id}_model_xgboost.pkl'),
+                os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model_optimized.pkl'),
+                os.path.join(self.artifacts_dir, f'league_{league_id}_model_optimized.pkl'),
+                os.path.join(self.artifacts_optimized_dir, f'league_{league_id}_model.pkl'),
+                os.path.join(self.artifacts_dir, f'league_{league_id}_model.pkl')
+            ]
+            
+            logger.info(f"Checking local paths: {model_paths}")
+            for path in model_paths:
+                if os.path.exists(path):
+                    model_path = path
+                    logger.info(f"✅ Found model locally: {path}")
+                    break
+            
+            if not model_path:
+                error_msg = (
+                    f"No model found for league {league_id}. "
+                    f"storage_loader unavailable (ImportError: {import_err}). "
+                    f"Checked local paths only: {model_paths}"
+                )
+                logger.error(f"❌ {error_msg}")
+                raise FileNotFoundError(error_msg)
+        except FileNotFoundError as fnf_err:
+            # Preserve the original error message from storage_loader (includes Cloud Storage paths)
+            logger.error(f"❌ FileNotFoundError from storage_loader: {fnf_err}")
+            # Re-raise with original message intact
+            raise FileNotFoundError(str(fnf_err)) from fnf_err
+        except Exception as e:
+            logger.error(f"❌ Unexpected error loading model: {e}", exc_info=True)
+            # Wrap in FileNotFoundError to maintain consistent error type
+            raise FileNotFoundError(
+                f"Error loading model for league {league_id}: {e}. "
+                f"Original error: {type(e).__name__}: {str(e)}"
+            ) from e
         
         if not model_path:
-            raise FileNotFoundError(
-                f"No model found for league {league_id}. "
-                f"Checked: {model_paths}"
-            )
+            error_msg = f"Model path is None for league {league_id}"
+            logger.error(f"❌ {error_msg}")
+            raise FileNotFoundError(error_msg)
         
-        predictor = HybridPredictor(model_path, self.sportdevs_api_key, self.db_path)
-        self._predictors[league_id] = predictor
-        return predictor
+        logger.info(f"Initializing HybridPredictor with model_path={model_path}")
+        try:
+            predictor = HybridPredictor(model_path, self.sportdevs_api_key, self.db_path)
+            logger.info(f"✅ HybridPredictor initialized successfully for league {league_id}")
+            self._predictors[league_id] = predictor
+            return predictor
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize HybridPredictor: {e}", exc_info=True)
+            raise
     
     def predict_match(self, home_team: str, away_team: str, league_id: int, 
                      match_date: str, match_id: Optional[int] = None) -> Dict[str, Any]:
@@ -379,7 +609,7 @@ def demo_hybrid_prediction():
     
     # Load a model (URC for example)
     try:
-        model_path = 'artifacts_optimized/league_4446_model_optimized.pkl'
+        model_path = 'artifacts/league_4446_model_xgboost.pkl'
         predictor = HybridPredictor(model_path, api_key)
         
         print("\n" + "="*80)

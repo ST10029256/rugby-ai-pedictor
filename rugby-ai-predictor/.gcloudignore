@@ -1,0 +1,65 @@
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore
+#
+# Virtual environments - MUST BE EXCLUDED (causes deployment failures)
+venv
+venv/
+**/venv
+**/venv/
+**/venv/**
+venv/**
+env
+env/
+**/env
+**/env/
+ENV
+ENV/
+**/ENV
+**/ENV/
+.venv
+.venv/
+**/.venv
+**/.venv/
+venv*
+**/venv*
+env*
+**/env*
+
+# Python - comprehensive exclusions
+__pycache__/
+**/__pycache__/
+**/__pycache__/**
+__pycache__/**
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
+*.pyc.*
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data
+*.sqlite
+*.db
+
+# Logs
+*.log
+firebase-debug.log
+
+# Duplicate/nested directories
+rugby-ai-predictor/
+**/rugby-ai-predictor/

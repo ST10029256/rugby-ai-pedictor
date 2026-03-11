@@ -1,0 +1,563 @@
+2026-03-09 10:18:07,933 | INFO | Starting MAZ MAXED V4 run
+2026-03-09 10:18:07,933 | INFO | Logging to: artifacts/maz_maxed_v4_run_20260309_101807.log
+2026-03-09 10:18:08,580 | INFO | [V4] Global pretraining start: rows=8845 teams=153 epochs=20 seeds=3
+2026-03-09 10:18:35,941 | INFO | [V4] Global pretraining done for seed=42
+2026-03-09 10:18:55,755 | INFO | [V4] Global pretraining done for seed=1337
+2026-03-09 10:19:16,946 | INFO | [V4] Global pretraining done for seed=9001
+2026-03-09 10:19:16,947 | INFO | [Rugby Championship] walk-forward start: rows=138, chunks=3, step=20
+2026-03-09 10:19:17,253 | INFO | [Rugby Championship] chunk 1/3 done | train=80 test=20
+2026-03-09 10:19:17,587 | INFO | [Rugby Championship] chunk 2/3 done | train=100 test=20
+2026-03-09 10:19:17,935 | INFO | [Rugby Championship] chunk 3/3 done | train=120 test=18
+2026-03-09 10:19:18,289 | INFO | [Rugby Championship] win_acc=0.741 mae=8.344 brier=0.2019 ece=0.2432 alpha_test_avg=0.554 low_conf_rate=0.483
+2026-03-09 10:19:18,292 | INFO | [United Rugby Championship] walk-forward start: rows=2226, chunks=108, step=20
+2026-03-09 10:19:18,597 | INFO | [United Rugby Championship] chunk 1/108 done | train=80 test=20
+2026-03-09 10:19:18,964 | INFO | [United Rugby Championship] chunk 2/108 done | train=100 test=20
+2026-03-09 10:19:19,282 | INFO | [United Rugby Championship] chunk 3/108 done | train=120 test=20
+2026-03-09 10:19:19,796 | INFO | [United Rugby Championship] chunk 4/108 done | train=140 test=20
+2026-03-09 10:19:20,331 | INFO | [United Rugby Championship] chunk 5/108 done | train=160 test=20
+2026-03-09 10:19:20,904 | INFO | [United Rugby Championship] chunk 6/108 done | train=180 test=20
+2026-03-09 10:19:21,450 | INFO | [United Rugby Championship] chunk 7/108 done | train=200 test=20
+2026-03-09 10:19:22,023 | INFO | [United Rugby Championship] chunk 8/108 done | train=220 test=20
+2026-03-09 10:19:22,615 | INFO | [United Rugby Championship] chunk 9/108 done | train=240 test=20
+2026-03-09 10:19:23,383 | INFO | [United Rugby Championship] chunk 10/108 done | train=260 test=20
+2026-03-09 10:19:24,207 | INFO | [United Rugby Championship] chunk 11/108 done | train=280 test=20
+2026-03-09 10:19:25,467 | INFO | [United Rugby Championship] chunk 12/108 done | train=300 test=20
+2026-03-09 10:19:26,734 | INFO | [United Rugby Championship] chunk 13/108 done | train=320 test=20
+2026-03-09 10:19:28,031 | INFO | [United Rugby Championship] chunk 14/108 done | train=340 test=20
+2026-03-09 10:19:29,418 | INFO | [United Rugby Championship] chunk 15/108 done | train=360 test=20
+2026-03-09 10:19:30,838 | INFO | [United Rugby Championship] chunk 16/108 done | train=380 test=20
+2026-03-09 10:19:32,541 | INFO | [United Rugby Championship] chunk 17/108 done | train=400 test=20
+2026-03-09 10:19:34,358 | INFO | [United Rugby Championship] chunk 18/108 done | train=420 test=20
+2026-03-09 10:19:36,066 | INFO | [United Rugby Championship] chunk 19/108 done | train=440 test=20
+2026-03-09 10:19:37,908 | INFO | [United Rugby Championship] chunk 20/108 done | train=460 test=20
+2026-03-09 10:19:39,711 | INFO | [United Rugby Championship] chunk 21/108 done | train=480 test=20
+2026-03-09 10:19:41,560 | INFO | [United Rugby Championship] chunk 22/108 done | train=500 test=20
+2026-03-09 10:19:43,638 | INFO | [United Rugby Championship] chunk 23/108 done | train=520 test=20
+2026-03-09 10:19:45,853 | INFO | [United Rugby Championship] chunk 24/108 done | train=540 test=20
+2026-03-09 10:19:48,046 | INFO | [United Rugby Championship] chunk 25/108 done | train=560 test=20
+2026-03-09 10:19:50,327 | INFO | [United Rugby Championship] chunk 26/108 done | train=580 test=20
+2026-03-09 10:19:52,653 | INFO | [United Rugby Championship] chunk 27/108 done | train=600 test=20
+2026-03-09 10:19:54,969 | INFO | [United Rugby Championship] chunk 28/108 done | train=620 test=20
+2026-03-09 10:19:57,333 | INFO | [United Rugby Championship] chunk 29/108 done | train=640 test=20
+2026-03-09 10:20:00,070 | INFO | [United Rugby Championship] chunk 30/108 done | train=660 test=20
+2026-03-09 10:20:02,764 | INFO | [United Rugby Championship] chunk 31/108 done | train=680 test=20
+2026-03-09 10:20:05,650 | INFO | [United Rugby Championship] chunk 32/108 done | train=700 test=20
+2026-03-09 10:20:08,608 | INFO | [United Rugby Championship] chunk 33/108 done | train=720 test=20
+2026-03-09 10:20:11,578 | INFO | [United Rugby Championship] chunk 34/108 done | train=740 test=20
+2026-03-09 10:20:14,177 | INFO | [United Rugby Championship] chunk 35/108 done | train=760 test=20
+2026-03-09 10:20:16,951 | INFO | [United Rugby Championship] chunk 36/108 done | train=780 test=20
+2026-03-09 10:20:20,577 | INFO | [United Rugby Championship] chunk 37/108 done | train=800 test=20
+2026-03-09 10:20:24,242 | INFO | [United Rugby Championship] chunk 38/108 done | train=820 test=20
+2026-03-09 10:20:27,978 | INFO | [United Rugby Championship] chunk 39/108 done | train=840 test=20
+2026-03-09 10:20:31,764 | INFO | [United Rugby Championship] chunk 40/108 done | train=860 test=20
+2026-03-09 10:20:35,719 | INFO | [United Rugby Championship] chunk 41/108 done | train=880 test=20
+2026-03-09 10:20:39,940 | INFO | [United Rugby Championship] chunk 42/108 done | train=900 test=20
+2026-03-09 10:20:44,167 | INFO | [United Rugby Championship] chunk 43/108 done | train=920 test=20
+2026-03-09 10:20:48,433 | INFO | [United Rugby Championship] chunk 44/108 done | train=940 test=20
+2026-03-09 10:20:52,742 | INFO | [United Rugby Championship] chunk 45/108 done | train=960 test=20
+2026-03-09 10:20:57,150 | INFO | [United Rugby Championship] chunk 46/108 done | train=980 test=20
+2026-03-09 10:21:01,530 | INFO | [United Rugby Championship] chunk 47/108 done | train=1000 test=20
+2026-03-09 10:21:06,226 | INFO | [United Rugby Championship] chunk 48/108 done | train=1020 test=20
+2026-03-09 10:21:11,216 | INFO | [United Rugby Championship] chunk 49/108 done | train=1040 test=20
+2026-03-09 10:21:16,062 | INFO | [United Rugby Championship] chunk 50/108 done | train=1060 test=20
+2026-03-09 10:21:20,838 | INFO | [United Rugby Championship] chunk 51/108 done | train=1080 test=20
+2026-03-09 10:21:25,144 | INFO | [United Rugby Championship] chunk 52/108 done | train=1100 test=20
+2026-03-09 10:21:30,435 | INFO | [United Rugby Championship] chunk 53/108 done | train=1120 test=20
+2026-03-09 10:21:35,599 | INFO | [United Rugby Championship] chunk 54/108 done | train=1140 test=20
+2026-03-09 10:21:40,986 | INFO | [United Rugby Championship] chunk 55/108 done | train=1160 test=20
+2026-03-09 10:21:46,586 | INFO | [United Rugby Championship] chunk 56/108 done | train=1180 test=20
+2026-03-09 10:21:52,104 | INFO | [United Rugby Championship] chunk 57/108 done | train=1200 test=20
+2026-03-09 10:21:57,331 | INFO | [United Rugby Championship] chunk 58/108 done | train=1220 test=20
+2026-03-09 10:22:02,619 | INFO | [United Rugby Championship] chunk 59/108 done | train=1240 test=20
+2026-03-09 10:22:08,627 | INFO | [United Rugby Championship] chunk 60/108 done | train=1260 test=20
+2026-03-09 10:22:14,530 | INFO | [United Rugby Championship] chunk 61/108 done | train=1280 test=20
+2026-03-09 10:22:20,474 | INFO | [United Rugby Championship] chunk 62/108 done | train=1300 test=20
+2026-03-09 10:22:26,231 | INFO | [United Rugby Championship] chunk 63/108 done | train=1320 test=20
+2026-03-09 10:22:31,633 | INFO | [United Rugby Championship] chunk 64/108 done | train=1340 test=20
+2026-03-09 10:22:37,236 | INFO | [United Rugby Championship] chunk 65/108 done | train=1360 test=20
+2026-03-09 10:22:42,613 | INFO | [United Rugby Championship] chunk 66/108 done | train=1380 test=20
+2026-03-09 10:22:47,888 | INFO | [United Rugby Championship] chunk 67/108 done | train=1400 test=20
+2026-03-09 10:22:53,774 | INFO | [United Rugby Championship] chunk 68/108 done | train=1420 test=20
+2026-03-09 10:23:00,218 | INFO | [United Rugby Championship] chunk 69/108 done | train=1440 test=20
+2026-03-09 10:23:07,127 | INFO | [United Rugby Championship] chunk 70/108 done | train=1460 test=20
+2026-03-09 10:23:13,289 | INFO | [United Rugby Championship] chunk 71/108 done | train=1480 test=20
+2026-03-09 10:23:19,673 | INFO | [United Rugby Championship] chunk 72/108 done | train=1500 test=20
+2026-03-09 10:23:25,788 | INFO | [United Rugby Championship] chunk 73/108 done | train=1520 test=20
+2026-03-09 10:23:32,261 | INFO | [United Rugby Championship] chunk 74/108 done | train=1540 test=20
+2026-03-09 10:23:38,995 | INFO | [United Rugby Championship] chunk 75/108 done | train=1560 test=20
+2026-03-09 10:23:46,123 | INFO | [United Rugby Championship] chunk 76/108 done | train=1580 test=20
+2026-03-09 10:23:53,174 | INFO | [United Rugby Championship] chunk 77/108 done | train=1600 test=20
+2026-03-09 10:24:00,069 | INFO | [United Rugby Championship] chunk 78/108 done | train=1620 test=20
+2026-03-09 10:24:07,406 | INFO | [United Rugby Championship] chunk 79/108 done | train=1640 test=20
+2026-03-09 10:24:14,024 | INFO | [United Rugby Championship] chunk 80/108 done | train=1660 test=20
+2026-03-09 10:24:20,647 | INFO | [United Rugby Championship] chunk 81/108 done | train=1680 test=20
+2026-03-09 10:24:27,316 | INFO | [United Rugby Championship] chunk 82/108 done | train=1700 test=20
+2026-03-09 10:24:33,874 | INFO | [United Rugby Championship] chunk 83/108 done | train=1720 test=20
+2026-03-09 10:24:40,729 | INFO | [United Rugby Championship] chunk 84/108 done | train=1740 test=20
+2026-03-09 10:24:47,361 | INFO | [United Rugby Championship] chunk 85/108 done | train=1760 test=20
+2026-03-09 10:24:54,048 | INFO | [United Rugby Championship] chunk 86/108 done | train=1780 test=20
+2026-03-09 10:25:00,998 | INFO | [United Rugby Championship] chunk 87/108 done | train=1800 test=20
+2026-03-09 10:25:08,565 | INFO | [United Rugby Championship] chunk 88/108 done | train=1820 test=20
+2026-03-09 10:25:15,788 | INFO | [United Rugby Championship] chunk 89/108 done | train=1840 test=20
+2026-03-09 10:25:23,296 | INFO | [United Rugby Championship] chunk 90/108 done | train=1860 test=20
+2026-03-09 10:25:30,852 | INFO | [United Rugby Championship] chunk 91/108 done | train=1880 test=20
+2026-03-09 10:25:38,471 | INFO | [United Rugby Championship] chunk 92/108 done | train=1900 test=20
+2026-03-09 10:25:46,092 | INFO | [United Rugby Championship] chunk 93/108 done | train=1920 test=20
+2026-03-09 10:25:53,541 | INFO | [United Rugby Championship] chunk 94/108 done | train=1940 test=20
+2026-03-09 10:26:01,164 | INFO | [United Rugby Championship] chunk 95/108 done | train=1960 test=20
+2026-03-09 10:26:09,312 | INFO | [United Rugby Championship] chunk 96/108 done | train=1980 test=20
+2026-03-09 10:26:16,962 | INFO | [United Rugby Championship] chunk 97/108 done | train=2000 test=20
+2026-03-09 10:26:25,011 | INFO | [United Rugby Championship] chunk 98/108 done | train=2020 test=20
+2026-03-09 10:26:33,197 | INFO | [United Rugby Championship] chunk 99/108 done | train=2040 test=20
+2026-03-09 10:26:41,325 | INFO | [United Rugby Championship] chunk 100/108 done | train=2060 test=20
+2026-03-09 10:26:49,014 | INFO | [United Rugby Championship] chunk 101/108 done | train=2080 test=20
+2026-03-09 10:26:57,634 | INFO | [United Rugby Championship] chunk 102/108 done | train=2100 test=20
+2026-03-09 10:27:06,567 | INFO | [United Rugby Championship] chunk 103/108 done | train=2120 test=20
+2026-03-09 10:27:14,958 | INFO | [United Rugby Championship] chunk 104/108 done | train=2140 test=20
+2026-03-09 10:27:23,134 | INFO | [United Rugby Championship] chunk 105/108 done | train=2160 test=20
+2026-03-09 10:27:30,923 | INFO | [United Rugby Championship] chunk 106/108 done | train=2180 test=20
+2026-03-09 10:27:38,733 | INFO | [United Rugby Championship] chunk 107/108 done | train=2200 test=20
+2026-03-09 10:27:47,069 | INFO | [United Rugby Championship] chunk 108/108 done | train=2220 test=6
+2026-03-09 10:27:55,357 | INFO | [United Rugby Championship] win_acc=0.807 mae=7.173 brier=0.1394 ece=0.1784 alpha_test_avg=0.560 low_conf_rate=0.448
+2026-03-09 10:27:55,361 | INFO | [Currie Cup] walk-forward start: rows=745, chunks=34, step=20
+2026-03-09 10:27:55,622 | INFO | [Currie Cup] chunk 1/34 done | train=80 test=20
+2026-03-09 10:27:55,886 | INFO | [Currie Cup] chunk 2/34 done | train=100 test=20
+2026-03-09 10:27:56,173 | INFO | [Currie Cup] chunk 3/34 done | train=120 test=20
+2026-03-09 10:27:56,610 | INFO | [Currie Cup] chunk 4/34 done | train=140 test=20
+2026-03-09 10:27:57,063 | INFO | [Currie Cup] chunk 5/34 done | train=160 test=20
+2026-03-09 10:27:57,527 | INFO | [Currie Cup] chunk 6/34 done | train=180 test=20
+2026-03-09 10:27:58,019 | INFO | [Currie Cup] chunk 7/34 done | train=200 test=20
+2026-03-09 10:27:58,521 | INFO | [Currie Cup] chunk 8/34 done | train=220 test=20
+2026-03-09 10:27:59,050 | INFO | [Currie Cup] chunk 9/34 done | train=240 test=20
+2026-03-09 10:27:59,764 | INFO | [Currie Cup] chunk 10/34 done | train=260 test=20
+2026-03-09 10:28:00,532 | INFO | [Currie Cup] chunk 11/34 done | train=280 test=20
+2026-03-09 10:28:01,645 | INFO | [Currie Cup] chunk 12/34 done | train=300 test=20
+2026-03-09 10:28:02,745 | INFO | [Currie Cup] chunk 13/34 done | train=320 test=20
+2026-03-09 10:28:03,878 | INFO | [Currie Cup] chunk 14/34 done | train=340 test=20
+2026-03-09 10:28:05,211 | INFO | [Currie Cup] chunk 15/34 done | train=360 test=20
+2026-03-09 10:28:06,578 | INFO | [Currie Cup] chunk 16/34 done | train=380 test=20
+2026-03-09 10:28:08,123 | INFO | [Currie Cup] chunk 17/34 done | train=400 test=20
+2026-03-09 10:28:09,615 | INFO | [Currie Cup] chunk 18/34 done | train=420 test=20
+2026-03-09 10:28:11,098 | INFO | [Currie Cup] chunk 19/34 done | train=440 test=20
+2026-03-09 10:28:12,509 | INFO | [Currie Cup] chunk 20/34 done | train=460 test=20
+2026-03-09 10:28:14,005 | INFO | [Currie Cup] chunk 21/34 done | train=480 test=20
+2026-03-09 10:28:15,519 | INFO | [Currie Cup] chunk 22/34 done | train=500 test=20
+2026-03-09 10:28:17,315 | INFO | [Currie Cup] chunk 23/34 done | train=520 test=20
+2026-03-09 10:28:19,101 | INFO | [Currie Cup] chunk 24/34 done | train=540 test=20
+2026-03-09 10:28:20,873 | INFO | [Currie Cup] chunk 25/34 done | train=560 test=20
+2026-03-09 10:28:22,660 | INFO | [Currie Cup] chunk 26/34 done | train=580 test=20
+2026-03-09 10:28:24,551 | INFO | [Currie Cup] chunk 27/34 done | train=600 test=20
+2026-03-09 10:28:26,468 | INFO | [Currie Cup] chunk 28/34 done | train=620 test=20
+2026-03-09 10:28:28,298 | INFO | [Currie Cup] chunk 29/34 done | train=640 test=20
+2026-03-09 10:28:30,405 | INFO | [Currie Cup] chunk 30/34 done | train=660 test=20
+2026-03-09 10:28:32,553 | INFO | [Currie Cup] chunk 31/34 done | train=680 test=20
+2026-03-09 10:28:34,759 | INFO | [Currie Cup] chunk 32/34 done | train=700 test=20
+2026-03-09 10:28:37,062 | INFO | [Currie Cup] chunk 33/34 done | train=720 test=20
+2026-03-09 10:28:39,262 | INFO | [Currie Cup] chunk 34/34 done | train=740 test=5
+2026-03-09 10:28:41,599 | INFO | [Currie Cup] win_acc=0.738 mae=8.795 brier=0.1747 ece=0.2190 alpha_test_avg=0.575 low_conf_rate=0.406
+2026-03-09 10:28:41,601 | INFO | [Rugby World Cup] walk-forward start: rows=201, chunks=7, step=20
+2026-03-09 10:28:41,869 | INFO | [Rugby World Cup] chunk 1/7 done | train=80 test=20
+2026-03-09 10:28:42,141 | INFO | [Rugby World Cup] chunk 2/7 done | train=100 test=20
+2026-03-09 10:28:42,433 | INFO | [Rugby World Cup] chunk 3/7 done | train=120 test=20
+2026-03-09 10:28:42,873 | INFO | [Rugby World Cup] chunk 4/7 done | train=140 test=20
+2026-03-09 10:28:43,337 | INFO | [Rugby World Cup] chunk 5/7 done | train=160 test=20
+2026-03-09 10:28:43,817 | INFO | [Rugby World Cup] chunk 6/7 done | train=180 test=20
+2026-03-09 10:28:44,326 | INFO | [Rugby World Cup] chunk 7/7 done | train=200 test=1
+2026-03-09 10:28:44,855 | INFO | [Rugby World Cup] win_acc=0.777 mae=10.776 brier=0.1606 ece=0.2219 alpha_test_avg=0.590 low_conf_rate=0.455
+2026-03-09 10:28:44,857 | INFO | [Super Rugby] walk-forward start: rows=1756, chunks=84, step=20
+2026-03-09 10:28:45,121 | INFO | [Super Rugby] chunk 1/84 done | train=80 test=20
+2026-03-09 10:28:45,400 | INFO | [Super Rugby] chunk 2/84 done | train=100 test=20
+2026-03-09 10:28:45,706 | INFO | [Super Rugby] chunk 3/84 done | train=120 test=20
+2026-03-09 10:28:46,184 | INFO | [Super Rugby] chunk 4/84 done | train=140 test=20
+2026-03-09 10:28:46,660 | INFO | [Super Rugby] chunk 5/84 done | train=160 test=20
+2026-03-09 10:28:47,160 | INFO | [Super Rugby] chunk 6/84 done | train=180 test=20
+2026-03-09 10:28:47,675 | INFO | [Super Rugby] chunk 7/84 done | train=200 test=20
+2026-03-09 10:28:48,189 | INFO | [Super Rugby] chunk 8/84 done | train=220 test=20
+2026-03-09 10:28:48,722 | INFO | [Super Rugby] chunk 9/84 done | train=240 test=20
+2026-03-09 10:28:49,389 | INFO | [Super Rugby] chunk 10/84 done | train=260 test=20
+2026-03-09 10:28:50,144 | INFO | [Super Rugby] chunk 11/84 done | train=280 test=20
+2026-03-09 10:28:51,276 | INFO | [Super Rugby] chunk 12/84 done | train=300 test=20
+2026-03-09 10:28:52,427 | INFO | [Super Rugby] chunk 13/84 done | train=320 test=20
+2026-03-09 10:28:53,622 | INFO | [Super Rugby] chunk 14/84 done | train=340 test=20
+2026-03-09 10:28:54,896 | INFO | [Super Rugby] chunk 15/84 done | train=360 test=20
+2026-03-09 10:28:56,103 | INFO | [Super Rugby] chunk 16/84 done | train=380 test=20
+2026-03-09 10:28:57,581 | INFO | [Super Rugby] chunk 17/84 done | train=400 test=20
+2026-03-09 10:28:59,065 | INFO | [Super Rugby] chunk 18/84 done | train=420 test=20
+2026-03-09 10:29:00,651 | INFO | [Super Rugby] chunk 19/84 done | train=440 test=20
+2026-03-09 10:29:02,222 | INFO | [Super Rugby] chunk 20/84 done | train=460 test=20
+2026-03-09 10:29:03,865 | INFO | [Super Rugby] chunk 21/84 done | train=480 test=20
+2026-03-09 10:29:05,553 | INFO | [Super Rugby] chunk 22/84 done | train=500 test=20
+2026-03-09 10:29:07,472 | INFO | [Super Rugby] chunk 23/84 done | train=520 test=20
+2026-03-09 10:29:09,233 | INFO | [Super Rugby] chunk 24/84 done | train=540 test=20
+2026-03-09 10:29:11,068 | INFO | [Super Rugby] chunk 25/84 done | train=560 test=20
+2026-03-09 10:29:12,867 | INFO | [Super Rugby] chunk 26/84 done | train=580 test=20
+2026-03-09 10:29:14,686 | INFO | [Super Rugby] chunk 27/84 done | train=600 test=20
+2026-03-09 10:29:16,564 | INFO | [Super Rugby] chunk 28/84 done | train=620 test=20
+2026-03-09 10:29:18,476 | INFO | [Super Rugby] chunk 29/84 done | train=640 test=20
+2026-03-09 10:29:20,578 | INFO | [Super Rugby] chunk 30/84 done | train=660 test=20
+2026-03-09 10:29:22,741 | INFO | [Super Rugby] chunk 31/84 done | train=680 test=20
+2026-03-09 10:29:24,931 | INFO | [Super Rugby] chunk 32/84 done | train=700 test=20
+2026-03-09 10:29:27,180 | INFO | [Super Rugby] chunk 33/84 done | train=720 test=20
+2026-03-09 10:29:29,438 | INFO | [Super Rugby] chunk 34/84 done | train=740 test=20
+2026-03-09 10:29:31,657 | INFO | [Super Rugby] chunk 35/84 done | train=760 test=20
+2026-03-09 10:29:34,199 | INFO | [Super Rugby] chunk 36/84 done | train=780 test=20
+2026-03-09 10:29:37,405 | INFO | [Super Rugby] chunk 37/84 done | train=800 test=20
+2026-03-09 10:29:40,671 | INFO | [Super Rugby] chunk 38/84 done | train=820 test=20
+2026-03-09 10:29:43,934 | INFO | [Super Rugby] chunk 39/84 done | train=840 test=20
+2026-03-09 10:29:47,211 | INFO | [Super Rugby] chunk 40/84 done | train=860 test=20
+2026-03-09 10:29:50,546 | INFO | [Super Rugby] chunk 41/84 done | train=880 test=20
+2026-03-09 10:29:54,183 | INFO | [Super Rugby] chunk 42/84 done | train=900 test=20
+2026-03-09 10:29:58,694 | INFO | [Super Rugby] chunk 43/84 done | train=920 test=20
+2026-03-09 10:30:03,392 | INFO | [Super Rugby] chunk 44/84 done | train=940 test=20
+2026-03-09 10:30:10,588 | INFO | [Super Rugby] chunk 45/84 done | train=960 test=20
+2026-03-09 10:30:14,884 | INFO | [Super Rugby] chunk 46/84 done | train=980 test=20
+2026-03-09 10:30:21,882 | INFO | [Super Rugby] chunk 47/84 done | train=1000 test=20
+2026-03-09 10:30:26,627 | INFO | [Super Rugby] chunk 48/84 done | train=1020 test=20
+2026-03-09 10:30:31,786 | INFO | [Super Rugby] chunk 49/84 done | train=1040 test=20
+2026-03-09 10:30:36,552 | INFO | [Super Rugby] chunk 50/84 done | train=1060 test=20
+2026-03-09 10:30:41,920 | INFO | [Super Rugby] chunk 51/84 done | train=1080 test=20
+2026-03-09 10:30:47,359 | INFO | [Super Rugby] chunk 52/84 done | train=1100 test=20
+2026-03-09 10:30:52,713 | INFO | [Super Rugby] chunk 53/84 done | train=1120 test=20
+2026-03-09 10:30:58,126 | INFO | [Super Rugby] chunk 54/84 done | train=1140 test=20
+2026-03-09 10:31:03,905 | INFO | [Super Rugby] chunk 55/84 done | train=1160 test=20
+2026-03-09 10:31:09,740 | INFO | [Super Rugby] chunk 56/84 done | train=1180 test=20
+2026-03-09 10:31:15,919 | INFO | [Super Rugby] chunk 57/84 done | train=1200 test=20
+2026-03-09 10:31:23,117 | INFO | [Super Rugby] chunk 58/84 done | train=1220 test=20
+2026-03-09 10:31:28,423 | INFO | [Super Rugby] chunk 59/84 done | train=1240 test=20
+2026-03-09 10:31:34,082 | INFO | [Super Rugby] chunk 60/84 done | train=1260 test=20
+2026-03-09 10:31:39,882 | INFO | [Super Rugby] chunk 61/84 done | train=1280 test=20
+2026-03-09 10:31:46,470 | INFO | [Super Rugby] chunk 62/84 done | train=1300 test=20
+2026-03-09 10:31:52,117 | INFO | [Super Rugby] chunk 63/84 done | train=1320 test=20
+2026-03-09 10:31:58,372 | INFO | [Super Rugby] chunk 64/84 done | train=1340 test=20
+2026-03-09 10:32:04,213 | INFO | [Super Rugby] chunk 65/84 done | train=1360 test=20
+2026-03-09 10:32:10,512 | INFO | [Super Rugby] chunk 66/84 done | train=1380 test=20
+2026-03-09 10:32:16,348 | INFO | [Super Rugby] chunk 67/84 done | train=1400 test=20
+2026-03-09 10:32:22,394 | INFO | [Super Rugby] chunk 68/84 done | train=1420 test=20
+2026-03-09 10:32:28,554 | INFO | [Super Rugby] chunk 69/84 done | train=1440 test=20
+2026-03-09 10:32:34,777 | INFO | [Super Rugby] chunk 70/84 done | train=1460 test=20
+2026-03-09 10:32:41,646 | INFO | [Super Rugby] chunk 71/84 done | train=1480 test=20
+2026-03-09 10:32:48,173 | INFO | [Super Rugby] chunk 72/84 done | train=1500 test=20
+2026-03-09 10:32:54,784 | INFO | [Super Rugby] chunk 73/84 done | train=1520 test=20
+2026-03-09 10:33:01,457 | INFO | [Super Rugby] chunk 74/84 done | train=1540 test=20
+2026-03-09 10:33:08,789 | INFO | [Super Rugby] chunk 75/84 done | train=1560 test=20
+2026-03-09 10:33:15,402 | INFO | [Super Rugby] chunk 76/84 done | train=1580 test=20
+2026-03-09 10:33:22,073 | INFO | [Super Rugby] chunk 77/84 done | train=1600 test=20
+2026-03-09 10:33:29,000 | INFO | [Super Rugby] chunk 78/84 done | train=1620 test=20
+2026-03-09 10:33:36,282 | INFO | [Super Rugby] chunk 79/84 done | train=1640 test=20
+2026-03-09 10:33:44,748 | INFO | [Super Rugby] chunk 80/84 done | train=1660 test=20
+2026-03-09 10:33:52,831 | INFO | [Super Rugby] chunk 81/84 done | train=1680 test=20
+2026-03-09 10:34:01,361 | INFO | [Super Rugby] chunk 82/84 done | train=1700 test=20
+2026-03-09 10:34:10,243 | INFO | [Super Rugby] chunk 83/84 done | train=1720 test=20
+2026-03-09 10:34:18,274 | INFO | [Super Rugby] chunk 84/84 done | train=1740 test=16
+2026-03-09 10:34:25,898 | INFO | [Super Rugby] win_acc=0.786 mae=7.767 brier=0.1601 ece=0.1997 alpha_test_avg=0.597 low_conf_rate=0.504
+2026-03-09 10:34:25,904 | INFO | [French Top 14] walk-forward start: rows=2922, chunks=143, step=20
+2026-03-09 10:34:26,205 | INFO | [French Top 14] chunk 1/143 done | train=80 test=20
+2026-03-09 10:34:26,549 | INFO | [French Top 14] chunk 2/143 done | train=100 test=20
+2026-03-09 10:34:26,942 | INFO | [French Top 14] chunk 3/143 done | train=120 test=20
+2026-03-09 10:34:27,530 | INFO | [French Top 14] chunk 4/143 done | train=140 test=20
+2026-03-09 10:34:28,114 | INFO | [French Top 14] chunk 5/143 done | train=160 test=20
+2026-03-09 10:34:28,779 | INFO | [French Top 14] chunk 6/143 done | train=180 test=20
+2026-03-09 10:34:29,380 | INFO | [French Top 14] chunk 7/143 done | train=200 test=20
+2026-03-09 10:34:29,970 | INFO | [French Top 14] chunk 8/143 done | train=220 test=20
+2026-03-09 10:34:30,635 | INFO | [French Top 14] chunk 9/143 done | train=240 test=20
+2026-03-09 10:34:31,420 | INFO | [French Top 14] chunk 10/143 done | train=260 test=20
+2026-03-09 10:34:32,349 | INFO | [French Top 14] chunk 11/143 done | train=280 test=20
+2026-03-09 10:34:33,578 | INFO | [French Top 14] chunk 12/143 done | train=300 test=20
+2026-03-09 10:34:34,888 | INFO | [French Top 14] chunk 13/143 done | train=320 test=20
+2026-03-09 10:34:36,222 | INFO | [French Top 14] chunk 14/143 done | train=340 test=20
+2026-03-09 10:34:37,548 | INFO | [French Top 14] chunk 15/143 done | train=360 test=20
+2026-03-09 10:34:38,872 | INFO | [French Top 14] chunk 16/143 done | train=380 test=20
+2026-03-09 10:34:40,545 | INFO | [French Top 14] chunk 17/143 done | train=400 test=20
+2026-03-09 10:34:42,251 | INFO | [French Top 14] chunk 18/143 done | train=420 test=20
+2026-03-09 10:34:43,973 | INFO | [French Top 14] chunk 19/143 done | train=440 test=20
+2026-03-09 10:34:45,710 | INFO | [French Top 14] chunk 20/143 done | train=460 test=20
+2026-03-09 10:34:47,489 | INFO | [French Top 14] chunk 21/143 done | train=480 test=20
+2026-03-09 10:34:49,322 | INFO | [French Top 14] chunk 22/143 done | train=500 test=20
+2026-03-09 10:34:51,333 | INFO | [French Top 14] chunk 23/143 done | train=520 test=20
+2026-03-09 10:34:53,474 | INFO | [French Top 14] chunk 24/143 done | train=540 test=20
+2026-03-09 10:34:55,666 | INFO | [French Top 14] chunk 25/143 done | train=560 test=20
+2026-03-09 10:34:57,913 | INFO | [French Top 14] chunk 26/143 done | train=580 test=20
+2026-03-09 10:35:00,255 | INFO | [French Top 14] chunk 27/143 done | train=600 test=20
+2026-03-09 10:35:02,607 | INFO | [French Top 14] chunk 28/143 done | train=620 test=20
+2026-03-09 10:35:04,827 | INFO | [French Top 14] chunk 29/143 done | train=640 test=20
+2026-03-09 10:35:07,403 | INFO | [French Top 14] chunk 30/143 done | train=660 test=20
+2026-03-09 10:35:09,777 | INFO | [French Top 14] chunk 31/143 done | train=680 test=20
+2026-03-09 10:35:12,256 | INFO | [French Top 14] chunk 32/143 done | train=700 test=20
+2026-03-09 10:35:14,687 | INFO | [French Top 14] chunk 33/143 done | train=720 test=20
+2026-03-09 10:35:17,251 | INFO | [French Top 14] chunk 34/143 done | train=740 test=20
+2026-03-09 10:35:20,037 | INFO | [French Top 14] chunk 35/143 done | train=760 test=20
+2026-03-09 10:35:22,924 | INFO | [French Top 14] chunk 36/143 done | train=780 test=20
+2026-03-09 10:35:26,936 | INFO | [French Top 14] chunk 37/143 done | train=800 test=20
+2026-03-09 10:35:30,987 | INFO | [French Top 14] chunk 38/143 done | train=820 test=20
+2026-03-09 10:35:35,073 | INFO | [French Top 14] chunk 39/143 done | train=840 test=20
+2026-03-09 10:35:38,976 | INFO | [French Top 14] chunk 40/143 done | train=860 test=20
+2026-03-09 10:35:42,709 | INFO | [French Top 14] chunk 41/143 done | train=880 test=20
+2026-03-09 10:35:46,832 | INFO | [French Top 14] chunk 42/143 done | train=900 test=20
+2026-03-09 10:35:51,132 | INFO | [French Top 14] chunk 43/143 done | train=920 test=20
+2026-03-09 10:35:55,538 | INFO | [French Top 14] chunk 44/143 done | train=940 test=20
+2026-03-09 10:36:00,050 | INFO | [French Top 14] chunk 45/143 done | train=960 test=20
+2026-03-09 10:36:04,858 | INFO | [French Top 14] chunk 46/143 done | train=980 test=20
+2026-03-09 10:36:10,292 | INFO | [French Top 14] chunk 47/143 done | train=1000 test=20
+2026-03-09 10:36:15,246 | INFO | [French Top 14] chunk 48/143 done | train=1020 test=20
+2026-03-09 10:36:20,914 | INFO | [French Top 14] chunk 49/143 done | train=1040 test=20
+2026-03-09 10:36:26,478 | INFO | [French Top 14] chunk 50/143 done | train=1060 test=20
+2026-03-09 10:36:31,729 | INFO | [French Top 14] chunk 51/143 done | train=1080 test=20
+2026-03-09 10:36:36,923 | INFO | [French Top 14] chunk 52/143 done | train=1100 test=20
+2026-03-09 10:36:42,120 | INFO | [French Top 14] chunk 53/143 done | train=1120 test=20
+2026-03-09 10:36:47,142 | INFO | [French Top 14] chunk 54/143 done | train=1140 test=20
+2026-03-09 10:36:53,005 | INFO | [French Top 14] chunk 55/143 done | train=1160 test=20
+2026-03-09 10:36:58,689 | INFO | [French Top 14] chunk 56/143 done | train=1180 test=20
+2026-03-09 10:37:04,373 | INFO | [French Top 14] chunk 57/143 done | train=1200 test=20
+2026-03-09 10:37:10,291 | INFO | [French Top 14] chunk 58/143 done | train=1220 test=20
+2026-03-09 10:37:15,640 | INFO | [French Top 14] chunk 59/143 done | train=1240 test=20
+2026-03-09 10:37:20,967 | INFO | [French Top 14] chunk 60/143 done | train=1260 test=20
+2026-03-09 10:37:26,448 | INFO | [French Top 14] chunk 61/143 done | train=1280 test=20
+2026-03-09 10:37:32,362 | INFO | [French Top 14] chunk 62/143 done | train=1300 test=20
+2026-03-09 10:37:38,707 | INFO | [French Top 14] chunk 63/143 done | train=1320 test=20
+2026-03-09 10:37:45,197 | INFO | [French Top 14] chunk 64/143 done | train=1340 test=20
+2026-03-09 10:37:51,652 | INFO | [French Top 14] chunk 65/143 done | train=1360 test=20
+2026-03-09 10:37:57,715 | INFO | [French Top 14] chunk 66/143 done | train=1380 test=20
+2026-03-09 10:38:04,147 | INFO | [French Top 14] chunk 67/143 done | train=1400 test=20
+2026-03-09 10:38:11,270 | INFO | [French Top 14] chunk 68/143 done | train=1420 test=20
+2026-03-09 10:38:17,866 | INFO | [French Top 14] chunk 69/143 done | train=1440 test=20
+2026-03-09 10:38:24,709 | INFO | [French Top 14] chunk 70/143 done | train=1460 test=20
+2026-03-09 10:38:31,724 | INFO | [French Top 14] chunk 71/143 done | train=1480 test=20
+2026-03-09 10:38:38,967 | INFO | [French Top 14] chunk 72/143 done | train=1500 test=20
+2026-03-09 10:38:45,992 | INFO | [French Top 14] chunk 73/143 done | train=1520 test=20
+2026-03-09 10:38:52,796 | INFO | [French Top 14] chunk 74/143 done | train=1540 test=20
+2026-03-09 10:38:59,733 | INFO | [French Top 14] chunk 75/143 done | train=1560 test=20
+2026-03-09 10:39:06,682 | INFO | [French Top 14] chunk 76/143 done | train=1580 test=20
+2026-03-09 10:39:13,472 | INFO | [French Top 14] chunk 77/143 done | train=1600 test=20
+2026-03-09 10:39:20,659 | INFO | [French Top 14] chunk 78/143 done | train=1620 test=20
+2026-03-09 10:39:27,028 | INFO | [French Top 14] chunk 79/143 done | train=1640 test=20
+2026-03-09 10:39:33,405 | INFO | [French Top 14] chunk 80/143 done | train=1660 test=20
+2026-03-09 10:39:40,269 | INFO | [French Top 14] chunk 81/143 done | train=1680 test=20
+2026-03-09 10:39:47,219 | INFO | [French Top 14] chunk 82/143 done | train=1700 test=20
+2026-03-09 10:39:54,439 | INFO | [French Top 14] chunk 83/143 done | train=1720 test=20
+2026-03-09 10:40:01,809 | INFO | [French Top 14] chunk 84/143 done | train=1740 test=20
+2026-03-09 10:40:09,879 | INFO | [French Top 14] chunk 85/143 done | train=1760 test=20
+2026-03-09 10:40:17,480 | INFO | [French Top 14] chunk 86/143 done | train=1780 test=20
+2026-03-09 10:40:26,157 | INFO | [French Top 14] chunk 87/143 done | train=1800 test=20
+2026-03-09 10:40:33,765 | INFO | [French Top 14] chunk 88/143 done | train=1820 test=20
+2026-03-09 10:40:40,985 | INFO | [French Top 14] chunk 89/143 done | train=1840 test=20
+2026-03-09 10:40:48,292 | INFO | [French Top 14] chunk 90/143 done | train=1860 test=20
+2026-03-09 10:40:55,719 | INFO | [French Top 14] chunk 91/143 done | train=1880 test=20
+2026-03-09 10:41:03,414 | INFO | [French Top 14] chunk 92/143 done | train=1900 test=20
+2026-03-09 10:41:11,583 | INFO | [French Top 14] chunk 93/143 done | train=1920 test=20
+2026-03-09 10:41:19,440 | INFO | [French Top 14] chunk 94/143 done | train=1940 test=20
+2026-03-09 10:41:27,073 | INFO | [French Top 14] chunk 95/143 done | train=1960 test=20
+2026-03-09 10:41:34,700 | INFO | [French Top 14] chunk 96/143 done | train=1980 test=20
+2026-03-09 10:41:42,581 | INFO | [French Top 14] chunk 97/143 done | train=2000 test=20
+2026-03-09 10:41:50,935 | INFO | [French Top 14] chunk 98/143 done | train=2020 test=20
+2026-03-09 10:41:59,297 | INFO | [French Top 14] chunk 99/143 done | train=2040 test=20
+2026-03-09 10:42:08,494 | INFO | [French Top 14] chunk 100/143 done | train=2060 test=20
+2026-03-09 10:42:17,187 | INFO | [French Top 14] chunk 101/143 done | train=2080 test=20
+2026-03-09 10:42:26,158 | INFO | [French Top 14] chunk 102/143 done | train=2100 test=20
+2026-03-09 10:42:34,761 | INFO | [French Top 14] chunk 103/143 done | train=2120 test=20
+2026-03-09 10:42:43,624 | INFO | [French Top 14] chunk 104/143 done | train=2140 test=20
+2026-03-09 10:42:52,645 | INFO | [French Top 14] chunk 105/143 done | train=2160 test=20
+2026-03-09 10:43:01,794 | INFO | [French Top 14] chunk 106/143 done | train=2180 test=20
+2026-03-09 10:43:11,136 | INFO | [French Top 14] chunk 107/143 done | train=2200 test=20
+2026-03-09 10:43:19,976 | INFO | [French Top 14] chunk 108/143 done | train=2220 test=20
+2026-03-09 10:43:29,176 | INFO | [French Top 14] chunk 109/143 done | train=2240 test=20
+2026-03-09 10:43:38,708 | INFO | [French Top 14] chunk 110/143 done | train=2260 test=20
+2026-03-09 10:43:48,264 | INFO | [French Top 14] chunk 111/143 done | train=2280 test=20
+2026-03-09 10:43:58,545 | INFO | [French Top 14] chunk 112/143 done | train=2300 test=20
+2026-03-09 10:44:10,571 | INFO | [French Top 14] chunk 113/143 done | train=2320 test=20
+2026-03-09 10:44:21,048 | INFO | [French Top 14] chunk 114/143 done | train=2340 test=20
+2026-03-09 10:44:31,647 | INFO | [French Top 14] chunk 115/143 done | train=2360 test=20
+2026-03-09 10:44:42,194 | INFO | [French Top 14] chunk 116/143 done | train=2380 test=20
+2026-03-09 10:44:52,146 | INFO | [French Top 14] chunk 117/143 done | train=2400 test=20
+2026-03-09 10:45:02,378 | INFO | [French Top 14] chunk 118/143 done | train=2420 test=20
+2026-03-09 10:45:13,314 | INFO | [French Top 14] chunk 119/143 done | train=2440 test=20
+2026-03-09 10:45:24,031 | INFO | [French Top 14] chunk 120/143 done | train=2460 test=20
+2026-03-09 10:45:34,647 | INFO | [French Top 14] chunk 121/143 done | train=2480 test=20
+2026-03-09 10:45:44,983 | INFO | [French Top 14] chunk 122/143 done | train=2500 test=20
+2026-03-09 10:45:56,174 | INFO | [French Top 14] chunk 123/143 done | train=2520 test=20
+2026-03-09 10:46:07,643 | INFO | [French Top 14] chunk 124/143 done | train=2540 test=20
+2026-03-09 10:46:18,564 | INFO | [French Top 14] chunk 125/143 done | train=2560 test=20
+2026-03-09 10:46:29,844 | INFO | [French Top 14] chunk 126/143 done | train=2580 test=20
+2026-03-09 10:46:41,234 | INFO | [French Top 14] chunk 127/143 done | train=2600 test=20
+2026-03-09 10:46:53,119 | INFO | [French Top 14] chunk 128/143 done | train=2620 test=20
+2026-03-09 10:47:05,046 | INFO | [French Top 14] chunk 129/143 done | train=2640 test=20
+2026-03-09 10:47:17,007 | INFO | [French Top 14] chunk 130/143 done | train=2660 test=20
+2026-03-09 10:47:28,721 | INFO | [French Top 14] chunk 131/143 done | train=2680 test=20
+2026-03-09 10:47:40,628 | INFO | [French Top 14] chunk 132/143 done | train=2700 test=20
+2026-03-09 10:47:52,714 | INFO | [French Top 14] chunk 133/143 done | train=2720 test=20
+2026-03-09 10:48:04,861 | INFO | [French Top 14] chunk 134/143 done | train=2740 test=20
+2026-03-09 10:48:17,050 | INFO | [French Top 14] chunk 135/143 done | train=2760 test=20
+2026-03-09 10:48:29,916 | INFO | [French Top 14] chunk 136/143 done | train=2780 test=20
+2026-03-09 10:48:44,607 | INFO | [French Top 14] chunk 137/143 done | train=2800 test=20
+2026-03-09 10:48:58,982 | INFO | [French Top 14] chunk 138/143 done | train=2820 test=20
+2026-03-09 10:49:13,506 | INFO | [French Top 14] chunk 139/143 done | train=2840 test=20
+2026-03-09 10:49:27,868 | INFO | [French Top 14] chunk 140/143 done | train=2860 test=20
+2026-03-09 10:49:42,519 | INFO | [French Top 14] chunk 141/143 done | train=2880 test=20
+2026-03-09 10:49:56,818 | INFO | [French Top 14] chunk 142/143 done | train=2900 test=20
+2026-03-09 10:50:12,985 | INFO | [French Top 14] chunk 143/143 done | train=2920 test=2
+2026-03-09 10:50:28,415 | INFO | [French Top 14] win_acc=0.816 mae=7.117 brier=0.1412 ece=0.1744 alpha_test_avg=0.553 low_conf_rate=0.452
+2026-03-09 10:50:28,419 | INFO | [English Premiership Rugby] walk-forward start: rows=2050, chunks=99, step=20
+2026-03-09 10:50:28,768 | INFO | [English Premiership Rugby] chunk 1/99 done | train=80 test=20
+2026-03-09 10:50:29,136 | INFO | [English Premiership Rugby] chunk 2/99 done | train=100 test=20
+2026-03-09 10:50:29,540 | INFO | [English Premiership Rugby] chunk 3/99 done | train=120 test=20
+2026-03-09 10:50:30,164 | INFO | [English Premiership Rugby] chunk 4/99 done | train=140 test=20
+2026-03-09 10:50:30,817 | INFO | [English Premiership Rugby] chunk 5/99 done | train=160 test=20
+2026-03-09 10:50:31,503 | INFO | [English Premiership Rugby] chunk 6/99 done | train=180 test=20
+2026-03-09 10:50:32,199 | INFO | [English Premiership Rugby] chunk 7/99 done | train=200 test=20
+2026-03-09 10:50:32,923 | INFO | [English Premiership Rugby] chunk 8/99 done | train=220 test=20
+2026-03-09 10:50:33,670 | INFO | [English Premiership Rugby] chunk 9/99 done | train=240 test=20
+2026-03-09 10:50:34,709 | INFO | [English Premiership Rugby] chunk 10/99 done | train=260 test=20
+2026-03-09 10:50:35,772 | INFO | [English Premiership Rugby] chunk 11/99 done | train=280 test=20
+2026-03-09 10:50:37,090 | INFO | [English Premiership Rugby] chunk 12/99 done | train=300 test=20
+2026-03-09 10:50:38,505 | INFO | [English Premiership Rugby] chunk 13/99 done | train=320 test=20
+2026-03-09 10:50:40,143 | INFO | [English Premiership Rugby] chunk 14/99 done | train=340 test=20
+2026-03-09 10:50:41,626 | INFO | [English Premiership Rugby] chunk 15/99 done | train=360 test=20
+2026-03-09 10:50:43,129 | INFO | [English Premiership Rugby] chunk 16/99 done | train=380 test=20
+2026-03-09 10:50:44,909 | INFO | [English Premiership Rugby] chunk 17/99 done | train=400 test=20
+2026-03-09 10:50:46,829 | INFO | [English Premiership Rugby] chunk 18/99 done | train=420 test=20
+2026-03-09 10:50:48,666 | INFO | [English Premiership Rugby] chunk 19/99 done | train=440 test=20
+2026-03-09 10:50:50,469 | INFO | [English Premiership Rugby] chunk 20/99 done | train=460 test=20
+2026-03-09 10:50:52,427 | INFO | [English Premiership Rugby] chunk 21/99 done | train=480 test=20
+2026-03-09 10:50:54,391 | INFO | [English Premiership Rugby] chunk 22/99 done | train=500 test=20
+2026-03-09 10:50:56,695 | INFO | [English Premiership Rugby] chunk 23/99 done | train=520 test=20
+2026-03-09 10:50:59,214 | INFO | [English Premiership Rugby] chunk 24/99 done | train=540 test=20
+2026-03-09 10:51:01,768 | INFO | [English Premiership Rugby] chunk 25/99 done | train=560 test=20
+2026-03-09 10:51:04,535 | INFO | [English Premiership Rugby] chunk 26/99 done | train=580 test=20
+2026-03-09 10:51:07,455 | INFO | [English Premiership Rugby] chunk 27/99 done | train=600 test=20
+2026-03-09 10:51:09,863 | INFO | [English Premiership Rugby] chunk 28/99 done | train=620 test=20
+2026-03-09 10:51:12,486 | INFO | [English Premiership Rugby] chunk 29/99 done | train=640 test=20
+2026-03-09 10:51:15,471 | INFO | [English Premiership Rugby] chunk 30/99 done | train=660 test=20
+2026-03-09 10:51:18,289 | INFO | [English Premiership Rugby] chunk 31/99 done | train=680 test=20
+2026-03-09 10:51:20,829 | INFO | [English Premiership Rugby] chunk 32/99 done | train=700 test=20
+2026-03-09 10:51:23,873 | INFO | [English Premiership Rugby] chunk 33/99 done | train=720 test=20
+2026-03-09 10:51:26,938 | INFO | [English Premiership Rugby] chunk 34/99 done | train=740 test=20
+2026-03-09 10:51:29,829 | INFO | [English Premiership Rugby] chunk 35/99 done | train=760 test=20
+2026-03-09 10:51:33,068 | INFO | [English Premiership Rugby] chunk 36/99 done | train=780 test=20
+2026-03-09 10:51:37,315 | INFO | [English Premiership Rugby] chunk 37/99 done | train=800 test=20
+2026-03-09 10:51:41,875 | INFO | [English Premiership Rugby] chunk 38/99 done | train=820 test=20
+2026-03-09 10:51:46,430 | INFO | [English Premiership Rugby] chunk 39/99 done | train=840 test=20
+2026-03-09 10:51:50,924 | INFO | [English Premiership Rugby] chunk 40/99 done | train=860 test=20
+2026-03-09 10:51:55,421 | INFO | [English Premiership Rugby] chunk 41/99 done | train=880 test=20
+2026-03-09 10:51:59,793 | INFO | [English Premiership Rugby] chunk 42/99 done | train=900 test=20
+2026-03-09 10:52:04,312 | INFO | [English Premiership Rugby] chunk 43/99 done | train=920 test=20
+2026-03-09 10:52:09,154 | INFO | [English Premiership Rugby] chunk 44/99 done | train=940 test=20
+2026-03-09 10:52:14,058 | INFO | [English Premiership Rugby] chunk 45/99 done | train=960 test=20
+2026-03-09 10:52:18,753 | INFO | [English Premiership Rugby] chunk 46/99 done | train=980 test=20
+2026-03-09 10:52:23,459 | INFO | [English Premiership Rugby] chunk 47/99 done | train=1000 test=20
+2026-03-09 10:52:27,993 | INFO | [English Premiership Rugby] chunk 48/99 done | train=1020 test=20
+2026-03-09 10:52:33,054 | INFO | [English Premiership Rugby] chunk 49/99 done | train=1040 test=20
+2026-03-09 10:52:38,187 | INFO | [English Premiership Rugby] chunk 50/99 done | train=1060 test=20
+2026-03-09 10:52:43,480 | INFO | [English Premiership Rugby] chunk 51/99 done | train=1080 test=20
+2026-03-09 10:52:49,077 | INFO | [English Premiership Rugby] chunk 52/99 done | train=1100 test=20
+2026-03-09 10:52:54,693 | INFO | [English Premiership Rugby] chunk 53/99 done | train=1120 test=20
+2026-03-09 10:53:00,322 | INFO | [English Premiership Rugby] chunk 54/99 done | train=1140 test=20
+2026-03-09 10:53:06,112 | INFO | [English Premiership Rugby] chunk 55/99 done | train=1160 test=20
+2026-03-09 10:53:12,019 | INFO | [English Premiership Rugby] chunk 56/99 done | train=1180 test=20
+2026-03-09 10:53:17,968 | INFO | [English Premiership Rugby] chunk 57/99 done | train=1200 test=20
+2026-03-09 10:53:24,106 | INFO | [English Premiership Rugby] chunk 58/99 done | train=1220 test=20
+2026-03-09 10:53:29,890 | INFO | [English Premiership Rugby] chunk 59/99 done | train=1240 test=20
+2026-03-09 10:53:36,206 | INFO | [English Premiership Rugby] chunk 60/99 done | train=1260 test=20
+2026-03-09 10:53:42,896 | INFO | [English Premiership Rugby] chunk 61/99 done | train=1280 test=20
+2026-03-09 10:53:49,825 | INFO | [English Premiership Rugby] chunk 62/99 done | train=1300 test=20
+2026-03-09 10:53:56,776 | INFO | [English Premiership Rugby] chunk 63/99 done | train=1320 test=20
+2026-03-09 10:54:04,565 | INFO | [English Premiership Rugby] chunk 64/99 done | train=1340 test=20
+2026-03-09 10:54:11,848 | INFO | [English Premiership Rugby] chunk 65/99 done | train=1360 test=20
+2026-03-09 10:54:18,708 | INFO | [English Premiership Rugby] chunk 66/99 done | train=1380 test=20
+2026-03-09 10:54:25,568 | INFO | [English Premiership Rugby] chunk 67/99 done | train=1400 test=20
+2026-03-09 10:54:32,726 | INFO | [English Premiership Rugby] chunk 68/99 done | train=1420 test=20
+2026-03-09 10:54:40,253 | INFO | [English Premiership Rugby] chunk 69/99 done | train=1440 test=20
+2026-03-09 10:54:46,883 | INFO | [English Premiership Rugby] chunk 70/99 done | train=1460 test=20
+2026-03-09 10:54:53,470 | INFO | [English Premiership Rugby] chunk 71/99 done | train=1480 test=20
+2026-03-09 10:54:59,732 | INFO | [English Premiership Rugby] chunk 72/99 done | train=1500 test=20
+2026-03-09 10:55:06,404 | INFO | [English Premiership Rugby] chunk 73/99 done | train=1520 test=20
+2026-03-09 10:55:13,499 | INFO | [English Premiership Rugby] chunk 74/99 done | train=1540 test=20
+2026-03-09 10:55:21,651 | INFO | [English Premiership Rugby] chunk 75/99 done | train=1560 test=20
+2026-03-09 10:55:29,078 | INFO | [English Premiership Rugby] chunk 76/99 done | train=1580 test=20
+2026-03-09 10:55:36,969 | INFO | [English Premiership Rugby] chunk 77/99 done | train=1600 test=20
+2026-03-09 10:55:45,187 | INFO | [English Premiership Rugby] chunk 78/99 done | train=1620 test=20
+2026-03-09 10:55:54,361 | INFO | [English Premiership Rugby] chunk 79/99 done | train=1640 test=20
+2026-03-09 10:56:02,890 | INFO | [English Premiership Rugby] chunk 80/99 done | train=1660 test=20
+2026-03-09 10:56:11,636 | INFO | [English Premiership Rugby] chunk 81/99 done | train=1680 test=20
+2026-03-09 10:56:20,054 | INFO | [English Premiership Rugby] chunk 82/99 done | train=1700 test=20
+2026-03-09 10:56:31,492 | INFO | [English Premiership Rugby] chunk 83/99 done | train=1720 test=20
+2026-03-09 10:56:42,196 | INFO | [English Premiership Rugby] chunk 84/99 done | train=1740 test=20
+2026-03-09 10:56:52,266 | INFO | [English Premiership Rugby] chunk 85/99 done | train=1760 test=20
+2026-03-09 10:57:00,294 | INFO | [English Premiership Rugby] chunk 86/99 done | train=1780 test=20
+2026-03-09 10:57:08,653 | INFO | [English Premiership Rugby] chunk 87/99 done | train=1800 test=20
+2026-03-09 10:57:16,649 | INFO | [English Premiership Rugby] chunk 88/99 done | train=1820 test=20
+2026-03-09 10:57:25,649 | INFO | [English Premiership Rugby] chunk 89/99 done | train=1840 test=20
+2026-03-09 10:57:34,080 | INFO | [English Premiership Rugby] chunk 90/99 done | train=1860 test=20
+2026-03-09 10:57:42,192 | INFO | [English Premiership Rugby] chunk 91/99 done | train=1880 test=20
+2026-03-09 10:57:51,284 | INFO | [English Premiership Rugby] chunk 92/99 done | train=1900 test=20
+2026-03-09 10:57:59,972 | INFO | [English Premiership Rugby] chunk 93/99 done | train=1920 test=20
+2026-03-09 10:58:08,602 | INFO | [English Premiership Rugby] chunk 94/99 done | train=1940 test=20
+2026-03-09 10:58:18,095 | INFO | [English Premiership Rugby] chunk 95/99 done | train=1960 test=20
+2026-03-09 10:58:27,733 | INFO | [English Premiership Rugby] chunk 96/99 done | train=1980 test=20
+2026-03-09 10:58:36,985 | INFO | [English Premiership Rugby] chunk 97/99 done | train=2000 test=20
+2026-03-09 10:58:46,123 | INFO | [English Premiership Rugby] chunk 98/99 done | train=2020 test=20
+2026-03-09 10:58:54,807 | INFO | [English Premiership Rugby] chunk 99/99 done | train=2040 test=10
+2026-03-09 10:59:03,223 | INFO | [English Premiership Rugby] win_acc=0.796 mae=7.532 brier=0.1509 ece=0.1832 alpha_test_avg=0.553 low_conf_rate=0.510
+2026-03-09 10:59:03,225 | INFO | [Six Nations Championship] walk-forward start: rows=249, chunks=9, step=20
+2026-03-09 10:59:03,522 | INFO | [Six Nations Championship] chunk 1/9 done | train=80 test=20
+2026-03-09 10:59:03,866 | INFO | [Six Nations Championship] chunk 2/9 done | train=100 test=20
+2026-03-09 10:59:04,239 | INFO | [Six Nations Championship] chunk 3/9 done | train=120 test=20
+2026-03-09 10:59:04,809 | INFO | [Six Nations Championship] chunk 4/9 done | train=140 test=20
+2026-03-09 10:59:05,405 | INFO | [Six Nations Championship] chunk 5/9 done | train=160 test=20
+2026-03-09 10:59:06,115 | INFO | [Six Nations Championship] chunk 6/9 done | train=180 test=20
+2026-03-09 10:59:06,726 | INFO | [Six Nations Championship] chunk 7/9 done | train=200 test=20
+2026-03-09 10:59:07,328 | INFO | [Six Nations Championship] chunk 8/9 done | train=220 test=20
+2026-03-09 10:59:07,895 | INFO | [Six Nations Championship] chunk 9/9 done | train=240 test=9
+2026-03-09 10:59:08,489 | INFO | [Six Nations Championship] win_acc=0.746 mae=7.766 brier=0.1635 ece=0.2047 alpha_test_avg=0.572 low_conf_rate=0.533
+2026-03-09 10:59:08,491 | INFO | [Rugby Union International Friendlies] walk-forward start: rows=769, chunks=35, step=20
+2026-03-09 10:59:08,814 | INFO | [Rugby Union International Friendlies] chunk 1/35 done | train=80 test=20
+2026-03-09 10:59:09,120 | INFO | [Rugby Union International Friendlies] chunk 2/35 done | train=100 test=20
+2026-03-09 10:59:09,462 | INFO | [Rugby Union International Friendlies] chunk 3/35 done | train=120 test=20
+2026-03-09 10:59:09,993 | INFO | [Rugby Union International Friendlies] chunk 4/35 done | train=140 test=20
+2026-03-09 10:59:10,539 | INFO | [Rugby Union International Friendlies] chunk 5/35 done | train=160 test=20
+2026-03-09 10:59:11,151 | INFO | [Rugby Union International Friendlies] chunk 6/35 done | train=180 test=20
+2026-03-09 10:59:11,737 | INFO | [Rugby Union International Friendlies] chunk 7/35 done | train=200 test=20
+2026-03-09 10:59:12,354 | INFO | [Rugby Union International Friendlies] chunk 8/35 done | train=220 test=20
+2026-03-09 10:59:12,992 | INFO | [Rugby Union International Friendlies] chunk 9/35 done | train=240 test=20
+2026-03-09 10:59:13,774 | INFO | [Rugby Union International Friendlies] chunk 10/35 done | train=260 test=20
+2026-03-09 10:59:14,595 | INFO | [Rugby Union International Friendlies] chunk 11/35 done | train=280 test=20
+2026-03-09 10:59:15,902 | INFO | [Rugby Union International Friendlies] chunk 12/35 done | train=300 test=20
+2026-03-09 10:59:17,217 | INFO | [Rugby Union International Friendlies] chunk 13/35 done | train=320 test=20
+2026-03-09 10:59:18,471 | INFO | [Rugby Union International Friendlies] chunk 14/35 done | train=340 test=20
+2026-03-09 10:59:19,777 | INFO | [Rugby Union International Friendlies] chunk 15/35 done | train=360 test=20
+2026-03-09 10:59:21,071 | INFO | [Rugby Union International Friendlies] chunk 16/35 done | train=380 test=20
+2026-03-09 10:59:22,657 | INFO | [Rugby Union International Friendlies] chunk 17/35 done | train=400 test=20
+2026-03-09 10:59:24,308 | INFO | [Rugby Union International Friendlies] chunk 18/35 done | train=420 test=20
+2026-03-09 10:59:26,001 | INFO | [Rugby Union International Friendlies] chunk 19/35 done | train=440 test=20
+2026-03-09 10:59:27,524 | INFO | [Rugby Union International Friendlies] chunk 20/35 done | train=460 test=20
+2026-03-09 10:59:29,139 | INFO | [Rugby Union International Friendlies] chunk 21/35 done | train=480 test=20
+2026-03-09 10:59:30,967 | INFO | [Rugby Union International Friendlies] chunk 22/35 done | train=500 test=20
+2026-03-09 10:59:33,086 | INFO | [Rugby Union International Friendlies] chunk 23/35 done | train=520 test=20
+2026-03-09 10:59:35,183 | INFO | [Rugby Union International Friendlies] chunk 24/35 done | train=540 test=20
+2026-03-09 10:59:37,296 | INFO | [Rugby Union International Friendlies] chunk 25/35 done | train=560 test=20
+2026-03-09 10:59:39,434 | INFO | [Rugby Union International Friendlies] chunk 26/35 done | train=580 test=20
+2026-03-09 10:59:41,538 | INFO | [Rugby Union International Friendlies] chunk 27/35 done | train=600 test=20
+2026-03-09 10:59:43,799 | INFO | [Rugby Union International Friendlies] chunk 28/35 done | train=620 test=20
+2026-03-09 10:59:46,250 | INFO | [Rugby Union International Friendlies] chunk 29/35 done | train=640 test=20
+2026-03-09 10:59:48,791 | INFO | [Rugby Union International Friendlies] chunk 30/35 done | train=660 test=20
+2026-03-09 10:59:51,329 | INFO | [Rugby Union International Friendlies] chunk 31/35 done | train=680 test=20
+2026-03-09 10:59:53,934 | INFO | [Rugby Union International Friendlies] chunk 32/35 done | train=700 test=20
+2026-03-09 10:59:56,511 | INFO | [Rugby Union International Friendlies] chunk 33/35 done | train=720 test=20
+2026-03-09 10:59:59,222 | INFO | [Rugby Union International Friendlies] chunk 34/35 done | train=740 test=20
+2026-03-09 11:00:01,956 | INFO | [Rugby Union International Friendlies] chunk 35/35 done | train=760 test=9
+2026-03-09 11:00:04,754 | INFO | [Rugby Union International Friendlies] win_acc=0.792 mae=8.400 brier=0.1427 ece=0.1952 alpha_test_avg=0.587 low_conf_rate=0.475
+2026-03-09 11:00:04,754 | INFO | === MAZ MAXED V4 Summary ===
+2026-03-09 11:00:04,755 | INFO | {
+  "tested": 9,
+  "skipped": 0
+}
+2026-03-09 11:00:04,755 | INFO | === MAZ MAXED V4 Final League Recap ===
+2026-03-09 11:00:04,755 | INFO | [Rugby Championship] status=tested | win_acc=0.741 mae=8.344
+2026-03-09 11:00:04,755 | INFO | [United Rugby Championship] status=tested | win_acc=0.807 mae=7.173
+2026-03-09 11:00:04,755 | INFO | [Currie Cup] status=tested | win_acc=0.738 mae=8.795
+2026-03-09 11:00:04,756 | INFO | [Rugby World Cup] status=tested | win_acc=0.777 mae=10.776
+2026-03-09 11:00:04,756 | INFO | [Super Rugby] status=tested | win_acc=0.786 mae=7.767
+2026-03-09 11:00:04,756 | INFO | [French Top 14] status=tested | win_acc=0.816 mae=7.117
+2026-03-09 11:00:04,756 | INFO | [English Premiership Rugby] status=tested | win_acc=0.796 mae=7.532
+2026-03-09 11:00:04,756 | INFO | [Six Nations Championship] status=tested | win_acc=0.746 mae=7.766
+2026-03-09 11:00:04,756 | INFO | [Rugby Union International Friendlies] status=tested | win_acc=0.792 mae=8.400
+2026-03-09 11:00:04,758 | INFO | Report saved: artifacts\maz_maxed_v4_walk_forward_eval_20260309_110004.json
+2026-03-09 11:00:04,759 | INFO | Updated latest eval metrics: artifacts\maz_maxed_v4_metrics_latest.json

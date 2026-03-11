@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Terms of Service - Rugby AI Predictor">
+    <meta name="keywords" content="rugby, analytics, predictions, AI, terms of service">
+    <title>Terms of Service - Rugby AI Predictor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background: #0a0a0a;
+            overflow-x: hidden;
+        }
+
+        /* Navigation */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+            padding: 1rem 2rem;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-brand {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #f9fafb;
+            text-decoration: none;
+            background: linear-gradient(135deg, #f9fafb 0%, #86efac 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-brand img {
+            -webkit-text-fill-color: initial;
+            background: none;
+            -webkit-background-clip: initial;
+            background-clip: initial;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: #d1d5db;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .nav-links a:hover {
+            color: #86efac;
+        }
+
+        .btn-nav {
+            padding: 0.5rem 1.5rem;
+            background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+            color: white;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .btn-nav:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(34, 197, 94, 0.4);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 60vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            position: relative;
+            overflow: hidden;
+            padding-top: 80px;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+
+        .hero-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            color: #f9fafb;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #f9fafb 0%, #86efac 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+        }
+
+        .tagline {
+            font-size: 1.5rem;
+            color: #d1d5db;
+            margin-bottom: 2rem;
+            font-weight: 300;
+        }
+
+        /* Content Section */
+        .content-section {
+            padding: 6rem 2rem;
+            background: #ffffff;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .last-updated {
+            color: #64748b;
+            margin-bottom: 3rem;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .section {
+            margin-bottom: 3rem;
+        }
+
+        h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        h3 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        p {
+            color: #475569;
+            margin-bottom: 1rem;
+            line-height: 1.8;
+            font-size: 1rem;
+        }
+
+        ul, ol {
+            color: #475569;
+            margin-left: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.75rem;
+            line-height: 1.8;
+        }
+
+        /* Footer */
+        .footer {
+            background: #0a0a0a;
+            padding: 4rem 2rem 2rem;
+            text-align: center;
+            color: #94a3b8;
+        }
+
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .footer-link {
+            color: #94a3b8;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .footer-link:hover {
+            color: #22c55e;
+        }
+
+        .footer-copyright {
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .tagline {
+                font-size: 1.2rem;
+            }
+
+            .content-section {
+                padding: 4rem 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <a href="index.html" class="nav-brand"><img src="public/rugby_emoji.png" alt="Rugby Ball" style="width: 24px; height: 24px;" /> Rugby AI Predictor</a>
+        <ul class="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="about.html">About</a></li>
+            <li><a href="subscribe.html">Subscribe</a></li>
+            <li><a href="terms.html">Terms</a></li>
+            <li><a href="privacy.html">Privacy</a></li>
+            <li><a href="refund.html">Refund</a></li>
+            <li><a href="https://rugby-ai-61fd0.web.app" class="btn-nav">Launch App</a></li>
+        </ul>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Terms of Service</h1>
+            <p class="tagline">Please read these terms carefully before using our service</p>
+        </div>
+    </section>
+
+    <!-- Content Section -->
+    <section class="content-section">
+        <div class="container">
+            <p class="last-updated">Last Updated: December 2024</p>
+
+            <div class="section">
+                <h2>1. Acceptance of Terms</h2>
+                <p>
+                    By accessing and using the Rugby AI Predictor service ("Service"), you accept and agree to be bound by the terms and provision of this agreement. If you do not agree to abide by the above, please do not use this service.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>2. Description of Service</h2>
+                <p>
+                    Rugby AI Predictor provides AI-powered match predictions, analytics, and statistical insights for rugby matches. The Service uses machine learning algorithms to analyze historical data and generate predictions. All predictions are for informational and entertainment purposes only.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>3. Subscription and License Keys</h2>
+                <h3>3.1 Subscription Plans</h3>
+                <p>
+                    We offer various subscription plans (monthly, 6-month, and yearly). Subscription fees are charged in advance and are non-refundable except as required by law or as specified in our Refund Policy.
+                </p>
+                
+                <h3>3.2 License Keys</h3>
+                <p>
+                    Upon successful payment, you will receive a unique license key via email. This license key grants you access to premium features for the duration of your subscription. License keys are:
+                </p>
+                <ul>
+                    <li>Non-transferable and may not be shared with others</li>
+                    <li>Valid only for the subscription period purchased</li>
+                    <li>Subject to revocation if terms are violated</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>4. Use of Service</h2>
+                <h3>4.1 Permitted Use</h3>
+                <p>You may use the Service for:</p>
+                <ul>
+                    <li>Personal analysis and entertainment</li>
+                    <li>Research and educational purposes</li>
+                    <li>Non-commercial information gathering</li>
+                </ul>
+
+                <h3>4.2 Prohibited Use</h3>
+                <p>You agree NOT to:</p>
+                <ul>
+                    <li>Share, sell, or distribute your license key</li>
+                    <li>Use the Service for illegal gambling or betting operations</li>
+                    <li>Reverse engineer, decompile, or attempt to extract the source code</li>
+                    <li>Use automated systems to access the Service (scraping, bots, etc.)</li>
+                    <li>Interfere with or disrupt the Service or servers</li>
+                    <li>Use the Service to violate any applicable laws or regulations</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>5. Predictions and Accuracy</h2>
+                <p>
+                    All predictions provided by the Service are generated using AI algorithms and historical data analysis. We make no guarantees regarding the accuracy of predictions. Predictions are:
+                </p>
+                <ul>
+                    <li>For informational and entertainment purposes only</li>
+                    <li>Not financial, legal, or betting advice</li>
+                    <li>Subject to the inherent uncertainty of sports outcomes</li>
+                    <li>Not a guarantee of future results</li>
+                </ul>
+                <p>
+                    You acknowledge that sports outcomes are unpredictable and that past performance does not guarantee future results. You use predictions at your own risk.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>6. Intellectual Property</h2>
+                <p>
+                    All content, features, and functionality of the Service, including but not limited to text, graphics, logos, algorithms, and software, are the property of Rugby AI Predictor and are protected by international copyright, trademark, and other intellectual property laws.
+                </p>
+                <p>
+                    You may not reproduce, distribute, modify, or create derivative works of any content from the Service without express written permission.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>7. Account Termination</h2>
+                <p>
+                    We reserve the right to terminate or suspend your access to the Service immediately, without prior notice, for any breach of these Terms of Service. Upon termination:
+                </p>
+                <ul>
+                    <li>Your license key will be deactivated</li>
+                    <li>You will lose access to premium features</li>
+                    <li>No refund will be provided for the remaining subscription period</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>8. Limitation of Liability</h2>
+                <p>
+                    To the maximum extent permitted by law, Rugby AI Predictor shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible losses resulting from:
+                </p>
+                <ul>
+                    <li>Your use or inability to use the Service</li>
+                    <li>Any predictions or recommendations provided by the Service</li>
+                    <li>Any decisions made based on information from the Service</li>
+                    <li>Unauthorized access to or alteration of your data</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>9. Disclaimer of Warranties</h2>
+                <p>
+                    The Service is provided "as is" and "as available" without warranties of any kind, either express or implied, including but not limited to implied warranties of merchantability, fitness for a particular purpose, or non-infringement.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>10. Changes to Terms</h2>
+                <p>
+                    We reserve the right to modify these Terms of Service at any time. We will notify users of any material changes via email or through the Service. Your continued use of the Service after such modifications constitutes acceptance of the updated terms.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>11. Governing Law</h2>
+                <p>
+                    These Terms of Service shall be governed by and construed in accordance with the laws of the jurisdiction in which Rugby AI Predictor operates, without regard to its conflict of law provisions.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>12. Contact Information</h2>
+                <p>
+                    If you have any questions about these Terms of Service, please contact us through the Service or via the contact information provided in your subscription confirmation email.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="index.html" class="footer-link">Home</a>
+                <a href="about.html" class="footer-link">About</a>
+                <a href="subscribe.html" class="footer-link">Subscribe</a>
+                <a href="terms.html" class="footer-link">Terms of Service</a>
+                <a href="privacy.html" class="footer-link">Privacy Policy</a>
+                <a href="refund.html" class="footer-link">Refund Policy</a>
+            </div>
+            <div class="footer-copyright">
+                <p>&copy; 2024 Rugby AI Predictor. All rights reserved.</p>
+                <p style="margin-top: 0.5rem; font-size: 0.9rem;">
+                    Advanced rugby analytics and match prediction platform. For entertainment and analytical purposes only.
+                </p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

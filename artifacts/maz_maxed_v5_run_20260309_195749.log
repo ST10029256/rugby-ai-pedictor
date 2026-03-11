@@ -1,0 +1,32 @@
+2026-03-09 19:57:49,065 | INFO | Starting MAZ MAXED V5 run
+2026-03-09 19:57:49,065 | INFO | Logging to: artifacts/maz_maxed_v5_run_20260309_195749.log
+2026-03-09 19:57:49,607 | INFO | [V5] Global pretraining start: rows=8852 teams=153 epochs=24 seeds=3
+2026-03-09 19:58:54,955 | INFO | [V5] Global pretraining done for seed=42
+2026-03-09 19:59:56,388 | INFO | [V5] Global pretraining done for seed=1337
+2026-03-09 20:00:58,094 | INFO | [V5] Global pretraining done for seed=9001
+2026-03-09 20:00:58,095 | INFO | [Rugby Championship] full-train mode: using all completed games (n=138)
+2026-03-09 20:01:00,714 | INFO | [United Rugby Championship] full-train mode: using all completed games (n=2226)
+2026-03-09 20:01:28,260 | INFO | [Currie Cup] full-train mode: using all completed games (n=745)
+2026-03-09 20:01:37,475 | INFO | [Rugby World Cup] full-train mode: using all completed games (n=201)
+2026-03-09 20:01:40,415 | INFO | [Super Rugby] full-train mode: using all completed games (n=1761)
+2026-03-09 20:02:01,984 | INFO | [French Top 14] full-train mode: using all completed games (n=2922)
+2026-03-09 20:02:37,535 | INFO | [English Premiership Rugby] full-train mode: using all completed games (n=2050)
+2026-03-09 20:03:03,122 | INFO | [Six Nations Championship] full-train mode: using all completed games (n=252)
+2026-03-09 20:03:06,396 | INFO | [Rugby Union International Friendlies] full-train mode: using all completed games (n=769)
+2026-03-09 20:03:16,562 | INFO | === MAZ MAXED V5 Summary ===
+2026-03-09 20:03:16,563 | INFO | {
+  "tested": 9,
+  "skipped": 0
+}
+2026-03-09 20:03:16,563 | INFO | === MAZ MAXED V5 Final League Recap ===
+2026-03-09 20:03:16,563 | INFO | [Rugby Championship] status=trained_only | train_win_acc=0.971 train_mae=5.861
+2026-03-09 20:03:16,563 | INFO | [United Rugby Championship] status=trained_only | train_win_acc=1.000 train_mae=2.395
+2026-03-09 20:03:16,563 | INFO | [Currie Cup] status=trained_only | train_win_acc=1.000 train_mae=3.861
+2026-03-09 20:03:16,563 | INFO | [Rugby World Cup] status=trained_only | train_win_acc=1.000 train_mae=4.209
+2026-03-09 20:03:16,563 | INFO | [Super Rugby] status=trained_only | train_win_acc=1.000 train_mae=2.353
+2026-03-09 20:03:16,564 | INFO | [French Top 14] status=trained_only | train_win_acc=1.000 train_mae=2.377
+2026-03-09 20:03:16,564 | INFO | [English Premiership Rugby] status=trained_only | train_win_acc=1.000 train_mae=2.540
+2026-03-09 20:03:16,564 | INFO | [Six Nations Championship] status=trained_only | train_win_acc=1.000 train_mae=4.917
+2026-03-09 20:03:16,564 | INFO | [Rugby Union International Friendlies] status=trained_only | train_win_acc=0.999 train_mae=3.691
+2026-03-09 20:03:16,565 | INFO | Report saved: artifacts\maz_maxed_v5_train_all_prod_20260309_200316.json
+2026-03-09 20:03:16,566 | INFO | Updated latest production report: artifacts\maz_maxed_v5_prod_latest.json
