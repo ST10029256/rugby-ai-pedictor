@@ -43,8 +43,43 @@ class NewsItem:
 
 class NewsService:
     """Service for generating AI-powered rugby news"""
-    URC_LEAGUE_ID = 4446
-    URC_OFFICIAL_X_HANDLE = "URCOfficial"
+    OFFICIAL_LEAGUE_X_ACCOUNTS = {
+        4446: {
+            "league_name": "United Rugby Championship",
+            "x_handle": "URCOfficial",
+            "author_name": "URC Official",
+        },
+        4414: {
+            "league_name": "English Premiership Rugby",
+            "x_handle": "premrugby",
+            "author_name": "Prem Rugby",
+        },
+        4714: {
+            "league_name": "Six Nations Championship",
+            "x_handle": "SixNationsRugby",
+            "author_name": "Guinness Men's Six Nations",
+        },
+        4551: {
+            "league_name": "Super Rugby",
+            "x_handle": "SuperRugby",
+            "author_name": "Super Rugby Pacific",
+        },
+        4430: {
+            "league_name": "French Top 14",
+            "x_handle": "top14rugby",
+            "author_name": "TOP 14 Rugby",
+        },
+        4574: {
+            "league_name": "Rugby World Cup",
+            "x_handle": "rugbyworldcup",
+            "author_name": "Rugby World Cup",
+        },
+        5479: {
+            "league_name": "Rugby Union International Friendlies",
+            "x_handle": "WorldRugby",
+            "author_name": "World Rugby",
+        },
+    }
     
     def __init__(self, db_path: str, predictor=None, sportdevs_client=None, sportsdb_client=None, social_media_fetcher=None):
         self.db_path = db_path
@@ -56,6 +91,57 @@ class NewsService:
     def _get_db_connection(self) -> sqlite3.Connection:
         """Get database connection"""
         return sqlite3.connect(self.db_path)
+
+    @classmethod
+    def _get_official_league_x_config(cls, league_id: Optional[int]) -> Optional[Dict[str, str]]:
+        """Return strict official X account config for supported league feeds."""
+        if league_id is None:
+            return None
+        try:
+            return cls.OFFICIAL_LEAGUE_X_ACCOUNTS.get(int(league_id))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _select_official_league_media_items(news_items: List[NewsItem]) -> List[NewsItem]:
+        """Prefer exactly one photo post and one video post from the official account."""
+        twitter_items = [
+            item for item in news_items
+            if (getattr(item, "related_stats", {}) or {}).get("platform") == "twitter"
+        ]
+        twitter_items.sort(key=lambda item: item.timestamp, reverse=True)
+
+        video_item = next(
+            (
+                item for item in twitter_items
+                if bool((getattr(item, "related_stats", {}) or {}).get("is_video"))
+            ),
+            None,
+        )
+        photo_item = next(
+            (
+                item for item in twitter_items
+                if not bool((getattr(item, "related_stats", {}) or {}).get("is_video"))
+                and bool(item.image_url or (getattr(item, "related_stats", {}) or {}).get("image_url"))
+            ),
+            None,
+        )
+
+        picked: List[NewsItem] = []
+        if photo_item:
+            picked.append(photo_item)
+        if video_item and not any(existing.id == video_item.id for existing in picked):
+            picked.append(video_item)
+
+        if len(picked) < 2:
+            for item in twitter_items:
+                if any(existing.id == item.id for existing in picked):
+                    continue
+                picked.append(item)
+                if len(picked) == 2:
+                    break
+
+        return picked[:2]
     
     def fetch_external_news(self, league_id: Optional[int] = None, 
                            team_id: Optional[int] = None,
@@ -157,10 +243,11 @@ class NewsService:
                     return None
             
             # Fetch posts for each team
-            if league_id is not None and int(league_id) == self.URC_LEAGUE_ID:
-                # URC strict mode: use only official URC X account.
+            official_league_x_config = self._get_official_league_x_config(league_id)
+            if official_league_x_config:
+                # Strict league mode: use only official league X account posts.
                 posts = self.social_media_fetcher.fetch_twitter_posts(
-                    self.URC_OFFICIAL_X_HANDLE,
+                    official_league_x_config["x_handle"],
                     limit=max(limit, 10),
                 )
                 for post in posts:
@@ -171,7 +258,7 @@ class NewsService:
                             ai_explanation=SocialMediaService.generate_ai_explanation(
                                 embed_type="twitter",
                                 context="announcement",
-                                related_data={"league": "URC"},
+                                related_data={"league": official_league_x_config["league_name"]},
                             ),
                         )
 
@@ -185,20 +272,20 @@ class NewsService:
                             title="",
                             content=text,
                             timestamp=post.get("created_at", datetime.now().isoformat()),
-                            league_id=self.URC_LEAGUE_ID,
+                            league_id=int(league_id),
                             team_id=None,
                             embedded_content=embed_obj if embed_obj.get("type") == "embed" else None,
                             source_url=post.get("url"),
                             image_url=post.get("image_url") or post.get("media_url"),
                             video_url=post.get("video_url"),
-                            author_name=post.get("author_name") or "URC Official",
-                            author_handle=post.get("author_handle") or self.URC_OFFICIAL_X_HANDLE,
+                            author_name=post.get("author_name") or official_league_x_config["author_name"],
+                            author_handle=post.get("author_handle") or official_league_x_config["x_handle"],
                             author_avatar=post.get("author_avatar"),
                             author_verified=bool(post.get("author_verified", False)),
                             related_stats={
                                 "platform": "twitter",
                                 "is_video": bool(post.get("is_video", False)),
-                                "account": self.URC_OFFICIAL_X_HANDLE,
+                                "account": official_league_x_config["x_handle"],
                                 "media_urls": post.get("media_urls", []),
                                 "video_variants": post.get("video_variants", []),
                                 "image_url": post.get("image_url") or post.get("media_url"),
@@ -207,7 +294,7 @@ class NewsService:
                         )
                         news_items.append(news_item)
                     except Exception as e:
-                        logger.error(f"Error converting URC official X post: {e}")
+                        logger.error(f"Error converting official league X post: {e}")
                         continue
             else:
                 for team_name, team_id in team_names.items():
@@ -268,31 +355,9 @@ class NewsService:
                             logger.error(f"Error converting social media post: {e}")
                             continue
             
-            # URC strict social mode: exactly 1 video + 1 non-video post from X only.
-            if league_id is not None and int(league_id) == self.URC_LEAGUE_ID:
-                twitter_items = [
-                    n for n in news_items
-                    if (getattr(n, "related_stats", {}) or {}).get("platform") == "twitter"
-                ]
-                twitter_items.sort(key=lambda n: n.timestamp, reverse=True)
-                video_item = next(
-                    (n for n in twitter_items if bool((getattr(n, "related_stats", {}) or {}).get("is_video"))),
-                    None,
-                )
-                text_item = next(
-                    (n for n in twitter_items if not bool((getattr(n, "related_stats", {}) or {}).get("is_video"))),
-                    None,
-                )
-                picked: List[NewsItem] = []
-                if video_item:
-                    picked.append(video_item)
-                if text_item:
-                    # Avoid duplicates if API marks same item inconsistently.
-                    if not any(p.id == text_item.id for p in picked):
-                        picked.append(text_item)
-                if not picked and twitter_items:
-                    picked = twitter_items[:2]
-                news_items = picked[:2]
+            # Strict league mode: prefer exactly 1 photo + 1 video from the official X account.
+            if official_league_x_config:
+                news_items = self._select_official_league_media_items(news_items)
 
             conn.close()
             
@@ -774,13 +839,18 @@ class NewsService:
                     logger.warning(f"⚠️ Invalid league_id: {league_id}, ignoring filter")
                     filter_league_id = None
 
-            urc_x_only_mode = bool(filter_league_id == self.URC_LEAGUE_ID)
-            if urc_x_only_mode:
-                logger.info("🎯 URC X-only mode enabled: returning only 1 video + 1 post from X API")
+            official_league_x_config = self._get_official_league_x_config(filter_league_id)
+            official_x_only_mode = bool(official_league_x_config)
+            if official_x_only_mode:
+                logger.info(
+                    "🎯 Official league X-only mode enabled for %s (@%s): returning 1 photo + 1 video",
+                    official_league_x_config["league_name"],
+                    official_league_x_config["x_handle"],
+                )
             
             # 1. Get AI-generated news from upcoming matches (next 7 days)
-            # Skip in URC X-only mode.
-            if urc_x_only_mode:
+            # Skip in strict official-account mode.
+            if official_x_only_mode:
                 matches = []
             else:
             # CRITICAL: Build query with explicit league filter
@@ -865,7 +935,7 @@ class NewsService:
                     all_news_items.append(preview)
             
             # 2. If no upcoming matches, generate news from recent completed matches (fallback)
-            if len(all_news_items) == 0 and not urc_x_only_mode:
+            if len(all_news_items) == 0 and not official_x_only_mode:
                 logger.info("No upcoming matches found, generating news from recent completed matches")
                 cursor.execute("""
                     SELECT e.id, e.league_id, e.date_event, e.home_team_id, e.away_team_id,
@@ -931,7 +1001,7 @@ class NewsService:
                     all_news_items.append(recap_item)
             
             # 3. Fetch external news from SportDevs (if available)
-            if include_external and self.sportdevs_client and not urc_x_only_mode:
+            if include_external and self.sportdevs_client and not official_x_only_mode:
                 try:
                     external_news = self.fetch_external_news(
                         league_id=followed_leagues[0] if followed_leagues else None,

@@ -73,7 +73,7 @@ class SocialMediaFetcher:
             
             # Fetch tweets
             params = {
-                "query": f"from:{username}",
+                "query": f"from:{username} -is:retweet",
                 "max_results": limit,
                 "tweet.fields": "created_at,public_metrics,text,attachments",
                 "expansions": "attachments.media_keys",

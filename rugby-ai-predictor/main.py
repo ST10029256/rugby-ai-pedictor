@@ -3451,10 +3451,20 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
             except Exception as db_test_error:
                 logger.warning(f"  Database test query failed: {db_test_error}")
             
+            # Official-account social leagues should still use the NewsService even when
+            # SQLite has no nearby fixtures, because their feed can come directly from X.
+            official_social_league_ids = {4414, 4430, 4446, 4551, 4574, 4714, 5479}
+
             # If SQLite DB is present but has no usable data for this league, fall back to Firestore
             # (this commonly happens when the bundled SQLite doesn't include a league, or date parsing fails).
+            # Skip this fallback for official-social leagues so X-only feeds still load.
             if league_id_int is not None:
-                if sqlite_league_total == 0:
+                if league_id_int in official_social_league_ids:
+                    logger.info(
+                        f"Skipping Firestore news fallback for official-social league {league_id_int}; "
+                        "allowing NewsService social feed to run."
+                    )
+                elif sqlite_league_total == 0:
                     used_firestore_fallback = True
                     firestore_fallback_reason = "sqlite_no_matches_for_league"
                 elif (sqlite_upcoming_7d == 0) and (sqlite_recent_30d == 0):
