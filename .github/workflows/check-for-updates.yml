@@ -150,6 +150,9 @@ jobs:
         FIREBASE_CLI_EXPERIMENTS: webframeworks
       run: |
         echo "🚀 Deploying Firebase Functions so History endpoints use the updated DB..."
+        python -m venv rugby-ai-predictor/venv
+        rugby-ai-predictor/venv/bin/python -m pip install --upgrade pip
+        rugby-ai-predictor/venv/bin/python -m pip install -r rugby-ai-predictor/requirements.txt
         npm i -g firebase-tools
         firebase --version
         for i in 1 2 3; do
