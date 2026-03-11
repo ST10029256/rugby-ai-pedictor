@@ -43,7 +43,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        # V4 training requires PyTorch; use CPU wheels in CI.
+        # V4/V5 training requires PyTorch; use CPU wheels in CI.
         pip install torch --index-url https://download.pytorch.org/whl/cpu
         
     - name: Check if retraining is needed
@@ -74,6 +74,22 @@ jobs:
       run: |
         echo "🧠 Retraining V4 production brain (train-all-completed)..."
         python scripts/maz_boss_maxed_v4.py --all-leagues --train-all-completed --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 64 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 20 --finetune-epochs 12 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.25 --ranking-loss-weight 0.10 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --save-v4-models --save-global-pretrained --save-report --log-level INFO
+
+    - name: Retrain V5 eval (walk-forward)
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      env:
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+      run: |
+        echo "🤖 Retraining V5 evaluation metrics (walk-forward) for all leagues..."
+        python scripts/maz_boss_maxed_v5.py --all-leagues --walk-forward --wf-start-train 80 --wf-step 20 --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 80 --n-experts 4 --adapter-dim 24 --cross-heads 4 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 24 --finetune-epochs 14 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.30 --ranking-loss-weight 0.12 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --expert-balance-weight 0.01 --confidence-variance-threshold 40 --save-v5-models --save-global-pretrained --save-report --log-level INFO
+
+    - name: Retrain V5 production brain (100% completed)
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      env:
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+      run: |
+        echo "🧠 Retraining V5 production brain (train-all-completed)..."
+        python scripts/maz_boss_maxed_v5.py --all-leagues --train-all-completed --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 80 --n-experts 4 --adapter-dim 24 --cross-heads 4 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 24 --finetune-epochs 14 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.30 --ranking-loss-weight 0.12 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --expert-balance-weight 0.01 --save-v5-models --save-global-pretrained --save-report --log-level INFO
     
     - name: Authenticate to Google Cloud
       if: steps.check-retrain.outputs.retrain_needed == 'true'
@@ -85,8 +101,11 @@ jobs:
       if: steps.check-retrain.outputs.retrain_needed == 'true'
       run: |
         echo "☁️ Uploading retrained V4 artifacts to Cloud Storage..."
-        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts
+        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts --family-filter v4
         echo "✅ V4 artifacts uploaded"
+        echo "☁️ Uploading retrained V5 artifacts to Cloud Storage..."
+        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts --family-filter v5
+        echo "✅ V5 artifacts uploaded"
     
     - name: Publish V4 metrics to Firestore
       if: steps.check-retrain.outputs.retrain_needed == 'true'
@@ -96,6 +115,41 @@ jobs:
         echo "📊 Publishing V4 metrics to Firestore..."
         python scripts/publish_v4_metrics_to_firestore.py --report artifacts/maz_maxed_v4_metrics_latest.json --prod-report artifacts/maz_maxed_v4_prod_latest.json --project-id rugby-ai-61fd0
         echo "✅ V4 league metrics updated in Firestore"
+
+    - name: Build champion policy and publish champion metrics
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      env:
+        GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
+      run: |
+        echo "🏆 Building league champion policy from V4 and V5..."
+        python scripts/select_league_champions.py --v4-report artifacts/maz_maxed_v4_metrics_latest.json --v5-report artifacts/maz_maxed_v5_metrics_latest.json --output rugby-ai-predictor/league_model_champions.json --artifacts-copy artifacts/league_model_champions.json
+        echo "📊 Publishing champion league metrics to Firestore..."
+        python scripts/publish_champion_metrics_to_firestore.py --champion-file rugby-ai-predictor/league_model_champions.json --v4-report artifacts/maz_maxed_v4_metrics_latest.json --v5-report artifacts/maz_maxed_v5_metrics_latest.json --v4-prod-report artifacts/maz_maxed_v4_prod_latest.json --v5-prod-report artifacts/maz_maxed_v5_prod_latest.json --project-id rugby-ai-61fd0 --model-channel prod_100
+        echo "✅ Champion league metrics updated in Firestore"
+
+    - name: Write Functions runtime environment
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      run: |
+        cat > rugby-ai-predictor/.env <<'EOF'
+        LIVE_MODEL_FAMILY=champion
+        LIVE_MODEL_CHANNEL=prod_100
+        EOF
+        echo "✅ Wrote rugby-ai-predictor/.env for champion runtime"
+
+    - name: Deploy Firebase Functions champion runtime
+      if: steps.check-retrain.outputs.retrain_needed == 'true'
+      env:
+        FIREBASE_CLI_EXPERIMENTS: webframeworks
+      run: |
+        echo "🚀 Deploying Firebase Functions champion runtime..."
+        npm i -g firebase-tools
+        firebase --version
+        for i in 1 2 3; do
+          firebase deploy --project rugby-ai-61fd0 --only functions:rugby-ai-predictor --non-interactive && break
+          [ "$i" -eq 3 ] && exit 1
+          echo "Retry $i/3 failed. Waiting before retry..."
+          sleep 20
+        done
         
     - name: Clean up retraining flag
       if: always()
@@ -115,11 +169,11 @@ jobs:
         git rm -f --cached gha-creds-*.json *-creds-*.json *credentials*.json *service-account*.json 2>/dev/null || true
         
         # Add specific files only (exclude credentials)
-        git add data.sqlite artifacts/ artifacts_optimized/ last_checkpoint.json
+        git add data.sqlite artifacts/ artifacts_optimized/ last_checkpoint.json rugby-ai-predictor/league_model_champions.json
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
-          git commit -m "Auto-retrain: Updated AI models with new data [skip ci]"
+          git commit -m "Auto-retrain: update champion rugby models [skip ci]"
           git push
         fi
         

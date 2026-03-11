@@ -111,6 +111,14 @@ jobs:
       run: |
         echo "📦 Copying updated data.sqlite into rugby-ai-predictor/ for Cloud Functions..."
         cp data.sqlite rugby-ai-predictor/data.sqlite
+
+    - name: Write Functions runtime environment
+      run: |
+        cat > rugby-ai-predictor/.env <<'EOF'
+        LIVE_MODEL_FAMILY=champion
+        LIVE_MODEL_CHANNEL=prod_100
+        EOF
+        echo "✅ Wrote rugby-ai-predictor/.env for champion runtime"
     
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
@@ -140,7 +148,7 @@ jobs:
         npm i -g firebase-tools
         firebase --version
         for i in 1 2 3; do
-          firebase deploy --project rugby-ai-61fd0 --only functions --non-interactive && break
+          firebase deploy --project rugby-ai-61fd0 --only functions:rugby-ai-predictor --non-interactive && break
           [ "$i" -eq 3 ] && exit 1
           echo "Retry $i/3 failed. Waiting before retry..."
           sleep 20
