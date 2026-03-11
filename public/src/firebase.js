@@ -1,6 +1,6 @@
 // Firebase configuration
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
@@ -27,9 +27,26 @@ export const storage = getStorage(app);
 // Cloud Functions - specify region for 2nd Gen functions
 const functionsRegion = getFunctions(app, 'us-central1');
 
-export const predictMatch = (data) => {
-  const callable = httpsCallable(functionsRegion, 'predict_match');
-  return callable(data);
+export const predictMatch = async (data) => {
+  // Use explicit HTTP endpoint with CORS headers for local dev reliability.
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/predict_match_http';
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data || {}),
+  });
+
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const backendMessage = json?.error || `HTTP error! status: ${response.status}`;
+    throw new Error(backendMessage);
+  }
+
+  // Normalize shape to match httpsCallable response contract.
+  return { data: json };
 };
 
 export const getUpcomingMatches = (data) => {
@@ -106,7 +123,7 @@ export const getNewsFeed = async (data) => {
 
   try {
     console.log('🌐 [firebase.js] Making fetch request...');
-    console.time('⏱️ [firebase.js] Fetch duration');
+    const requestStartedAt = performance.now();
     
     const response = await fetch(url, {
       method: 'POST',
@@ -116,7 +133,8 @@ export const getNewsFeed = async (data) => {
       body: JSON.stringify(data || {}),
     });
 
-    console.timeEnd('⏱️ [firebase.js] Fetch duration');
+    const fetchDurationMs = performance.now() - requestStartedAt;
+    console.log(`⏱️ [firebase.js] Fetch duration: ${fetchDurationMs.toFixed(1)} ms`);
     console.log('🌐 [firebase.js] Response status:', response.status);
     console.log('🌐 [firebase.js] Response ok:', response.ok);
     console.log('🌐 [firebase.js] Response statusText:', response.statusText);
@@ -183,16 +201,34 @@ export const getTrendingTopics = async (data) => {
   return { data: json };
 };
 
-export const getLeagueStandings = async (highlightlyLeagueId) => {
+export const getLeagueStandings = async ({ highlightlyLeagueId, sportsdbLeagueId, leagueName }) => {
   // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_league_standings_http';
+
+  let licenseKey = null;
+  try {
+    const raw = localStorage.getItem('rugby_ai_auth');
+    if (raw) {
+      const auth = JSON.parse(raw);
+      licenseKey = auth?.licenseKey || null;
+    }
+  } catch (e) {
+    // ignore
+  }
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ league_id: highlightlyLeagueId }),
+    body: JSON.stringify({
+      league_id: highlightlyLeagueId,
+      sportsdb_league_id: sportsdbLeagueId,
+      league_name: leagueName,
+      license_key: licenseKey,
+      // Server-side cache TTL hint (seconds). The function clamps this.
+      cache_ttl_seconds: 21600, // 6 hours
+    }),
   });
 
   if (!response.ok) {
@@ -202,6 +238,34 @@ export const getLeagueStandings = async (highlightlyLeagueId) => {
   // Normalize shape to match httpsCallable: { data: ... }
   const json = await response.json().catch(() => ({}));
   return json;
+};
+
+/**
+ * Subscribe to Firestore standings cache for real-time updates.
+ * When the API updates the server-side cache, this listener fires and the app can update.
+ * @param {number} highlightlyLeagueId - Highlightly league ID
+ * @param {number[]} seasons - Seasons to listen to (e.g. [2025, 2024])
+ * @param {(standings: object, season: number) => void} onUpdate - Callback when cache updates
+ * @returns {() => void} Unsubscribe function
+ */
+export const subscribeToStandingsCache = (highlightlyLeagueId, seasons, onUpdate) => {
+  const unsubs = [];
+  for (const year of seasons) {
+    const docId = `hl::${Number(highlightlyLeagueId)}::season::${Number(year)}`;
+    const ref = doc(db, 'standings_cache_v1', docId);
+    const unsub = onSnapshot(ref, (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const standings = data?.standings;
+      if (standings && typeof standings === 'object') {
+        onUpdate(standings, year);
+      }
+    }, (err) => {
+      console.warn('Standings cache listener error:', err);
+    });
+    unsubs.push(unsub);
+  }
+  return () => unsubs.forEach((u) => u());
 };
 
 export const parseSocialEmbed = (data) => {

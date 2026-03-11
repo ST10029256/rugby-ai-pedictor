@@ -1,0 +1,41 @@
+2026-03-04 13:25:39,116 | INFO | Starting MAZ MAXED V4 run
+2026-03-04 13:25:39,116 | INFO | Logging to: artifacts/maz_maxed_v4_run_20260304_132539.log
+2026-03-04 13:25:39,661 | INFO | [V4] Global pretraining start: rows=8845 teams=153 epochs=20 seeds=3
+2026-03-04 13:26:00,642 | INFO | [V4] Global pretraining done for seed=42
+2026-03-04 13:26:21,227 | INFO | [V4] Global pretraining done for seed=1337
+2026-03-04 13:26:40,889 | INFO | [V4] Global pretraining done for seed=9001
+2026-03-04 13:26:40,891 | INFO | [Rugby Championship] full-train mode: using all completed games (n=138)
+2026-03-04 13:26:41,656 | INFO | [Rugby Championship] full-train complete | train_rows=138 train_win_acc=0.841 train_mae=7.511
+2026-03-04 13:26:41,659 | INFO | [United Rugby Championship] full-train mode: using all completed games (n=2226)
+2026-03-04 13:26:49,827 | INFO | [United Rugby Championship] full-train complete | train_rows=2226 train_win_acc=0.868 train_mae=6.715
+2026-03-04 13:26:49,829 | INFO | [Currie Cup] full-train mode: using all completed games (n=745)
+2026-03-04 13:26:52,743 | INFO | [Currie Cup] full-train complete | train_rows=745 train_win_acc=0.840 train_mae=8.088
+2026-03-04 13:26:52,745 | INFO | [Rugby World Cup] full-train mode: using all completed games (n=201)
+2026-03-04 13:26:53,699 | INFO | [Rugby World Cup] full-train complete | train_rows=201 train_win_acc=0.930 train_mae=8.017
+2026-03-04 13:26:53,701 | INFO | [Super Rugby] full-train mode: using all completed games (n=1756)
+2026-03-04 13:27:00,480 | INFO | [Super Rugby] full-train complete | train_rows=1756 train_win_acc=0.858 train_mae=7.147
+2026-03-04 13:27:00,486 | INFO | [French Top 14] full-train mode: using all completed games (n=2922)
+2026-03-04 13:27:11,227 | INFO | [French Top 14] full-train complete | train_rows=2922 train_win_acc=0.877 train_mae=6.695
+2026-03-04 13:27:11,230 | INFO | [English Premiership Rugby] full-train mode: using all completed games (n=2050)
+2026-03-04 13:27:18,887 | INFO | [English Premiership Rugby] full-train complete | train_rows=2050 train_win_acc=0.862 train_mae=7.005
+2026-03-04 13:27:18,890 | INFO | [Six Nations Championship] full-train mode: using all completed games (n=249)
+2026-03-04 13:27:19,873 | INFO | [Six Nations Championship] full-train complete | train_rows=249 train_win_acc=0.831 train_mae=6.774
+2026-03-04 13:27:19,875 | INFO | [Rugby Union International Friendlies] full-train mode: using all completed games (n=769)
+2026-03-04 13:27:23,036 | INFO | [Rugby Union International Friendlies] full-train complete | train_rows=769 train_win_acc=0.895 train_mae=7.215
+2026-03-04 13:27:23,036 | INFO | === MAZ MAXED V4 Summary ===
+2026-03-04 13:27:23,036 | INFO | {
+  "tested": 9,
+  "skipped": 0
+}
+2026-03-04 13:27:23,036 | INFO | === MAZ MAXED V4 Final League Recap ===
+2026-03-04 13:27:23,036 | INFO | [Rugby Championship] status=trained_only | train_win_acc=0.841 train_mae=7.511
+2026-03-04 13:27:23,036 | INFO | [United Rugby Championship] status=trained_only | train_win_acc=0.868 train_mae=6.715
+2026-03-04 13:27:23,036 | INFO | [Currie Cup] status=trained_only | train_win_acc=0.840 train_mae=8.088
+2026-03-04 13:27:23,036 | INFO | [Rugby World Cup] status=trained_only | train_win_acc=0.930 train_mae=8.017
+2026-03-04 13:27:23,038 | INFO | [Super Rugby] status=trained_only | train_win_acc=0.858 train_mae=7.147
+2026-03-04 13:27:23,038 | INFO | [French Top 14] status=trained_only | train_win_acc=0.877 train_mae=6.695
+2026-03-04 13:27:23,038 | INFO | [English Premiership Rugby] status=trained_only | train_win_acc=0.862 train_mae=7.005
+2026-03-04 13:27:23,038 | INFO | [Six Nations Championship] status=trained_only | train_win_acc=0.831 train_mae=6.774
+2026-03-04 13:27:23,038 | INFO | [Rugby Union International Friendlies] status=trained_only | train_win_acc=0.895 train_mae=7.215
+2026-03-04 13:27:23,038 | INFO | Report saved: artifacts\maz_maxed_v4_train_all_prod_20260304_132723.json
+2026-03-04 13:27:23,040 | INFO | Updated latest production report: artifacts\maz_maxed_v4_prod_latest.json

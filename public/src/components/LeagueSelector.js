@@ -118,6 +118,9 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
         MenuProps={{
           disablePortal: false, // Use portal to prevent layout shifts
           disableScrollLock: true, // Prevent scroll lock on desktop
+          sx: {
+            zIndex: 2300,
+          },
           PaperProps: {
             sx: {
               maxHeight: 'none', // Show all leagues without scrolling
@@ -125,7 +128,7 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
               minWidth: '200px',
               maxWidth: '280px', // Never exceed control panel width (280px)
               boxSizing: 'border-box',
-              zIndex: 1400, // Higher than drawer (1200) and default menu (1300)
+              zIndex: 2301, // Above fixed header/drawer overlays
               mt: 0.5,
               backgroundColor: '#1f2937',
               backgroundImage: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',

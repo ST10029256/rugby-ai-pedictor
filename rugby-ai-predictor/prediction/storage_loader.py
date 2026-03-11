@@ -5,12 +5,91 @@ Helper module for loading models from Cloud Storage only
 import os
 import tempfile
 import logging
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4").strip().lower()
-ALLOW_LEGACY_MODEL_FALLBACK = os.getenv("ALLOW_LEGACY_MODEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
+# Default to strict runtime-first loading. Set ALLOW_LEGACY_MODEL_FALLBACK=1 to opt in.
+ALLOW_LEGACY_MODEL_FALLBACK = os.getenv("ALLOW_LEGACY_MODEL_FALLBACK", "0").strip().lower() not in {"0", "false", "no"}
+
+
+def _load_runtime_assets_from_storage(
+    league_id: int,
+    bucket_name: str,
+    family: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Download runtime assets for a model family (meta + all seed .pt files).
+
+    Returns None when the required runtime assets are not present.
+    """
+    if not bucket_name:
+        return None
+    try:
+        from google.cloud import storage  # type: ignore
+    except Exception as import_error:
+        logger.warning("Could not import google.cloud.storage for %s assets: %s", family, import_error)
+        return None
+
+    family_s = str(family or "v4").strip().lower()
+    if family_s not in {"v4", "v5"}:
+        return None
+
+    clean_bucket_name = bucket_name.replace('gs://', '').replace('https://', '').replace('http://', '').split('/')[0]
+    client = storage.Client()
+    bucket = client.bucket(clean_bucket_name)
+
+    meta_candidates = [
+        f"models/league_{league_id}_model_maz_maxed_{family_s}_meta.pkl",
+        f"models/artifacts/league_{league_id}_model_maz_maxed_{family_s}_meta.pkl",
+    ]
+    meta_blob = None
+    for path in meta_candidates:
+        b = bucket.blob(path)
+        if b.exists():
+            meta_blob = b
+            break
+    if meta_blob is None:
+        return None
+
+    seed_prefix = f"models/league_{league_id}_model_maz_maxed_{family_s}_seed_"
+    seed_blobs: List[Any] = [
+        b for b in bucket.list_blobs(prefix=seed_prefix)
+        if b.name.endswith(".pt")
+    ]
+    if not seed_blobs:
+        return None
+
+    # Deterministic order helps reproducibility.
+    seed_blobs = sorted(seed_blobs, key=lambda b: b.name)
+    temp_dir = tempfile.mkdtemp(prefix=f"{family_s}_assets_league_{league_id}_")
+    meta_local = os.path.join(temp_dir, os.path.basename(meta_blob.name))
+    meta_blob.download_to_filename(meta_local)
+    seed_local_paths: List[str] = []
+    for blob in seed_blobs:
+        local_path = os.path.join(temp_dir, os.path.basename(blob.name))
+        blob.download_to_filename(local_path)
+        seed_local_paths.append(local_path)
+
+    return {
+        "league_id": int(league_id),
+        "meta_path": meta_local,
+        "seed_model_paths": seed_local_paths,
+        "bucket_name": clean_bucket_name,
+        "model_family": family_s,
+    }
+
+
+def load_v4_assets_from_storage(league_id: int, bucket_name: str) -> Optional[Dict[str, Any]]:
+    """Backwards-compatible V4 runtime asset loader."""
+    return _load_runtime_assets_from_storage(league_id=league_id, bucket_name=bucket_name, family="v4")
+
+
+def load_v5_assets_from_storage(league_id: int, bucket_name: str) -> Optional[Dict[str, Any]]:
+    """V5 runtime asset loader."""
+    return _load_runtime_assets_from_storage(league_id=league_id, bucket_name=bucket_name, family="v5")
 
 
 def load_model_from_storage(

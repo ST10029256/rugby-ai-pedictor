@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Enhanced Auto-Update Script
-Automatically pulls ALL results and upcoming games from TheSportsDB
+Automatically pulls ALL results and upcoming games from API-Sports Rugby.
 """
 
 import argparse
@@ -14,6 +14,31 @@ import time
 import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - optional in some local setups
+    load_dotenv = None  # type: ignore
+
+try:
+    from prediction.hybrid_predictor import MultiLeaguePredictor
+except Exception:  # pragma: no cover
+    MultiLeaguePredictor = None  # type: ignore
+
+
+def _load_local_env_files() -> None:
+    """Load env vars from repo-level and functions-level .env files."""
+    if load_dotenv is None:
+        return
+    root = Path(__file__).resolve().parent.parent
+    candidates = [
+        root / ".env",
+        root / "rugby-ai-predictor" / ".env",
+    ]
+    for p in candidates:
+        if p.exists():
+            load_dotenv(dotenv_path=p, override=False)
 
 # Try to import Highlightly API
 try:
@@ -27,17 +52,24 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# League mappings for TheSportsDB
+# Ensure API keys can be sourced from local .env files.
+_load_local_env_files()
+
+LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4")
+LIVE_MODEL_CHANNEL = os.getenv("LIVE_MODEL_CHANNEL", "prod_100")
+LIVE_MODEL_VERSION = os.getenv("LIVE_MODEL_VERSION", f"{LIVE_MODEL_FAMILY}:{LIVE_MODEL_CHANNEL}")
+
+# League mappings for local league IDs + API-Sports Rugby IDs
 LEAGUE_MAPPINGS = {
-    4986: {"name": "Rugby Championship", "sportsdb_id": 4986},
-    4446: {"name": "United Rugby Championship", "sportsdb_id": 4446}, 
-    5069: {"name": "Currie Cup", "sportsdb_id": 5069},
-    4574: {"name": "Rugby World Cup", "sportsdb_id": 4574},
-    4551: {"name": "Super Rugby", "sportsdb_id": 4551},
-    4430: {"name": "French Top 14", "sportsdb_id": 4430},
-    4414: {"name": "English Premiership Rugby", "sportsdb_id": 4414},
-    4714: {"name": "Six Nations Championship", "sportsdb_id": 4714},
-    5479: {"name": "Rugby Union International Friendlies", "sportsdb_id": 5479}
+    4986: {"name": "Rugby Championship", "apisports_id": 85},
+    4446: {"name": "United Rugby Championship", "apisports_id": 76},
+    5069: {"name": "Currie Cup", "apisports_id": 37},
+    4574: {"name": "Rugby World Cup", "apisports_id": 69},
+    4551: {"name": "Super Rugby", "apisports_id": 71},
+    4430: {"name": "French Top 14", "apisports_id": 16},
+    4414: {"name": "English Premiership Rugby", "apisports_id": 13},
+    4714: {"name": "Six Nations Championship", "apisports_id": 51},
+    5479: {"name": "Rugby Union International Friendlies", "apisports_id": 84},
 }
 
 YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}  # e.g. Premiership, Top 14, URC
@@ -130,241 +162,103 @@ def get_team_id(conn: sqlite3.Connection, team_name: str, league_id: int) -> Opt
     logger.info(f"Created new team: {team_name} (ID: {team_id})")
     return team_id
 
-def fetch_games_from_sportsdb(
+def fetch_games_from_apisports(
     league_id: int,
-    sportsdb_id: int,
+    apisports_id: Optional[int],
     league_name: str,
+    api_key: str,
     include_history: bool = False,
-    scan_rounds: bool = False,
     days_ahead: int = 180,
     days_back: int = 14,
 ) -> List[Dict[str, Any]]:
-    """Fetch games from TheSportsDB for a specific league."""
-    logger.info(f"Fetching games for {league_name} (SportsDB ID: {sportsdb_id})")
-    
-    games = []
-    
-    try:
-        # OPTIMIZED: fetch upcoming games first (historical backfills are optional via --include-history)
-        urls_to_try = []
-        
-        # Upcoming games endpoints (often limited to ~15 fixtures)
-        urls_to_try.extend([
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id={sportsdb_id}",
-            f"https://www.thesportsdb.com/api/v1/json/1/eventsnextleague.php?id={sportsdb_id}"
-        ])
-        
-        # Season-based endpoints (dynamic, based on today's date)
-        for season in compute_current_seasons(sportsdb_id):
-            urls_to_try.extend([
-                f"https://www.thesportsdb.com/api/v1/json/123/eventsseason.php?id={sportsdb_id}&s={season}",
-                f"https://www.thesportsdb.com/api/v1/json/1/eventsseason.php?id={sportsdb_id}&s={season}"
-            ])
+    """Fetch games from API-Sports Rugby for a specific league."""
+    if not apisports_id:
+        logger.warning(f"No API-Sports ID configured for {league_name}; skipping.")
+        return []
+    if not api_key:
+        logger.warning("APISPORTS_RUGBY_KEY not set; cannot fetch games.")
+        return []
 
-        # Always scan rounds to get more upcoming fixtures (API often only returns 1-2 games from eventsnextleague)
-        # This ensures we capture all upcoming games that are only available in round-specific endpoints
-        # TheSportsDB sometimes won't return full seasons in one call, so round scanning is essential
-        if scan_rounds or True:  # Always scan rounds for all leagues to get comprehensive fixture data
-            max_rounds = MAX_ROUNDS_BY_LEAGUE.get(sportsdb_id, 30)
-            for season in compute_current_seasons(sportsdb_id):
-                for round_num in range(1, max_rounds + 1):
-                    urls_to_try.extend([
-                        f"https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}",
-                        f"https://www.thesportsdb.com/api/v1/json/1/eventsround.php?id={sportsdb_id}&r={round_num}&s={season}",
-                    ])
+    logger.info(f"Fetching games for {league_name} (API-Sports ID: {apisports_id})")
+    session = requests.Session()
+    headers = {"x-apisports-key": api_key}
+    games: List[Dict[str, Any]] = []
 
-        # For International Friendlies, fixtures are scattered; sample upcoming weekends via day-based query.
-        if sportsdb_id == 5479:
-            today = datetime.utcnow().date()
-            weekend_dates: List[str] = []
-            for i in range(0, 70):
-                d = today + timedelta(days=i)
-                # 5=Saturday, 6=Sunday
-                if d.weekday() in (5, 6):
-                    weekend_dates.append(d.strftime('%Y-%m-%d'))
-            for d in weekend_dates[:12]:  # cap calls to avoid rate limiting
-                urls_to_try.extend([
-                    f"https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d={d}&s=Rugby",
-                    f"https://www.thesportsdb.com/api/v1/json/1/eventsday.php?d={d}&s=Rugby",
-                ])
+    now = datetime.utcnow()
+    current_year = now.year
+    season_years = [current_year, current_year - 1]
+    if include_history:
+        season_years = list(range(2008, current_year + 1))
 
-        # Add general league endpoint (can include recent/upcoming depending on API)
-        urls_to_try.extend([
-            f"https://www.thesportsdb.com/api/v1/json/123/eventsleague.php?id={sportsdb_id}"
-        ])
-
-        # Optional history backfill (kept behind a flag so the daily pipeline stays fast/reliable)
-        if include_history and sportsdb_id in {4430, 4714, 5479}:
-            urls_to_try.extend([
-                f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={sportsdb_id}",
-                f"https://www.thesportsdb.com/api/v1/json/1/eventspastleague.php?id={sportsdb_id}"
-            ])
-        
-        for i, url in enumerate(urls_to_try):
-            try:
-                logger.debug(f"Trying URL: {url}")
-                
-                # Add progressive delay to avoid rate limiting
-                if i > 0:
-                    delay = random.uniform(1.0, 2.5)  # Random delay between 1-2.5 seconds
-                    logger.debug(f"Waiting {delay:.1f}s to avoid rate limiting...")
-                    time.sleep(delay)
-                else:
-                    time.sleep(0.5)  # Short delay for first request
-                
-                response = requests.get(url, timeout=30)
-                
-                if response.status_code == 429:
-                    logger.warning(f"Rate limited (429) - waiting longer before next request...")
-                    time.sleep(random.uniform(5.0, 10.0))  # Wait 5-10 seconds on rate limit
-                    continue
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    events = data.get('events')
-                    
-                    if events is not None and len(events) > 0:
-                        logger.info(f"Found {len(events)} events for {league_name} from {url}")
-                        
-                        for event in events:
-                            try:
-                                # Filter to correct league for day-based queries
-                                ev_league_id = event.get('idLeague') or event.get('idleague')
-                                ev_league_name = (event.get('strLeague') or '').lower()
-                                
-                                # For International Friendlies (5479), accept ALL rugby matches from eventsday.php
-                                # since friendlies are scattered across different competitions
-                                if sportsdb_id == 5479 and 'eventsday' in url:
-                                    # Accept all rugby matches when using day-based queries for friendlies
-                                    pass  # Don't filter by league ID for friendlies day queries
-                                elif ev_league_id and str(ev_league_id) != str(sportsdb_id):
-                                    # For other queries, filter by exact league ID match
-                                    continue
-                                # Parse event data
-                                event_id = safe_to_int(event.get('idEvent'))
-                                # Robust date extraction: try multiple fields and formats
-                                date_str = event.get('dateEvent') or event.get('dateEventLocal')
-                                home_team = event.get('strHomeTeam', '').strip()
-                                away_team = event.get('strAwayTeam', '').strip()
-                                home_score = event.get('intHomeScore')
-                                away_score = event.get('intAwayScore')
-                                
-                                if not home_team or not away_team:
-                                    continue
-                                
-                                # CRITICAL: For International Friendlies (5479), only accept matches where both teams
-                                # look like national teams (end with "Rugby" like "England Rugby", "Scotland Rugby")
-                                # or are known country names without club names
-                                # EXCLUDE women's matches (e.g., "Hong Kong W Rugby", "Belgium W Rugby")
-                                if sportsdb_id == 5479 and 'eventsday' in url:
-                                    # List of countries with their common rugby names
-                                    rugby_countries = ['england', 'scotland', 'wales', 'ireland', 'france', 'italy', 'spain', 
-                                                     'portugal', 'argentina', 'chile', 'uruguay', 'brazil', 'usa', 'canada',
-                                                     'samoa', 'tonga', 'fiji', 'japan', 'south korea', 'hong kong',
-                                                     'new zealand', 'australia', 'south africa', 'namibia', 'zimbabwe',
-                                                     'georgia', 'romania', 'russia', 'portugal', 'germany', 'belgium', 'netherlands']
-                                    home_lower = home_team.lower()
-                                    away_lower = away_team.lower()
-                                    
-                                    # EXCLUDE women's matches - check for women's indicators
-                                    women_indicators = [' w rugby', ' women', ' womens', ' w ', ' women\'s', ' w\'s']
-                                    is_women_home = any(indicator in home_lower for indicator in women_indicators)
-                                    is_women_away = any(indicator in away_lower for indicator in women_indicators)
-                                    
-                                    if is_women_home or is_women_away:
-                                        continue  # Skip women's matches
-                                    
-                                    # Check if both teams end with "Rugby" (like "England Rugby", "Scotland Rugby")
-                                    # But exclude if it's " W Rugby" (women's)
-                                    is_national_home = home_team.endswith(' Rugby') and not home_team.endswith(' W Rugby')
-                                    is_national_away = away_team.endswith(' Rugby') and not away_team.endswith(' W Rugby')
-                                    
-                                    # Check if both teams are country names
-                                    is_country_home = any(country in home_lower for country in rugby_countries)
-                                    is_country_away = any(country in away_lower for country in rugby_countries)
-                                    
-                                    # Accept if BOTH teams look like national teams
-                                    if not ((is_national_home and is_national_away) or (is_country_home and is_country_away and not 'club' in home_lower and not 'club' in away_lower)):
-                                        continue  # Skip club matches
-                                
-                                # Convert date
-                                event_date = None
-                                try:
-                                    if date_str:
-                                        # Common 'YYYY-MM-DD'
-                                        try:
-                                            event_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                                        except Exception:
-                                            # Sometimes includes time; take date part
-                                            try:
-                                                event_date = datetime.strptime(date_str[:10], '%Y-%m-%d').date()
-                                            except Exception:
-                                                event_date = None
-                                    if event_date is None:
-                                        # Fallback to timestamp if available
-                                        ts = event.get('strTimestamp') or event.get('dateEventTimestamp')
-                                        if isinstance(ts, str) and len(ts) >= 10:
-                                            event_date = datetime.strptime(ts[:10], '%Y-%m-%d').date()
-                                except Exception:
-                                    event_date = None
-                                if event_date is None:
-                                    continue
-                                
-                                # Convert scores
-                                home_score_int = safe_to_int(home_score) if home_score else None
-                                away_score_int = safe_to_int(away_score) if away_score else None
-                                
-                                game = {
-                                    'event_id': event_id,
-                                    'date_event': event_date,
-                                    'home_team': home_team,
-                                    'away_team': away_team,
-                                    'home_score': home_score_int,
-                                    'away_score': away_score_int,
-                                    'league_id': league_id,
-                                    'league_name': league_name
-                                }
-                                
-                                games.append(game)
-                                
-                            except Exception as e:
-                                logger.warning(f"Error parsing event {event.get('idEvent', 'unknown')}: {e}")
-                                continue
-                        
-                        # Continue trying other URLs to get comprehensive coverage
-                        # Don't break - collect games from all successful endpoints
-                    else:
-                        logger.debug(f"No events found in {url}")
-                        
-            except Exception as e:
-                logger.debug(f"Error with URL {url}: {e}")
+    for season in season_years:
+        try:
+            resp = session.get(
+                "https://v1.rugby.api-sports.io/games",
+                headers=headers,
+                params={"league": apisports_id, "season": season},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.warning(f"{league_name} season={season}: HTTP {resp.status_code}")
                 continue
-                
-    except Exception as e:
-        logger.error(f"Error fetching games for {league_name}: {e}")
-    
-    # Remove duplicate games based on date, home team, and away team
-    unique_games = []
+            payload = resp.json() if resp.content else {}
+            errors = payload.get("errors")
+            if errors:
+                logger.warning(f"{league_name} season={season}: API errors={errors}")
+            rows = payload.get("response") or []
+            logger.info(f"{league_name} season={season}: fetched {len(rows)} rows")
+            for row in rows:
+                try:
+                    dt_raw = row.get("date")
+                    dt = datetime.fromisoformat(str(dt_raw).replace("Z", "+00:00")) if dt_raw else None
+                    if dt is None:
+                        continue
+                    teams = row.get("teams") or {}
+                    home_name = str((teams.get("home") or {}).get("name") or "").strip()
+                    away_name = str((teams.get("away") or {}).get("name") or "").strip()
+                    if not home_name or not away_name:
+                        continue
+                    scores = row.get("scores") or {}
+                    home_score = scores.get("home")
+                    away_score = scores.get("away")
+                    games.append(
+                        {
+                            "event_id": safe_to_int(row.get("id"), 0),
+                            "date_event": dt.date(),
+                            "home_team": home_name,
+                            "away_team": away_name,
+                            "home_score": safe_to_int(home_score) if home_score is not None else None,
+                            "away_score": safe_to_int(away_score) if away_score is not None else None,
+                            "league_id": league_id,
+                            "league_name": league_name,
+                            "season": f"{season}-{season + 1}",
+                            "timestamp": dt.isoformat(),
+                            "status": ((row.get("status") or {}).get("short") or (row.get("status") or {}).get("long")),
+                        }
+                    )
+                except Exception as ex_row:
+                    logger.debug(f"Row parse failed for {league_name} season={season}: {ex_row}")
+        except Exception as ex:
+            logger.warning(f"{league_name} season={season}: request failed ({ex})")
+
+    unique_games: List[Dict[str, Any]] = []
     seen_games = set()
-    
     for game in games:
-        game_key = (game['date_event'], game['home_team'], game['away_team'])
+        game_key = (game["date_event"], game["home_team"], game["away_team"])
         if game_key not in seen_games:
             seen_games.add(game_key)
             unique_games.append(game)
-    
-    logger.info(f"Found {len(games)} total games, {len(unique_games)} unique games for {league_name}")
 
-    # Filter to a sensible date window so we don't waste inserts on ancient events.
+    logger.info(f"Found {len(games)} total rows, {len(unique_games)} unique rows for {league_name}")
+
     today = datetime.utcnow().date()
     min_date = today - timedelta(days=days_back)
     max_date = today + timedelta(days=days_ahead)
-
     in_window: List[Dict[str, Any]] = []
     past = 0
     future = 0
     for g in unique_games:
-        d = g.get('date_event')
+        d = g.get("date_event")
         if not d:
             continue
         if d < min_date or d > max_date:
@@ -379,14 +273,220 @@ def fetch_games_from_sportsdb(
         f"Date window for {league_name}: {min_date} .. {max_date} | "
         f"in-window={len(in_window)} (past={past}, today={len(in_window) - past - future}, future={future})"
     )
-    
-    # If no games found from API, log warning
-    if not unique_games:
-        logger.warning(f"No games found from API for {league_name}")
-    
     return in_window
 
-def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, league_name: str) -> int:
+
+def _ensure_prediction_snapshot_table(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prediction_snapshot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            league_id INTEGER,
+            model_version TEXT NOT NULL,
+            snapshot_type TEXT NOT NULL,
+            predicted_at TEXT NOT NULL,
+            kickoff_at TEXT,
+            home_team TEXT,
+            away_team TEXT,
+            predicted_winner TEXT,
+            predicted_home_score REAL,
+            predicted_away_score REAL,
+            confidence REAL,
+            home_win_prob REAL,
+            away_win_prob REAL,
+            actual_home_score INTEGER,
+            actual_away_score INTEGER,
+            actual_winner TEXT,
+            prediction_correct INTEGER,
+            score_error REAL,
+            source_note TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(match_id, model_version, snapshot_type)
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_prediction_snapshot_match ON prediction_snapshot(match_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_prediction_snapshot_model ON prediction_snapshot(model_version, snapshot_type)")
+    conn.commit()
+
+
+class SnapshotRuntime:
+    """Event-driven pre-kickoff snapshot + completed-game finalization."""
+
+    def __init__(self, db_path: str, enabled: bool = True, before_kickoff_minutes: int = 20, after_kickoff_minutes: int = 5):
+        self.db_path = db_path
+        self.enabled = enabled and MultiLeaguePredictor is not None
+        self.before_kickoff_minutes = max(0, int(before_kickoff_minutes))
+        self.after_kickoff_minutes = max(0, int(after_kickoff_minutes))
+        self.model_version = LIVE_MODEL_VERSION
+        self._predictor = None
+        self.stats = {"created": 0, "finalized": 0, "skipped_outside_window": 0, "skipped_existing": 0, "errors": 0}
+
+    def _get_predictor(self):
+        if self._predictor is None:
+            if not self.enabled:
+                return None
+            storage_bucket = os.getenv("MODEL_STORAGE_BUCKET", "rugby-ai-61fd0.firebasestorage.app")
+            self._predictor = MultiLeaguePredictor(
+                db_path=self.db_path,
+                sportdevs_api_key="",  # AI-only snapshots
+                artifacts_dir="artifacts",
+                storage_bucket=storage_bucket,
+            )
+        return self._predictor
+
+    @staticmethod
+    def _parse_kickoff(game: Dict[str, Any]) -> Optional[datetime]:
+        kickoff_raw = game.get("timestamp") or game.get("date_event")
+        if not kickoff_raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(kickoff_raw).replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt
+        except Exception:
+            try:
+                return datetime.fromisoformat(str(game.get("date_event")))
+            except Exception:
+                return None
+
+    @staticmethod
+    def _actual_winner(home_score: Optional[int], away_score: Optional[int]) -> Optional[str]:
+        if home_score is None or away_score is None:
+            return None
+        if home_score > away_score:
+            return "Home"
+        if away_score > home_score:
+            return "Away"
+        return "Draw"
+
+    def process_event(self, conn: sqlite3.Connection, event_id: int, game: Dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        try:
+            _ensure_prediction_snapshot_table(conn)
+            cur = conn.cursor()
+            home_score = game.get("home_score")
+            away_score = game.get("away_score")
+            has_actual = home_score is not None and away_score is not None
+
+            if has_actual:
+                cur.execute(
+                    """
+                    SELECT predicted_home_score, predicted_away_score, predicted_winner
+                    FROM prediction_snapshot
+                    WHERE match_id = ? AND model_version = ? AND snapshot_type = 'pre_kickoff_live'
+                    LIMIT 1
+                    """,
+                    (int(event_id), self.model_version),
+                )
+                row = cur.fetchone()
+                if row:
+                    pred_home, pred_away, pred_winner = row
+                    actual_winner = self._actual_winner(home_score, away_score)
+                    prediction_correct = None
+                    if pred_winner in {"Home", "Away", "Draw"} and actual_winner:
+                        prediction_correct = 1 if pred_winner == actual_winner else 0
+                    score_error = None
+                    if pred_home is not None and pred_away is not None:
+                        score_error = abs(float(pred_home) - float(home_score)) + abs(float(pred_away) - float(away_score))
+                    cur.execute(
+                        """
+                        UPDATE prediction_snapshot
+                        SET actual_home_score=?, actual_away_score=?, actual_winner=?, prediction_correct=?, score_error=?, updated_at=CURRENT_TIMESTAMP
+                        WHERE match_id=? AND model_version=? AND snapshot_type='pre_kickoff_live'
+                        """,
+                        (int(home_score), int(away_score), actual_winner, prediction_correct, score_error, int(event_id), self.model_version),
+                    )
+                    self.stats["finalized"] += 1
+                return
+
+            kickoff_dt = self._parse_kickoff(game)
+            if kickoff_dt is None:
+                self.stats["skipped_outside_window"] += 1
+                return
+            minutes_to_kickoff = (kickoff_dt - datetime.utcnow()).total_seconds() / 60.0
+            if not (-float(self.after_kickoff_minutes) <= minutes_to_kickoff <= float(self.before_kickoff_minutes)):
+                self.stats["skipped_outside_window"] += 1
+                return
+
+            cur.execute(
+                """
+                SELECT 1 FROM prediction_snapshot
+                WHERE match_id = ? AND model_version = ? AND snapshot_type = 'pre_kickoff_live'
+                LIMIT 1
+                """,
+                (int(event_id), self.model_version),
+            )
+            if cur.fetchone() is not None:
+                self.stats["skipped_existing"] += 1
+                return
+
+            predictor = self._get_predictor()
+            if predictor is None:
+                self.stats["errors"] += 1
+                return
+            home_team = str(game.get("home_team") or "").strip()
+            away_team = str(game.get("away_team") or "").strip()
+            league_id = int(game.get("league_id"))
+            if not home_team or not away_team:
+                self.stats["errors"] += 1
+                return
+
+            pred = predictor.predict_match(
+                home_team=home_team,
+                away_team=away_team,
+                league_id=league_id,
+                match_date=str(game.get("date_event")),
+                match_id=None,
+            )
+            cur.execute(
+                """
+                INSERT INTO prediction_snapshot (
+                    match_id, league_id, model_version, snapshot_type, predicted_at, kickoff_at, home_team, away_team,
+                    predicted_winner, predicted_home_score, predicted_away_score, confidence, home_win_prob, away_win_prob,
+                    source_note, updated_at
+                ) VALUES (?, ?, ?, 'pre_kickoff_live', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(match_id, model_version, snapshot_type)
+                DO UPDATE SET
+                    league_id=excluded.league_id, predicted_at=excluded.predicted_at, kickoff_at=excluded.kickoff_at,
+                    home_team=excluded.home_team, away_team=excluded.away_team, predicted_winner=excluded.predicted_winner,
+                    predicted_home_score=excluded.predicted_home_score, predicted_away_score=excluded.predicted_away_score,
+                    confidence=excluded.confidence, home_win_prob=excluded.home_win_prob, away_win_prob=excluded.away_win_prob,
+                    source_note=excluded.source_note, updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    int(event_id),
+                    league_id,
+                    self.model_version,
+                    datetime.utcnow().isoformat(),
+                    kickoff_dt.isoformat(),
+                    home_team,
+                    away_team,
+                    pred.get("predicted_winner"),
+                    float(pred.get("predicted_home_score")) if pred.get("predicted_home_score") is not None else None,
+                    float(pred.get("predicted_away_score")) if pred.get("predicted_away_score") is not None else None,
+                    float(pred.get("confidence")) if pred.get("confidence") is not None else None,
+                    float(pred.get("home_win_prob")) if pred.get("home_win_prob") is not None else None,
+                    float(pred.get("away_win_prob")) if pred.get("away_win_prob") is not None else None,
+                    "event_driven_pre_kickoff",
+                ),
+            )
+            self.stats["created"] += 1
+        except Exception as e:
+            self.stats["errors"] += 1
+            logger.debug(f"SnapshotRuntime error for event {event_id}: {e}")
+
+def detect_and_add_missing_games(
+    conn: sqlite3.Connection,
+    league_id: int,
+    league_name: str,
+    snapshot_runtime: Optional[SnapshotRuntime] = None,
+) -> int:
     """Detect and add missing games by checking TheSportsDB website data."""
     logger.info(f"Checking for missing games in {league_name}...")
     
@@ -396,7 +496,7 @@ def detect_and_add_missing_games(conn: sqlite3.Connection, league_id: int, leagu
         manual_games = get_manual_urc_fixtures()
         if manual_games:
             # Use update_database_with_games to add them (handles duplicates)
-            added = update_database_with_games(conn, manual_games)
+            added = update_database_with_games(conn, manual_games, snapshot_runtime=snapshot_runtime)
             if added > 0:
                 logger.info(f"Added {added} URC games from manual fixtures")
             return added
@@ -580,7 +680,7 @@ def fetch_highlightly_friendlies(conn: sqlite3.Connection, league_id: int, leagu
     conn.commit()
     return added_count
 
-def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, Any]]) -> int:
+def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, Any]], snapshot_runtime: Optional[SnapshotRuntime] = None) -> int:
     """Update database with fetched games."""
     cursor = conn.cursor()
     updated_count = 0
@@ -615,15 +715,17 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                     
                     cursor.execute("""
                         UPDATE event 
-                        SET home_score = ?, away_score = ?
+                        SET home_score = ?, away_score = ?, season = COALESCE(?, season), timestamp = COALESCE(?, timestamp), status = COALESCE(?, status)
                         WHERE id = ?
-                    """, (game['home_score'], game['away_score'], event_id))
+                    """, (game['home_score'], game['away_score'], game.get('season'), game.get('timestamp'), game.get('status'), event_id))
                     
                     updated_count += 1
                     logger.info(f"Score added: {game['home_team']} {game['home_score']}-{game['away_score']} {game['away_team']}")
                 else:
                     # Game already exists - skip silently (prevent duplicates)
                     logger.debug(f"Skipped existing: {game['home_team']} vs {game['away_team']} on {game['date_event']}")
+                if snapshot_runtime:
+                    snapshot_runtime.process_event(conn, int(event_id), game)
             else:
                 # DOUBLE-CHECK before inserting (extra safety)
                 cursor.execute("""
@@ -640,12 +742,25 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                 
                 # Safe to insert
                 cursor.execute("""
-                    INSERT INTO event (home_team_id, away_team_id, date_event, home_score, away_score, league_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (home_team_id, away_team_id, game['date_event'], game['home_score'], game['away_score'], game['league_id']))
+                    INSERT INTO event (home_team_id, away_team_id, date_event, home_score, away_score, league_id, season, timestamp, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    home_team_id,
+                    away_team_id,
+                    game['date_event'],
+                    game['home_score'],
+                    game['away_score'],
+                    game['league_id'],
+                    game.get('season'),
+                    game.get('timestamp'),
+                    game.get('status'),
+                ))
+                event_id = cursor.lastrowid
                 
                 updated_count += 1
                 logger.info(f"Added: {game['home_team']} vs {game['away_team']} ({game['date_event']})")
+                if snapshot_runtime and event_id:
+                    snapshot_runtime.process_event(conn, int(event_id), game)
                 
         except Exception as e:
             logger.error(f"Error updating game {game.get('home_team', 'unknown')} vs {game.get('away_team', 'unknown')}: {e}")
@@ -655,23 +770,36 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
 
 def main():
     """Main function to update all leagues."""
-    parser = argparse.ArgumentParser(description='Auto-update rugby games from TheSportsDB')
+    parser = argparse.ArgumentParser(description='Auto-update rugby games from API-Sports Rugby')
     parser.add_argument('--db', default='data.sqlite', help='Database file path')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
-    parser.add_argument('--include-history', action='store_true', help='Also fetch historical endpoints (slower, more API calls)')
-    parser.add_argument('--scan-rounds', action='store_true', help='[DEPRECATED] Round scanning is now automatic for all leagues to ensure comprehensive fixture coverage')
+    parser.add_argument('--include-history', action='store_true', help='Also fetch history seasons (slower, more API calls)')
+    parser.add_argument('--api-key', default=None, help='API-Sports rugby key (or APISPORTS_RUGBY_KEY env var)')
     parser.add_argument('--days-ahead', type=int, default=180, help='Only keep fixtures up to N days ahead (default: 180)')
     parser.add_argument('--days-back', type=int, default=14, help='Also keep fixtures up to N days back (default: 14)')
+    parser.add_argument('--disable-event-snapshots', action='store_true', help='Disable event-driven pre-kickoff snapshots/finalization')
+    parser.add_argument('--snapshot-before-minutes', type=int, default=20, help='Snapshot when kickoff is within this many minutes (default: 20)')
+    parser.add_argument('--snapshot-after-minutes', type=int, default=5, help='Allow late snapshot this many minutes after kickoff (default: 5)')
     
     args = parser.parse_args()
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    logger.info("🚀 Starting automated game update from TheSportsDB")
+    logger.info("🚀 Starting automated game update from API-Sports Rugby")
+    api_key = args.api_key or os.getenv("APISPORTS_RUGBY_KEY", "") or os.getenv("APISPORTS_API_KEY", "")
+    if not api_key:
+        logger.error("Missing API key. Pass --api-key or set APISPORTS_RUGBY_KEY")
+        return
     
     # Connect to database
     conn = sqlite3.connect(args.db)
+    snapshot_runtime = SnapshotRuntime(
+        db_path=args.db,
+        enabled=not args.disable_event_snapshots,
+        before_kickoff_minutes=args.snapshot_before_minutes,
+        after_kickoff_minutes=args.snapshot_after_minutes,
+    )
     
     total_updated = 0
     
@@ -687,46 +815,45 @@ def main():
         if league_id in LEAGUE_MAPPINGS:
             league_info = LEAGUE_MAPPINGS[league_id]
             league_name = league_info['name']
-            sportsdb_id = league_info['sportsdb_id']
+            apisports_id = league_info['apisports_id']
             
-            logger.info(f"🔄 Fetching UPCOMING games for {league_name} (SportsDB ID: {sportsdb_id})")
+            logger.info(f"🔄 Fetching UPCOMING games for {league_name} (API-Sports ID: {apisports_id})")
             
             try:
-                # Fetch ONLY upcoming games from TheSportsDB
-                games = fetch_games_from_sportsdb(
+                games = fetch_games_from_apisports(
                     league_id,
-                    sportsdb_id,
+                    apisports_id,
                     league_name,
+                    api_key=api_key,
                     include_history=args.include_history,
-                    scan_rounds=args.scan_rounds,
                     days_ahead=args.days_ahead,
                     days_back=args.days_back,
                 )
                 
                 if games:
                     # Update database
-                    updated = update_database_with_games(conn, games)
+                    updated = update_database_with_games(conn, games, snapshot_runtime=snapshot_runtime)
                     total_updated += updated
                     logger.info(f"✅ {league_name}: Updated {updated} upcoming games")
                     
                     # For URC, also check manual fixtures to fill any gaps
                     if league_id == 4446:
                         logger.info(f"🔍 {league_name}: Checking for additional manual fixtures...")
-                        missing_added = detect_and_add_missing_games(conn, league_id, league_name)
+                        missing_added = detect_and_add_missing_games(conn, league_id, league_name, snapshot_runtime=snapshot_runtime)
                         if missing_added > 0:
                             total_updated += missing_added
                             logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games from manual fixtures")
                 else:
                     logger.warning(f"⚠️ {league_name}: No upcoming games found from API")
                     # Try manual fixtures as fallback (especially for URC)
-                    missing_added = detect_and_add_missing_games(conn, league_id, league_name)
+                    missing_added = detect_and_add_missing_games(conn, league_id, league_name, snapshot_runtime=snapshot_runtime)
                     if missing_added > 0:
                         total_updated += missing_added
                         logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games from manual fixtures")
                 
                 # For International Friendlies, also fetch from Highlightly API
-                if sportsdb_id == 5479:
-                    highlightly_added = fetch_highlightly_friendlies(conn, league_id, league_name, sportsdb_id)
+                if league_id == 5479:
+                    highlightly_added = fetch_highlightly_friendlies(conn, league_id, league_name, 5479)
                     if highlightly_added > 0:
                         total_updated += highlightly_added
                         logger.info(f"🎯 {league_name}: Added {highlightly_added} friendlies from Highlightly API")
@@ -740,6 +867,12 @@ def main():
     conn.close()
     
     logger.info(f"🎉 Update complete! Total games updated: {total_updated}")
+    if snapshot_runtime and snapshot_runtime.enabled:
+        s = snapshot_runtime.stats
+        logger.info(
+            "📸 Event-driven snapshots: created=%s finalized=%s skipped_outside_window=%s skipped_existing=%s errors=%s",
+            s["created"], s["finalized"], s["skipped_outside_window"], s["skipped_existing"], s["errors"]
+        )
     
     if total_updated > 0:
         # Create retraining flag file for new games - ALWAYS retrain when new data is found
@@ -752,7 +885,7 @@ def main():
                     "timestamp": datetime.now().isoformat(),
                     "reason": "new_games_fetched",
                     "trigger": "comprehensive_data_update",
-                    "description": f"Found {total_updated} new/updated games from TheSportsDB - retraining all models to capture latest data"
+                    "description": f"Found {total_updated} new/updated games from API-Sports Rugby - retraining all models to capture latest data"
                 }, f, indent=2)
             logger.info(f"🔄 Created retraining flag file: {retrain_flag_file}")
             logger.info("🤖 Models will be retrained with new game data")

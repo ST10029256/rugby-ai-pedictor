@@ -11,6 +11,12 @@ V4 research architecture:
 - Post-hoc calibration (isotonic/platt fallback)
 
 This file is intentionally self-contained and does not replace V3.
+
+Upgrades in this version:
+- rating-aware temporal features
+- recency-weighted training
+- calibrated runtime-compatible probabilities
+- confidence thresholds learned from train behavior
 """
 
 from __future__ import annotations
@@ -56,6 +62,26 @@ from prediction.features import FeatureConfig, build_feature_table
 V4_VERSION = "v4"
 LOG = logging.getLogger("maz_v4")
 FRIENDLIES_LEAGUE_ID = 5479
+DEFAULT_PROB_STD_THRESHOLD = 0.06
+SCORE_HUBER_MIX = 0.0
+HOME_CONTEXT_RATE_SPAN = 0.18
+CONTEXT_PLATT_MIN_ROWS = 800
+ISOTONIC_MIN_ROWS = 1200
+SMALL_SAMPLE_ROWS = 300
+MEDIUM_SAMPLE_ROWS = 800
+LOW_SAMPLE_SHRINK_MAX = 0.15
+HIGH_SAMPLE_SHRINK_MAX = 0.35
+LEAGUE_HOME_ADV_PRIOR: Dict[int, float] = {
+    4551: 0.58,  # Super Rugby
+    4986: 0.56,  # Rugby Championship
+    4446: 0.57,  # United Rugby Championship
+    4430: 0.60,  # French Top 14
+    4414: 0.56,  # English Premiership
+    5069: 0.57,  # Currie Cup
+    4714: 0.54,  # Six Nations
+    4574: 0.50,  # Rugby World Cup: conservative prior, let data override it
+    5479: 0.52,  # Friendlies
+}
 
 
 @dataclass
@@ -175,6 +201,33 @@ def build_league_score_stats(df_train: pd.DataFrame) -> Dict[int, Tuple[float, f
     return out
 
 
+def build_league_environment_stats(
+    df_train: pd.DataFrame,
+    base_rating_home_adv: float,
+) -> Dict[int, Dict[str, float]]:
+    out: Dict[int, Dict[str, float]] = {}
+    default_prior = 0.55
+    for lid, g in df_train.groupby("league_id"):
+        lid_i = int(lid)
+        prior_home_prob = float(LEAGUE_HOME_ADV_PRIOR.get(lid_i, default_prior))
+        n = len(g)
+        empirical_home_prob = float(np.mean(g["home_score"].astype(float).values > g["away_score"].astype(float).values))
+        blend_w = min(0.80, max(0.0, n / 400.0))
+        blended_home_prob = ((blend_w * empirical_home_prob) + ((1.0 - blend_w) * prior_home_prob))
+        # "Home" here is really listing/context advantage, not purely venue.
+        # Some tournaments look neutral in theory but still have strong home-side signal in the data.
+        home_strength = float(np.clip((blended_home_prob - 0.50) / HOME_CONTEXT_RATE_SPAN, 0.0, 1.0))
+        # Keep the handcrafted rating update stable across leagues; let the neural features
+        # learn league-specific home/listing context from `home_strength`.
+        rating_home_adv = float(base_rating_home_adv)
+        out[lid_i] = {
+            "home_prob": blended_home_prob,
+            "home_strength": home_strength,
+            "rating_home_adv": rating_home_adv,
+        }
+    return out
+
+
 def scale_score_targets(
     y_raw: np.ndarray,
     league_ids: np.ndarray,
@@ -201,6 +254,88 @@ def unscale_score_predictions(
         out[i, 0] = (out[i, 0] * sd) + mu
         out[i, 1] = (out[i, 1] * sd) + mu
     return out
+
+
+def unscale_score_variances(
+    var_scaled: np.ndarray,
+    league_ids: np.ndarray,
+    league_stats: Dict[int, Tuple[float, float]],
+) -> np.ndarray:
+    out = var_scaled.copy()
+    for i in range(len(out)):
+        lid = int(league_ids[i])
+        _, sd = league_stats.get(lid, (20.0, 8.0))
+        if not np.isfinite(sd) or sd < 1e-6:
+            sd = 8.0
+        scale = float(sd * sd)
+        out[i, 0] = out[i, 0] * scale
+        out[i, 1] = out[i, 1] * scale
+    return out
+
+
+def build_recency_weights(df: pd.DataFrame, half_life_days: float) -> np.ndarray:
+    if len(df) == 0 or half_life_days <= 0:
+        return np.ones(len(df), dtype=np.float32)
+    dates = pd.to_datetime(df["date_event"], errors="coerce")
+    if dates.isna().all():
+        return np.ones(len(df), dtype=np.float32)
+    last_dt = dates.max()
+    ages = (last_dt - dates).dt.days.fillna(0).clip(lower=0).astype(float).to_numpy()
+    weights = np.power(0.5, ages / max(1.0, float(half_life_days))).astype(np.float32)
+    mean_w = float(np.mean(weights)) if len(weights) else 1.0
+    if not np.isfinite(mean_w) or mean_w <= 1e-6:
+        mean_w = 1.0
+    return (weights / mean_w).astype(np.float32)
+
+
+def weighted_mean(values: torch.Tensor, weights: Optional[torch.Tensor]) -> torch.Tensor:
+    if weights is None or weights.numel() == 0:
+        return torch.mean(values)
+    w = weights / torch.clamp(torch.sum(weights), min=1e-6)
+    return torch.sum(values * w)
+
+
+def _quantile_or_fallback(values: np.ndarray, q: float, fallback: float) -> float:
+    if len(values) == 0:
+        return float(fallback)
+    out = float(np.quantile(values.astype(float), q))
+    if not np.isfinite(out):
+        return float(fallback)
+    return out
+
+
+def _make_sequence_features(
+    *,
+    points_for_scaled: float,
+    points_against_scaled: float,
+    margin_scaled: float,
+    is_home: float,
+    venue_adv_context: float,
+    rest_days_norm: float,
+    margin_vol5_norm: float,
+    margin_vol10_norm: float,
+    team_rating_pre: float,
+    opp_rating_pre: float,
+    expected_margin_pre: float,
+    score_sd: float,
+) -> np.ndarray:
+    sd = max(1.0, float(score_sd))
+    return np.array(
+        [
+            points_for_scaled,
+            points_against_scaled,
+            margin_scaled,
+            is_home,
+            venue_adv_context,
+            rest_days_norm,
+            margin_vol5_norm,
+            margin_vol10_norm,
+            float(team_rating_pre) / sd,
+            float(opp_rating_pre) / sd,
+            float(expected_margin_pre) / sd,
+        ],
+        dtype=np.float32,
+    )
 
 
 def detect_regime(df_train: pd.DataFrame) -> Tuple[str, int, float]:
@@ -244,6 +379,7 @@ def build_temporal_sequences(
     team_to_idx: Dict[int, int] | None = None,
     league_to_idx: Dict[int, int] | None = None,
     league_stats: Dict[int, Tuple[float, float]] | None = None,
+    league_env_stats: Dict[int, Dict[str, float]] | None = None,
     rating_k: float = 0.06,
     rating_home_adv: float = 2.0,
     rating_scale: float = 7.0,
@@ -251,11 +387,12 @@ def build_temporal_sequences(
     """
     Build chronology-safe team sequences from raw scores.
     Each sequence step uses:
-    [points_for_scaled, points_against_scaled, margin_scaled, is_home,
-     rest_days_norm, margin_vol5_norm, margin_vol10_norm]
+    [points_for_scaled, points_against_scaled, margin_scaled, is_home, venue_adv_context,
+     rest_days_norm, margin_vol5_norm, margin_vol10_norm,
+     team_rating_pre_scaled, opp_rating_pre_scaled, expected_margin_pre_scaled]
     Opponent identity at each step is carried separately as sequence ids.
     """
-    seq_dim = 7
+    seq_dim = 11
     n = len(df)
     home_seq = np.zeros((n, seq_len, seq_dim), dtype=np.float32)
     away_seq = np.zeros((n, seq_len, seq_dim), dtype=np.float32)
@@ -304,6 +441,9 @@ def build_temporal_sequences(
 
         # Update history after consuming this row (chronology-safe).
         mu_l, sd_l = (league_stats.get(lid, (20.0, 8.0)) if league_stats else (20.0, 8.0))
+        env = (league_env_stats.get(lid) if league_env_stats else None) or {}
+        home_strength = float(env.get("home_strength", 1.0))
+        rating_home_adv_l = float(env.get("rating_home_adv", rating_home_adv))
         d_h = float((dt.to_pydatetime() - team_last_date[h]).days) if h in team_last_date else 7.0
         d_a = float((dt.to_pydatetime() - team_last_date[a]).days) if a in team_last_date else 7.0
         rest_h = max(0.0, min(d_h, 42.0)) / 14.0
@@ -316,12 +456,52 @@ def build_temporal_sequences(
         aw_s = (aw - mu_l) / sd_l
         m_h_s = (hs - aw) / sd_l
         m_a_s = (aw - hs) / sd_l
-        histories[h].append((np.array([hs_s, aw_s, m_h_s, 1.0, rest_h, vol5_h, vol10_h], dtype=np.float32), a))
-        histories[a].append((np.array([aw_s, hs_s, m_a_s, 0.0, rest_a, vol5_a, vol10_a], dtype=np.float32), h))
+        rating_h_pre = float(team_rating.get(h, 0.0))
+        rating_a_pre = float(team_rating.get(a, 0.0))
+        exp_margin_h = (rating_h_pre - rating_a_pre + rating_home_adv_l) / max(1.0, rating_scale)
+        exp_margin_a = -exp_margin_h
+        histories[h].append(
+            (
+                _make_sequence_features(
+                    points_for_scaled=hs_s,
+                    points_against_scaled=aw_s,
+                    margin_scaled=m_h_s,
+                    is_home=1.0,
+                    venue_adv_context=home_strength,
+                    rest_days_norm=rest_h,
+                    margin_vol5_norm=vol5_h,
+                    margin_vol10_norm=vol10_h,
+                    team_rating_pre=rating_h_pre,
+                    opp_rating_pre=rating_a_pre,
+                    expected_margin_pre=exp_margin_h,
+                    score_sd=sd_l,
+                ),
+                a,
+            )
+        )
+        histories[a].append(
+            (
+                _make_sequence_features(
+                    points_for_scaled=aw_s,
+                    points_against_scaled=hs_s,
+                    margin_scaled=m_a_s,
+                    is_home=0.0,
+                    venue_adv_context=-home_strength,
+                    rest_days_norm=rest_a,
+                    margin_vol5_norm=vol5_a,
+                    margin_vol10_norm=vol10_a,
+                    team_rating_pre=rating_a_pre,
+                    opp_rating_pre=rating_h_pre,
+                    expected_margin_pre=exp_margin_a,
+                    score_sd=sd_l,
+                ),
+                h,
+            )
+        )
         team_margin_hist[h].append(hs - aw)
         team_margin_hist[a].append(aw - hs)
         # ELO-like margin rating update.
-        exp_h = (team_rating.get(h, 0.0) - team_rating.get(a, 0.0) + rating_home_adv) / max(1.0, rating_scale)
+        exp_h = (team_rating.get(h, 0.0) - team_rating.get(a, 0.0) + rating_home_adv_l) / max(1.0, rating_scale)
         err = (hs - aw) - exp_h
         team_rating[h] = team_rating.get(h, 0.0) + (rating_k * err)
         team_rating[a] = team_rating.get(a, 0.0) - (rating_k * err)
@@ -438,27 +618,291 @@ class V4Model(nn.Module):
         }
 
 
-def fit_calibrator(p_raw: np.ndarray, y_w: np.ndarray) -> Dict[str, Any]:
-    p2 = np.clip(p_raw, 1e-6, 1.0 - 1e-6)
-    if len(np.unique(y_w)) < 2:
-        return {"method": "constant", "p": float(np.mean(y_w))}
-    if len(y_w) >= 80:
+def _prob_brier(y_w: np.ndarray, p: np.ndarray) -> float:
+    return float(np.mean((np.clip(p, 1e-6, 1.0 - 1e-6) - y_w.astype(float)) ** 2))
+
+
+def _shrink_probabilities(p: np.ndarray, shrink_lambda: float) -> np.ndarray:
+    lam = float(np.clip(shrink_lambda, 0.0, 0.5))
+    return np.clip(0.5 + ((np.clip(p, 1e-6, 1.0 - 1e-6) - 0.5) * (1.0 - lam)), 1e-6, 1.0 - 1e-6)
+
+
+def _prob_quality_score(y_w: np.ndarray, p: np.ndarray) -> float:
+    p2 = np.clip(p, 1e-6, 1.0 - 1e-6)
+    brier = _prob_brier(y_w, p2)
+    ece = _ece_binary(y_w.astype(int), p2, bins=10)
+    balance = float(abs(np.mean(y_w.astype(float)) - np.mean(p2)))
+    return float(brier + (0.35 * ece) + (0.15 * balance))
+
+
+def _build_calibration_features(
+    p_raw: np.ndarray,
+    prob_std: Optional[np.ndarray] = None,
+    margin_var: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    p2 = np.clip(p_raw.astype(float), 1e-6, 1.0 - 1e-6)
+    prob_std_arr = np.array(prob_std if prob_std is not None else np.zeros_like(p2), dtype=np.float32)
+    margin_var_arr = np.array(margin_var if margin_var is not None else np.zeros_like(p2), dtype=np.float32)
+    logit = _logit_features(p2)
+    log_margin_var = np.log(np.clip(margin_var_arr, 1e-6, None))
+    return np.column_stack(
+        [
+            logit,
+            prob_std_arr,
+            log_margin_var,
+            np.abs(logit) * prob_std_arr,
+            prob_std_arr * np.tanh(log_margin_var / 5.0),
+        ]
+    ).astype(np.float32)
+
+
+def _chronology_validation_split(
+    n_rows: int,
+    min_fit_rows: int,
+    min_val_rows: int,
+    val_ratio: float = 0.2,
+) -> Optional[int]:
+    if n_rows < (min_fit_rows + min_val_rows):
+        return None
+    val_rows = max(min_val_rows, int(round(n_rows * val_ratio)))
+    val_rows = min(val_rows, n_rows - min_fit_rows)
+    if val_rows < min_val_rows:
+        return None
+    return int(n_rows - val_rows)
+
+
+def _fit_calibrator_method(
+    method: str,
+    p_raw: np.ndarray,
+    y_w: np.ndarray,
+    prob_std: Optional[np.ndarray] = None,
+    margin_var: Optional[np.ndarray] = None,
+) -> Dict[str, Any]:
+    p2 = np.clip(p_raw.astype(float), 1e-6, 1.0 - 1e-6)
+    y = y_w.astype(int)
+    if len(np.unique(y)) < 2:
+        return {"method": "constant", "p": float(np.mean(y))}
+    method_l = str(method).lower()
+    if method_l == "identity":
+        return {"method": "identity"}
+    if method_l == "isotonic":
         iso = IsotonicRegression(out_of_bounds="clip")
-        iso.fit(p2, y_w)
+        iso.fit(p2, y)
         return {"method": "isotonic", "model": iso}
+    if method_l == "beta":
+        lr = LogisticRegression(max_iter=2000, solver="lbfgs")
+        x = np.column_stack([np.log(p2), np.log(1.0 - p2)])
+        lr.fit(x, y)
+        return {"method": "beta", "model": lr}
+    if method_l == "context_platt":
+        x = _build_calibration_features(p2, prob_std, margin_var)
+        mean = np.mean(x, axis=0)
+        std = np.std(x, axis=0)
+        std = np.where(std < 1e-6, 1.0, std)
+        xs = (x - mean.reshape(1, -1)) / std.reshape(1, -1)
+        lr = LogisticRegression(C=0.50, max_iter=2000, solver="lbfgs")
+        lr.fit(xs, y)
+        return {
+            "method": "context_platt",
+            "model": lr,
+            "feature_mean": mean.tolist(),
+            "feature_std": std.tolist(),
+        }
     lr = LogisticRegression(max_iter=2000, solver="lbfgs")
-    lr.fit(np.log(p2 / (1.0 - p2)).reshape(-1, 1), y_w)
+    lr.fit(np.log(p2 / (1.0 - p2)).reshape(-1, 1), y)
     return {"method": "platt", "model": lr}
 
 
-def apply_calibrator(cal: Dict[str, Any], p_raw: np.ndarray) -> np.ndarray:
+def fit_calibrator(
+    p_raw: np.ndarray,
+    y_w: np.ndarray,
+    prob_std: Optional[np.ndarray] = None,
+    margin_var: Optional[np.ndarray] = None,
+    allow_context_platt: bool = True,
+    allow_isotonic: bool = True,
+    max_shrink_lambda: float = HIGH_SAMPLE_SHRINK_MAX,
+) -> Dict[str, Any]:
+    p2 = np.clip(p_raw.astype(float), 1e-6, 1.0 - 1e-6)
+    y = y_w.astype(int)
+    if len(np.unique(y)) < 2:
+        return {"method": "constant", "p": float(np.mean(y))}
+
+    split_idx = _chronology_validation_split(len(y), min_fit_rows=60, min_val_rows=40, val_ratio=0.2)
+    if split_idx is not None:
+        p_fit, p_val = p2[:split_idx], p2[split_idx:]
+        y_fit, y_val = y[:split_idx], y[split_idx:]
+        ps_fit = (prob_std[:split_idx] if prob_std is not None else None)
+        ps_val = (prob_std[split_idx:] if prob_std is not None else None)
+        mv_fit = (margin_var[:split_idx] if margin_var is not None else None)
+        mv_val = (margin_var[split_idx:] if margin_var is not None else None)
+        candidates = ["identity", "platt", "beta"]
+        if allow_context_platt and prob_std is not None and margin_var is not None and len(y_fit) >= 120:
+            candidates.append("context_platt")
+        if allow_isotonic and len(y_fit) >= 120:
+            candidates.append("isotonic")
+        best_method = "identity"
+        best_shrink = 0.0
+        best_score = (float("inf"), float("inf"), float("inf"))
+        shrink_cap = float(np.clip(max_shrink_lambda, 0.0, 0.5))
+        shrink_grid = np.array([0.0], dtype=float) if shrink_cap <= 1e-9 else np.linspace(0.0, shrink_cap, 8)
+        for method in candidates:
+            candidate = _fit_calibrator_method(method, p_fit, y_fit, ps_fit, mv_fit)
+            for shrink in shrink_grid:
+                trial = dict(candidate)
+                trial["shrink_lambda"] = float(shrink)
+                p_candidate = apply_calibrator(trial, p_val, ps_val, mv_val)
+                score = (
+                    _prob_quality_score(y_val, p_candidate),
+                    _prob_brier(y_val, p_candidate),
+                    _ece_binary(y_val, p_candidate, bins=10),
+                )
+                if score < best_score:
+                    best_score = score
+                    best_method = method
+                    best_shrink = float(shrink)
+        out = _fit_calibrator_method(best_method, p2, y, prob_std, margin_var)
+        if best_shrink > 1e-9:
+            out["shrink_lambda"] = float(best_shrink)
+        return out
+
+    if allow_isotonic and len(y) >= 120:
+        return _fit_calibrator_method("isotonic", p2, y, prob_std, margin_var)
+    return _fit_calibrator_method("platt", p2, y, prob_std, margin_var)
+
+
+def apply_calibrator(
+    cal: Dict[str, Any],
+    p_raw: np.ndarray,
+    prob_std: Optional[np.ndarray] = None,
+    margin_var: Optional[np.ndarray] = None,
+) -> np.ndarray:
     p = np.clip(p_raw, 1e-6, 1.0 - 1e-6)
     if cal["method"] == "constant":
-        return np.full(len(p), float(np.clip(cal["p"], 1e-6, 1.0 - 1e-6)), dtype=float)
+        out = np.full(len(p), float(np.clip(cal["p"], 1e-6, 1.0 - 1e-6)), dtype=float)
+        return _shrink_probabilities(out, float(cal.get("shrink_lambda", 0.0)))
+    if cal["method"] == "identity":
+        return _shrink_probabilities(p, float(cal.get("shrink_lambda", 0.0)))
     if cal["method"] == "isotonic":
-        return np.clip(cal["model"].predict(p), 1e-6, 1.0 - 1e-6)
+        out = np.clip(cal["model"].predict(p), 1e-6, 1.0 - 1e-6)
+        return _shrink_probabilities(out, float(cal.get("shrink_lambda", 0.0)))
+    if cal["method"] == "beta":
+        x = np.column_stack([np.log(p), np.log(1.0 - p)])
+        out = np.clip(cal["model"].predict_proba(x)[:, 1], 1e-6, 1.0 - 1e-6)
+        return _shrink_probabilities(out, float(cal.get("shrink_lambda", 0.0)))
+    if cal["method"] == "context_platt":
+        x = _build_calibration_features(p, prob_std, margin_var)
+        mean = np.array(cal.get("feature_mean") or [0.0] * x.shape[1], dtype=np.float32)
+        std = np.array(cal.get("feature_std") or [1.0] * x.shape[1], dtype=np.float32)
+        std = np.where(std < 1e-6, 1.0, std)
+        xs = (x - mean.reshape(1, -1)) / std.reshape(1, -1)
+        out = np.clip(cal["model"].predict_proba(xs)[:, 1], 1e-6, 1.0 - 1e-6)
+        return _shrink_probabilities(out, float(cal.get("shrink_lambda", 0.0)))
     x = np.log(p / (1.0 - p)).reshape(-1, 1)
-    return np.clip(cal["model"].predict_proba(x)[:, 1], 1e-6, 1.0 - 1e-6)
+    out = np.clip(cal["model"].predict_proba(x)[:, 1], 1e-6, 1.0 - 1e-6)
+    return _shrink_probabilities(out, float(cal.get("shrink_lambda", 0.0)))
+
+
+def _logit_features(p: np.ndarray) -> np.ndarray:
+    p2 = np.clip(p.astype(float), 1e-6, 1.0 - 1e-6)
+    return np.log(p2 / (1.0 - p2))
+
+
+def _build_blend_features(p_cls: np.ndarray, p_sd: np.ndarray) -> np.ndarray:
+    cls_logit = _logit_features(p_cls)
+    sd_logit = _logit_features(p_sd)
+    return np.column_stack(
+        [
+            cls_logit,
+            sd_logit,
+            cls_logit - sd_logit,
+            np.abs(cls_logit - sd_logit),
+        ]
+    ).astype(np.float32)
+
+
+def _fit_alpha_grid_blender(p_cls: np.ndarray, p_sd: np.ndarray, y_w: np.ndarray) -> Dict[str, Any]:
+    best_alpha = 0.5
+    best_brier = float("inf")
+    for alpha in np.linspace(0.0, 1.0, 41):
+        p = np.clip((alpha * p_cls) + ((1.0 - alpha) * p_sd), 1e-6, 1.0 - 1e-6)
+        brier = float(np.mean((p - y_w) ** 2))
+        if brier < best_brier:
+            best_brier = brier
+            best_alpha = float(alpha)
+    return {
+        "method": "alpha_grid",
+        "alpha": float(best_alpha),
+        "train_brier": float(best_brier),
+    }
+
+
+def _fit_logistic_meta_blender(p_cls: np.ndarray, p_sd: np.ndarray, y_w: np.ndarray) -> Dict[str, Any]:
+    x = _build_blend_features(p_cls, p_sd)
+    mean = np.mean(x, axis=0)
+    std = np.std(x, axis=0)
+    std = np.where(std < 1e-6, 1.0, std)
+    xs = (x - mean.reshape(1, -1)) / std.reshape(1, -1)
+    lr = LogisticRegression(C=0.35, max_iter=2000, solver="lbfgs")
+    lr.fit(xs, y_w.astype(int))
+    p_meta = np.clip(lr.predict_proba(xs)[:, 1], 1e-6, 1.0 - 1e-6)
+    return {
+        "method": "logistic_meta",
+        "model": lr,
+        "feature_mean": mean.tolist(),
+        "feature_std": std.tolist(),
+        "train_brier": _prob_brier(y_w.astype(int), p_meta),
+    }
+
+
+def fit_probability_blender(p_cls: np.ndarray, p_sd: np.ndarray, y_w: np.ndarray) -> Dict[str, Any]:
+    p_cls = np.clip(p_cls.astype(float), 1e-6, 1.0 - 1e-6)
+    p_sd = np.clip(p_sd.astype(float), 1e-6, 1.0 - 1e-6)
+    y = y_w.astype(int)
+    if len(np.unique(y)) < 2:
+        return {"method": "constant", "p": float(np.mean(y))}
+
+    split_idx = _chronology_validation_split(len(y), min_fit_rows=80, min_val_rows=40, val_ratio=0.2)
+    if split_idx is not None:
+        p_cls_fit, p_cls_val = p_cls[:split_idx], p_cls[split_idx:]
+        p_sd_fit, p_sd_val = p_sd[:split_idx], p_sd[split_idx:]
+        y_fit, y_val = y[:split_idx], y[split_idx:]
+
+        alpha_fit = _fit_alpha_grid_blender(p_cls_fit, p_sd_fit, y_fit)
+        alpha_val = apply_probability_blender(alpha_fit, p_cls_val, p_sd_val)
+        best_method = "alpha_grid"
+        best_score = (_prob_brier(y_val, alpha_val), _ece_binary(y_val, alpha_val, bins=10))
+
+        if len(y_fit) >= 220:
+            meta_fit = _fit_logistic_meta_blender(p_cls_fit, p_sd_fit, y_fit)
+            meta_val = apply_probability_blender(meta_fit, p_cls_val, p_sd_val)
+            meta_score = (_prob_brier(y_val, meta_val), _ece_binary(y_val, meta_val, bins=10))
+            if meta_score < best_score:
+                best_method = "logistic_meta"
+
+        if best_method == "logistic_meta":
+            out = _fit_logistic_meta_blender(p_cls, p_sd, y)
+            out["fallback_alpha"] = float(_fit_alpha_grid_blender(p_cls, p_sd, y)["alpha"])
+            return out
+        return _fit_alpha_grid_blender(p_cls, p_sd, y)
+
+    return _fit_alpha_grid_blender(p_cls, p_sd, y)
+
+
+def apply_probability_blender(blender: Dict[str, Any], p_cls: np.ndarray, p_sd: np.ndarray) -> np.ndarray:
+    p_cls = np.clip(p_cls.astype(float), 1e-6, 1.0 - 1e-6)
+    p_sd = np.clip(p_sd.astype(float), 1e-6, 1.0 - 1e-6)
+    method = str(blender.get("method", "")).lower()
+    if method == "constant":
+        return np.full(len(p_cls), float(np.clip(blender.get("p", 0.5), 1e-6, 1.0 - 1e-6)), dtype=float)
+    if method == "alpha_grid":
+        alpha = float(blender.get("alpha", 0.5))
+        return np.clip((alpha * p_cls) + ((1.0 - alpha) * p_sd), 1e-6, 1.0 - 1e-6)
+    x = _build_blend_features(p_cls, p_sd)
+    mean = np.array(blender.get("feature_mean") or [0.0] * x.shape[1], dtype=np.float32)
+    std = np.array(blender.get("feature_std") or [1.0] * x.shape[1], dtype=np.float32)
+    std = np.where(std < 1e-6, 1.0, std)
+    xs = (x - mean.reshape(1, -1)) / std.reshape(1, -1)
+    return np.clip(blender["model"].predict_proba(xs)[:, 1], 1e-6, 1.0 - 1e-6)
 
 
 def evaluate(p_home: np.ndarray, pred_h: np.ndarray, pred_a: np.ndarray, y_w: np.ndarray, y_h: np.ndarray, y_a: np.ndarray) -> Metrics:
@@ -514,6 +958,7 @@ def main() -> None:
     parser.add_argument("--embedding-l2-weight", type=float, default=0.0005)
     parser.add_argument("--var-reg-weight", type=float, default=0.002)
     parser.add_argument("--confidence-variance-threshold", type=float, default=40.0)
+    parser.add_argument("--recency-half-life-days", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save-v4-models", action="store_true")
     parser.add_argument("--save-global-pretrained", action="store_true")
@@ -602,12 +1047,14 @@ def main() -> None:
             )
             for s in args._ensemble_seeds:
                 league_stats_g = build_league_score_stats(df_pre)
+                league_env_stats_g = build_league_environment_stats(df_pre, args.rating_home_adv)
                 home_seq_g, away_seq_g, home_idx_g, away_idx_g, home_opp_g, away_opp_g, league_idx_g, y_g_raw, league_ids_g, _, _ = build_temporal_sequences(
                     df_pre,
                     seq_len=args.seq_len,
                     team_to_idx=global_team_to_idx,
                     league_to_idx=global_league_to_idx,
                     league_stats=league_stats_g,
+                    league_env_stats=league_env_stats_g,
                     rating_k=args.rating_k,
                     rating_home_adv=args.rating_home_adv,
                     rating_scale=args.rating_scale,
@@ -615,6 +1062,10 @@ def main() -> None:
                 n_train_g = len(df_pre)
                 home_seq_g, away_seq_g, _ = normalize_sequences(home_seq_g, away_seq_g, n_train_g)
                 y_g = scale_score_targets(y_g_raw, league_ids_g, league_stats_g)
+                w_g = torch.tensor(
+                    build_recency_weights(df_pre, args.recency_half_life_days),
+                    dtype=torch.float32,
+                )
                 xh_g = torch.tensor(home_seq_g, dtype=torch.float32)
                 xa_g = torch.tensor(away_seq_g, dtype=torch.float32)
                 ih_g = torch.tensor(home_idx_g, dtype=torch.long)
@@ -631,7 +1082,7 @@ def main() -> None:
                     n_teams=len(global_team_to_idx),
                     n_leagues=len(global_league_to_idx),
                     emb_dim=args.emb_dim,
-                    seq_dim=7,
+                    seq_dim=int(home_seq_g.shape[-1]),
                     hidden_dim=args.hidden_dim,
                 )
                 opt_g = torch.optim.AdamW(model_g.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -644,7 +1095,11 @@ def main() -> None:
                         y_w = y_g_t[idx, 0]
                         y_h = y_g_t[idx, 1]
                         y_a = y_g_t[idx, 2]
-                        loss_w = F.binary_cross_entropy_with_logits(out["winner_logit"], y_w)
+                        batch_w = w_g[idx]
+                        loss_w = weighted_mean(
+                            F.binary_cross_entropy_with_logits(out["winner_logit"], y_w, reduction="none"),
+                            batch_w,
+                        )
                         mu = out["score_mu"]
                         logvar = out["score_logvar"].clamp(-5.0, 4.0)
                         var = torch.exp(logvar)
@@ -658,13 +1113,23 @@ def main() -> None:
                             + torch.log(den)
                             + ((zh * zh) + (za * za) - (2.0 * rho * zh * za)) / den
                         )
-                        loss_s = torch.mean(nll)
+                        score_huber = F.huber_loss(
+                            mu,
+                            torch.stack([y_h, y_a], dim=1),
+                            reduction="none",
+                        ).mean(dim=1)
+                        loss_s = ((1.0 - SCORE_HUBER_MIX) * weighted_mean(nll, batch_w)) + (
+                            SCORE_HUBER_MIX * weighted_mean(score_huber, batch_w)
+                        )
                         y_margin = y_h - y_a
                         pred_margin = mu[:, 0] - mu[:, 1]
                         m_non_draw = torch.abs(y_margin) > 1e-6
                         if torch.any(m_non_draw):
                             sign = torch.sign(y_margin[m_non_draw])
-                            loss_rank = torch.mean(F.softplus(-(sign * pred_margin[m_non_draw])))
+                            loss_rank = weighted_mean(
+                                F.softplus(-(sign * pred_margin[m_non_draw])),
+                                batch_w[m_non_draw],
+                            )
                         else:
                             loss_rank = torch.tensor(0.0, dtype=loss_w.dtype, device=loss_w.device)
                         var_reg = torch.mean(out["score_logvar"].clamp(-5.0, 4.0) ** 2)
@@ -714,10 +1179,12 @@ def main() -> None:
             "ensemble_seeds": args._ensemble_seeds,
             "winner_loss_weight": args.winner_loss_weight,
             "score_loss_weight": args.score_loss_weight,
+            "score_huber_mix": SCORE_HUBER_MIX,
             "ranking_loss_weight": args.ranking_loss_weight,
             "embedding_l2_weight": args.embedding_l2_weight,
             "var_reg_weight": args.var_reg_weight,
             "confidence_variance_threshold": args.confidence_variance_threshold,
+            "recency_half_life_days": args.recency_half_life_days,
             "save_v4_models": bool(args.save_v4_models),
             "save_global_pretrained": bool(args.save_global_pretrained),
             "log_level": args.log_level,
@@ -729,9 +1196,13 @@ def main() -> None:
                 "points_against_scaled",
                 "margin_scaled",
                 "is_home",
+                "venue_adv_context",
                 "rest_days_norm",
                 "margin_vol5_norm",
                 "margin_vol10_norm",
+                "team_rating_pre_scaled",
+                "opp_rating_pre_scaled",
+                "expected_margin_pre_scaled",
             ],
             "sequence_context_ids": ["opponent_team_id_sequence"],
         },
@@ -750,12 +1221,14 @@ def main() -> None:
         if len(tr_df) < 60 or (len(te_df) < 1 and not train_all_mode):
             return {"ok": False, "reason": "insufficient split rows"}
         league_stats = build_league_score_stats(tr_df)
+        league_env_stats = build_league_environment_stats(tr_df, args.rating_home_adv)
         home_seq, away_seq, home_idx, away_idx, home_opp_idx, away_opp_idx, league_idx, y_raw, league_ids_row, team_to_idx, _ = build_temporal_sequences(
             pd.concat([tr_df, te_df], axis=0).reset_index(drop=True),
             seq_len=args.seq_len,
             team_to_idx=global_team_to_idx,
             league_to_idx=global_league_to_idx,
             league_stats=league_stats,
+            league_env_stats=league_env_stats,
             rating_k=args.rating_k,
             rating_home_adv=args.rating_home_adv,
             rating_scale=args.rating_scale,
@@ -763,6 +1236,11 @@ def main() -> None:
         n_train = len(tr_df)
         home_seq, away_seq, norm_stats = normalize_sequences(home_seq, away_seq, n_train)
         y_scaled = scale_score_targets(y_raw, league_ids_row, league_stats)
+        w_tr = torch.tensor(
+            build_recency_weights(tr_df, args.recency_half_life_days),
+            dtype=torch.float32,
+        )
+        seq_dim = int(home_seq.shape[-1])
         xh_tr = torch.tensor(home_seq[:n_train], dtype=torch.float32)
         xa_tr = torch.tensor(away_seq[:n_train], dtype=torch.float32)
         ih_tr = torch.tensor(home_idx[:n_train], dtype=torch.long)
@@ -771,6 +1249,20 @@ def main() -> None:
         ioa_tr = torch.tensor(away_opp_idx[:n_train], dtype=torch.long)
         il_tr = torch.tensor(league_idx[:n_train], dtype=torch.long)
         regime_name, regime_idx, regime_unc_mult = detect_regime(tr_df)
+        allow_context_platt = bool(
+            len(tr_df) >= CONTEXT_PLATT_MIN_ROWS
+            and regime_name in {"stable_dominant", "balanced_competitive"}
+        )
+        allow_isotonic = bool(
+            len(tr_df) >= ISOTONIC_MIN_ROWS
+            or (
+                len(tr_df) >= MEDIUM_SAMPLE_ROWS
+                and regime_name in {"stable_dominant", "balanced_competitive"}
+            )
+        )
+        calibrator_shrink_max = float(
+            LOW_SAMPLE_SHRINK_MAX if len(tr_df) < SMALL_SAMPLE_ROWS else HIGH_SAMPLE_SHRINK_MAX
+        )
         ir_tr = torch.full((n_train,), int(regime_idx), dtype=torch.long)
         y_tr = torch.tensor(y_scaled[:n_train], dtype=torch.float32)
         xh_te = torch.tensor(home_seq[n_train:], dtype=torch.float32)
@@ -784,12 +1276,18 @@ def main() -> None:
         y_te_np = y_raw[n_train:]
         n_test = len(te_df)
 
-        ens_p_raw_tr: List[np.ndarray] = []
-        ens_p_raw_te: List[np.ndarray] = []
+        ens_p_cls_tr: List[np.ndarray] = []
+        ens_p_cls_te: List[np.ndarray] = []
+        ens_p_sd_tr: List[np.ndarray] = []
+        ens_p_sd_te: List[np.ndarray] = []
+        ens_proxy_prob_tr: List[np.ndarray] = []
+        ens_proxy_prob_te: List[np.ndarray] = []
         ens_mu_tr: List[np.ndarray] = []
         ens_mu_te: List[np.ndarray] = []
         ens_var_tr: List[np.ndarray] = []
         ens_var_te: List[np.ndarray] = []
+        ens_margin_var_tr: List[np.ndarray] = []
+        ens_margin_var_te: List[np.ndarray] = []
         ens_alpha_tr: List[np.ndarray] = []
         ens_alpha_te: List[np.ndarray] = []
         emb_norm_means: List[float] = []
@@ -802,13 +1300,20 @@ def main() -> None:
                 n_teams=len(global_team_to_idx),
                 n_leagues=len(global_league_to_idx),
                 emb_dim=args.emb_dim,
-                seq_dim=7,
+                seq_dim=seq_dim,
                 hidden_dim=args.hidden_dim,
             )
             if int(s) in pretrained_by_seed:
                 model.load_state_dict(pretrained_by_seed[int(s)], strict=True)
             use_lr = float(args.finetune_lr if args.global_pretrain else args.lr)
             use_epochs = int(args.finetune_epochs if args.global_pretrain else args.epochs)
+            if args.global_pretrain:
+                if len(tr_df) < SMALL_SAMPLE_ROWS:
+                    use_lr *= 0.75
+                    use_epochs = max(4, min(use_epochs, 6))
+                elif len(tr_df) < MEDIUM_SAMPLE_ROWS:
+                    use_lr *= 0.90
+                    use_epochs = max(6, min(use_epochs, 9))
             opt = torch.optim.AdamW(model.parameters(), lr=use_lr, weight_decay=1e-4)
 
             for _ in range(max(1, use_epochs)):
@@ -829,7 +1334,11 @@ def main() -> None:
                     y_w = y_tr[idx, 0]
                     y_h = y_tr[idx, 1]
                     y_a = y_tr[idx, 2]
-                    loss_w = F.binary_cross_entropy_with_logits(out["winner_logit"], y_w)
+                    batch_w = w_tr[idx]
+                    loss_w = weighted_mean(
+                        F.binary_cross_entropy_with_logits(out["winner_logit"], y_w, reduction="none"),
+                        batch_w,
+                    )
                     mu = out["score_mu"]
                     logvar = out["score_logvar"].clamp(-5.0, 4.0)
                     var = torch.exp(logvar)
@@ -843,7 +1352,14 @@ def main() -> None:
                         + torch.log(den)
                         + ((zh * zh) + (za * za) - (2.0 * rho * zh * za)) / den
                     )
-                    loss_s = torch.mean(nll)
+                    score_huber = F.huber_loss(
+                        mu,
+                        torch.stack([y_h, y_a], dim=1),
+                        reduction="none",
+                    ).mean(dim=1)
+                    loss_s = ((1.0 - SCORE_HUBER_MIX) * weighted_mean(nll, batch_w)) + (
+                        SCORE_HUBER_MIX * weighted_mean(score_huber, batch_w)
+                    )
                     var_reg = torch.mean(out["score_logvar"].clamp(-5.0, 4.0) ** 2)
                     emb_reg = torch.mean(model.team_emb.weight**2)
                     y_margin = y_h - y_a
@@ -851,7 +1367,10 @@ def main() -> None:
                     m_non_draw = torch.abs(y_margin) > 1e-6
                     if torch.any(m_non_draw):
                         sign = torch.sign(y_margin[m_non_draw])
-                        loss_rank = torch.mean(F.softplus(-(sign * pred_margin[m_non_draw])))
+                        loss_rank = weighted_mean(
+                            F.softplus(-(sign * pred_margin[m_non_draw])),
+                            batch_w[m_non_draw],
+                        )
                     else:
                         loss_rank = torch.tensor(0.0, dtype=loss_w.dtype, device=loss_w.device)
                     loss = (
@@ -890,8 +1409,10 @@ def main() -> None:
                     a_te = np.zeros((0,), dtype=float)
 
             mu_tr = unscale_score_predictions(mu_tr, league_ids_row[:n_train], league_stats)
+            var_tr = unscale_score_variances(var_tr, league_ids_row[:n_train], league_stats)
             if n_test > 0:
                 mu_te = unscale_score_predictions(mu_te, league_ids_row[n_train:], league_stats)
+                var_te = unscale_score_variances(var_te, league_ids_row[n_train:], league_stats)
             md_tr = mu_tr[:, 0] - mu_tr[:, 1]
             vd_tr = np.maximum(
                 1e-6,
@@ -909,14 +1430,22 @@ def main() -> None:
                 p_sd_te = _norm_cdf(md_te / np.sqrt(vd_te))
             else:
                 p_sd_te = np.zeros((0,), dtype=float)
-            p_raw_tr = np.clip((a_tr * p_cls_tr) + ((1.0 - a_tr) * p_sd_tr), 1e-6, 1.0 - 1e-6)
-            p_raw_te = np.clip((a_te * p_cls_te) + ((1.0 - a_te) * p_sd_te), 1e-6, 1.0 - 1e-6) if n_test > 0 else np.zeros((0,), dtype=float)
-            ens_p_raw_tr.append(p_raw_tr)
-            ens_p_raw_te.append(p_raw_te)
+            ens_p_cls_tr.append(p_cls_tr)
+            ens_p_cls_te.append(p_cls_te)
+            ens_p_sd_tr.append(p_sd_tr)
+            ens_p_sd_te.append(p_sd_te)
+            ens_proxy_prob_tr.append(np.clip(0.5 * (p_cls_tr + p_sd_tr), 1e-6, 1.0 - 1e-6))
+            ens_proxy_prob_te.append(
+                np.clip(0.5 * (p_cls_te + p_sd_te), 1e-6, 1.0 - 1e-6)
+                if n_test > 0
+                else np.zeros((0,), dtype=float)
+            )
             ens_mu_tr.append(mu_tr)
             ens_mu_te.append(mu_te)
             ens_var_tr.append(var_tr)
             ens_var_te.append(var_te)
+            ens_margin_var_tr.append(vd_tr)
+            ens_margin_var_te.append(vd_te if n_test > 0 else np.zeros((0,), dtype=float))
             ens_alpha_tr.append(a_tr)
             ens_alpha_te.append(a_te)
             emb_norms = np.linalg.norm(emb_weights, axis=1)
@@ -929,17 +1458,60 @@ def main() -> None:
                 torch.save(model.state_dict(), model_file)
                 saved_seed_models.append(str(model_file))
 
-        p_raw_tr = np.mean(np.vstack(ens_p_raw_tr), axis=0)
-        p_raw_te = np.mean(np.vstack(ens_p_raw_te), axis=0) if n_test > 0 else np.zeros((0,), dtype=float)
+        p_cls_tr = np.mean(np.vstack(ens_p_cls_tr), axis=0)
+        p_cls_te = np.mean(np.vstack(ens_p_cls_te), axis=0) if n_test > 0 else np.zeros((0,), dtype=float)
+        p_sd_tr = np.mean(np.vstack(ens_p_sd_tr), axis=0)
+        p_sd_te = np.mean(np.vstack(ens_p_sd_te), axis=0) if n_test > 0 else np.zeros((0,), dtype=float)
+        proxy_prob_tr = np.mean(np.vstack(ens_proxy_prob_tr), axis=0)
+        proxy_prob_te = (
+            np.mean(np.vstack(ens_proxy_prob_te), axis=0) if n_test > 0 else np.zeros((0,), dtype=float)
+        )
+        prob_std_tr = np.std(np.vstack(ens_proxy_prob_tr), axis=0) if len(ens_proxy_prob_tr) > 1 else np.zeros_like(proxy_prob_tr)
+        prob_std_te = (
+            np.std(np.vstack(ens_proxy_prob_te), axis=0)
+            if (n_test > 0 and len(ens_proxy_prob_te) > 1)
+            else np.zeros((0,), dtype=float)
+        )
         mu_tr = np.mean(np.stack(ens_mu_tr, axis=0), axis=0)
         mu_te = np.mean(np.stack(ens_mu_te, axis=0), axis=0) if n_test > 0 else np.zeros((0, 2), dtype=float)
         var_tr = np.mean(np.stack(ens_var_tr, axis=0), axis=0)
         var_te = np.mean(np.stack(ens_var_te, axis=0), axis=0) if n_test > 0 else np.zeros((0, 2), dtype=float)
+        margin_var_tr = np.mean(np.vstack(ens_margin_var_tr), axis=0)
+        margin_var_te = (
+            np.mean(np.vstack(ens_margin_var_te), axis=0)
+            if (n_test > 0 and len(ens_margin_var_te) > 0)
+            else np.zeros((0,), dtype=float)
+        )
         a_tr = np.mean(np.vstack(ens_alpha_tr), axis=0)
         a_te = np.mean(np.vstack(ens_alpha_te), axis=0) if n_test > 0 else np.zeros((0,), dtype=float)
-        cal = fit_calibrator(p_raw_tr, y_raw[:n_train, 0].astype(int))
-        p_fin_tr = apply_calibrator(cal, p_raw_tr)
-        p_fin_te = apply_calibrator(cal, p_raw_te) if n_test > 0 else np.zeros((0,), dtype=float)
+        margin_var_threshold = _quantile_or_fallback(margin_var_tr, 0.85, args.confidence_variance_threshold)
+        prob_std_threshold = _quantile_or_fallback(prob_std_tr, 0.85, DEFAULT_PROB_STD_THRESHOLD)
+        probability_blender = fit_probability_blender(
+            p_cls_tr,
+            p_sd_tr,
+            y_raw[:n_train, 0].astype(int),
+        )
+        p_blend_tr = apply_probability_blender(probability_blender, p_cls_tr, p_sd_tr)
+        p_blend_te = (
+            apply_probability_blender(probability_blender, p_cls_te, p_sd_te)
+            if n_test > 0
+            else np.zeros((0,), dtype=float)
+        )
+        cal = fit_calibrator(
+            p_blend_tr,
+            y_raw[:n_train, 0].astype(int),
+            prob_std=prob_std_tr,
+            margin_var=margin_var_tr,
+            allow_context_platt=allow_context_platt,
+            allow_isotonic=allow_isotonic,
+            max_shrink_lambda=calibrator_shrink_max,
+        )
+        p_fin_tr = apply_calibrator(cal, p_blend_tr, prob_std_tr, margin_var_tr)
+        p_fin_te = (
+            apply_calibrator(cal, p_blend_te, prob_std_te, margin_var_te)
+            if n_test > 0
+            else np.zeros((0,), dtype=float)
+        )
         m_train = evaluate(
             p_fin_tr,
             mu_tr[:, 0],
@@ -950,8 +1522,7 @@ def main() -> None:
         )
         if n_test > 0:
             m = evaluate(p_fin_te, mu_te[:, 0], mu_te[:, 1], y_te_np[:, 0].astype(int), y_te_np[:, 1], y_te_np[:, 2])
-            var_sum_te = var_te[:, 0] + var_te[:, 1]
-            low_conf_mask = var_sum_te > float(args.confidence_variance_threshold)
+            low_conf_mask = (margin_var_te > margin_var_threshold) | (prob_std_te > prob_std_threshold)
             high_conf_mask = ~low_conf_mask
             hc_total = int(np.sum(high_conf_mask))
             hc_correct = int(np.sum((p_fin_te[high_conf_mask] >= 0.5).astype(int) == y_te_np[:, 0].astype(int)[high_conf_mask])) if hc_total > 0 else 0
@@ -969,12 +1540,24 @@ def main() -> None:
             "train_rows": int(len(tr_df)),
             "test_rows": int(len(te_df)),
             "calibration_method": cal["method"],
+            "calibrator": cal,
+            "blend_method": str(probability_blender.get("method", "unknown")),
+            "blend_alpha": (
+                float(probability_blender["alpha"])
+                if probability_blender.get("method") == "alpha_grid"
+                else None
+            ),
             "regime": regime_name,
+            "regime_idx": int(regime_idx),
             "regime_uncertainty_multiplier": float(regime_unc_mult),
             "alpha_avg_train": float(np.mean(a_tr)),
             "alpha_avg_test": float(np.mean(a_te)) if len(a_te) else None,
             "variance_avg_train": float(np.mean(var_tr)),
             "variance_avg_test": float(np.mean(var_te)) if len(var_te) else None,
+            "ensemble_prob_std_avg_train": float(np.mean(prob_std_tr)),
+            "ensemble_prob_std_avg_test": float(np.mean(prob_std_te)) if len(prob_std_te) else None,
+            "confidence_margin_variance_threshold": float(margin_var_threshold),
+            "confidence_prob_std_threshold": float(prob_std_threshold),
             "embedding_norm_mean": float(np.mean(emb_norm_means)),
             "embedding_norm_std": float(np.mean(emb_norm_stds)),
             "low_confidence_rate": float(np.mean(low_conf_mask)) if len(low_conf_mask) else None,
@@ -983,6 +1566,7 @@ def main() -> None:
             "saved_seed_models": saved_seed_models,
             "team_to_idx": team_to_idx,
             "league_stats": league_stats,
+            "league_env_stats": league_env_stats,
             "normalization_stats": norm_stats,
         }
         if save_models and args.save_v4_models:
@@ -998,14 +1582,33 @@ def main() -> None:
                         "team_to_idx": team_to_idx,
                         "league_to_idx": global_league_to_idx,
                         "league_score_stats_train": {int(k): (float(v[0]), float(v[1])) for k, v in league_stats.items()},
+                        "league_env_stats_train": {
+                            int(k): {
+                                "home_prob": float(v.get("home_prob", 0.55)),
+                                "home_strength": float(v.get("home_strength", 1.0)),
+                                "rating_home_adv": float(v.get("rating_home_adv", args.rating_home_adv)),
+                            }
+                            for k, v in league_env_stats.items()
+                        },
                         "normalization_stats": norm_stats,
                         "config": {
                             "seq_len": int(args.seq_len),
                             "emb_dim": int(args.emb_dim),
                             "hidden_dim": int(args.hidden_dim),
-                            "seq_dim": 7,
+                            "seq_dim": seq_dim,
+                            "rating_k": float(args.rating_k),
+                            "rating_home_adv": float(args.rating_home_adv),
+                            "rating_scale": float(args.rating_scale),
+                            "score_huber_mix": SCORE_HUBER_MIX,
                         },
                         "calibration_method": cal["method"],
+                        "calibrator": cal,
+                        "probability_blender": probability_blender,
+                        "regime_name": regime_name,
+                        "regime_idx": int(regime_idx),
+                        "regime_uncertainty_multiplier": float(regime_unc_mult),
+                        "confidence_margin_variance_threshold": float(margin_var_threshold),
+                        "confidence_prob_std_threshold": float(prob_std_threshold),
                         "alpha_avg_test": float(np.mean(a_te)) if len(a_te) else None,
                         "ensemble_seeds": args._ensemble_seeds,
                         "saved_seed_models": saved_seed_models,
@@ -1043,8 +1646,16 @@ def main() -> None:
                 "ensemble_size": int(len(args._ensemble_seeds)),
                 "global_pretrained": bool(args.global_pretrain and len(pretrained_by_seed) > 0),
                 "calibration_method": out.get("calibration_method"),
+                "blend_method": out.get("blend_method"),
+                "blend_alpha": out.get("blend_alpha"),
+                "regime": out.get("regime"),
+                "regime_idx": out.get("regime_idx"),
+                "regime_uncertainty_multiplier": out.get("regime_uncertainty_multiplier"),
                 "alpha_avg_train": out.get("alpha_avg_train"),
                 "variance_avg_train": out.get("variance_avg_train"),
+                "ensemble_prob_std_avg_train": out.get("ensemble_prob_std_avg_train"),
+                "confidence_margin_variance_threshold": out.get("confidence_margin_variance_threshold"),
+                "confidence_prob_std_threshold": out.get("confidence_prob_std_threshold"),
                 "embedding_norm_mean": out.get("embedding_norm_mean"),
                 "embedding_norm_std": out.get("embedding_norm_std"),
                 "train_metrics": out["train_metrics"].__dict__ if out.get("train_metrics") is not None else None,
@@ -1141,10 +1752,19 @@ def main() -> None:
                 "ensemble_size": int(len(args._ensemble_seeds)),
                 "global_pretrained": bool(args.global_pretrain and len(pretrained_by_seed) > 0),
                 "calibration_method": str(last_ok[2]["calibration_method"]),
+                "blend_method": str(last_ok[2]["blend_method"]),
+                "blend_alpha": last_ok[2]["blend_alpha"],
+                "regime": str(last_ok[2]["regime"]),
+                "regime_idx": int(last_ok[2]["regime_idx"]),
+                "regime_uncertainty_multiplier": float(last_ok[2]["regime_uncertainty_multiplier"]),
                 "alpha_avg_train": alpha_tr_sum / rows_total,
                 "alpha_avg_test": alpha_te_sum / rows_total,
                 "variance_avg_train": var_tr_sum / rows_total,
                 "variance_avg_test": var_te_sum / rows_total,
+                "ensemble_prob_std_avg_train": float(last_ok[2]["ensemble_prob_std_avg_train"]),
+                "ensemble_prob_std_avg_test": float(last_ok[2]["ensemble_prob_std_avg_test"]),
+                "confidence_margin_variance_threshold": float(last_ok[2]["confidence_margin_variance_threshold"]),
+                "confidence_prob_std_threshold": float(last_ok[2]["confidence_prob_std_threshold"]),
                 "embedding_norm_mean": emb_mean_sum / rows_total,
                 "embedding_norm_std": emb_std_sum / rows_total,
                 "low_confidence_rate": low_conf_sum / rows_total,
@@ -1187,10 +1807,19 @@ def main() -> None:
                 "ensemble_size": int(len(args._ensemble_seeds)),
                 "global_pretrained": bool(args.global_pretrain and len(pretrained_by_seed) > 0),
                 "calibration_method": out["calibration_method"],
+                "blend_method": out["blend_method"],
+                "blend_alpha": out["blend_alpha"],
+                "regime": out["regime"],
+                "regime_idx": out["regime_idx"],
+                "regime_uncertainty_multiplier": out["regime_uncertainty_multiplier"],
                 "alpha_avg_train": out["alpha_avg_train"],
                 "alpha_avg_test": out["alpha_avg_test"],
                 "variance_avg_train": out["variance_avg_train"],
                 "variance_avg_test": out["variance_avg_test"],
+                "ensemble_prob_std_avg_train": out["ensemble_prob_std_avg_train"],
+                "ensemble_prob_std_avg_test": out["ensemble_prob_std_avg_test"],
+                "confidence_margin_variance_threshold": out["confidence_margin_variance_threshold"],
+                "confidence_prob_std_threshold": out["confidence_prob_std_threshold"],
                 "embedding_norm_mean": out["embedding_norm_mean"],
                 "embedding_norm_std": out["embedding_norm_std"],
                 "low_confidence_rate": out["low_confidence_rate"],

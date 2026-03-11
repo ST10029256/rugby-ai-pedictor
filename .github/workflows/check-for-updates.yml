@@ -40,13 +40,13 @@ jobs:
         
     - name: Check for completed matches
       env:
-        THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_API_KEY }}
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         PYTHONIOENCODING: utf-8
       run: |
         echo "🔍 Checking for completed matches..."
-        echo "📊 This will detect ALL completed matches from TheSportsDB"
+        echo "📊 This will detect completed matches from the API-Sports-backed SQLite DB"
         for i in 1 2 3; do
           python scripts/detect_completed_matches.py --db data.sqlite --verbose && break
           [ "$i" -eq 3 ] && exit 1
@@ -54,19 +54,32 @@ jobs:
           sleep 10
         done
 
-    - name: Check for new games and upcoming fixtures
+    - name: Full historical refresh from API-Sports
       env:
-        THESPORTSDB_API_KEY: ${{ secrets.THESPORTSDB_API_KEY }}
         APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_API_KEY }}
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         PYTHONIOENCODING: utf-8
       run: |
-        echo "📥 Checking for new games and upcoming fixtures..."
-        echo "🏉 This will capture ALL new upcoming games and completed results"
-        # Round scanning is now automatic for all leagues - no need for --scan-rounds flag
-        # This ensures comprehensive fixture coverage for all leagues
+        echo "📚 Pulling full historical + upcoming fixtures from API-Sports..."
+        echo "🏉 This overwrites target leagues in SQLite from API-Sports authoritative data"
         for i in 1 2 3; do
-          python scripts/enhanced_auto_update.py --db data.sqlite --verbose --days-ahead 365 --days-back 90 && break
+          python override_all_target_leagues_from_apisports.py --api-key "${APISPORTS_API_KEY}" --db data.sqlite --max-requests 7500 && break
+          [ "$i" -eq 3 ] && exit 1
+          echo "Retry $i/3 failed. Waiting before retry..."
+          sleep 15
+        done
+
+    - name: Incremental upcoming + recent sync from API-Sports
+      env:
+        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+        PYTHONIOENCODING: utf-8
+      run: |
+        echo "📥 Running incremental sync for near-term upcoming/recent fixtures..."
+        for i in 1 2 3; do
+          python scripts/enhanced_auto_update.py --db data.sqlite --verbose --days-ahead 365 --days-back 120 && break
           [ "$i" -eq 3 ] && exit 1
           echo "Retry $i/3 failed. Waiting before retry..."
           sleep 15

@@ -94,6 +94,12 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
         const source = video.currentSrc || video.src;
         console.error('❌ [Storage] Login video failed to load from:', source);
         console.error('Error details:', e);
+        // Hard fallback for dev / CORS issues.
+        try {
+          video.src = '/login_video.mp4';
+          video.load();
+          video.play().catch(() => {});
+        } catch {}
       }
     };
 

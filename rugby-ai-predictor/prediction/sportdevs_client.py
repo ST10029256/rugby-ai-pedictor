@@ -8,8 +8,58 @@ import time
 from typing import Dict, List, Optional, Any
 from functools import lru_cache
 import logging
+import os
+import re
+from pathlib import Path
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    load_dotenv = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+
+def _load_local_env_files() -> None:
+    """Allow a single local key source for scripts + functions."""
+    if load_dotenv is None:
+        return
+    here = Path(__file__).resolve()
+    functions_root = here.parents[1]  # rugby-ai-predictor/
+    repo_root = functions_root.parent
+    for p in (repo_root / ".env", functions_root / ".env"):
+        if p.exists():
+            load_dotenv(dotenv_path=p, override=False)
+
+
+_load_local_env_files()
+
+# Local app league_id -> API-Sports league id
+APISPORTS_LEAGUE_BY_LOCAL_ID: Dict[int, int] = {
+    4986: 85,   # Rugby Championship
+    4446: 76,   # United Rugby Championship
+    5069: 37,   # Currie Cup
+    4574: 69,   # Rugby World Cup
+    4551: 71,   # Super Rugby
+    4430: 16,   # Top 14
+    4414: 13,   # Premiership Rugby
+    4714: 51,   # Six Nations
+    5479: 84,   # Friendlies
+}
+
+# Leagues where API season key follows start-year format (e.g. 2025-2026 => season 2025).
+YEAR_SPAN_LOCAL_LEAGUE_IDS = {4414, 4430, 4446}
+TEAM_NAME_ALIAS_BY_NORMALIZED: Dict[str, str] = {
+    "newsouthwaleswaratahs": "waratahs",
+    "wellingtonhurricanes": "hurricanes",
+    "hurricanessuperrugby": "hurricanes",
+    "otagohighlanders": "highlanders",
+    "highlanderssuperrugby": "highlanders",
+    "actbrumbies": "brumbies",
+    "queenslandreds": "reds",
+    "bluessuperrugby": "blues",
+    "crusaderssuperrugby": "crusaders",
+    "chiefssuperrugby": "chiefs",
+}
 
 class SportDevsClient:
     """Client for SportDevs Rugby API"""
@@ -24,6 +74,19 @@ class SportDevsClient:
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+        self.apisports_base_url = os.getenv("APISPORTS_RUGBY_BASE_URL", "https://v1.rugby.api-sports.io")
+        self.apisports_api_key = (
+            os.getenv("APISPORTS_RUGBY_KEY")
+            or os.getenv("APISPORTS_API_KEY")
+            or ""
+        ).strip()
+        self.apisports_session = requests.Session()
+        self._apisports_game_cache: Dict[int, Dict[str, Any]] = {}
+        if self.apisports_api_key:
+            self.apisports_session.headers.update({
+                "x-apisports-key": self.apisports_api_key,
+                "Accept": "application/json",
+            })
     
     def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Any]:
         """Make API request with error handling and rate limiting"""
@@ -42,12 +105,355 @@ class SportDevsClient:
             else:
                 logger.warning(f"API request failed for {endpoint}: {e}")
                 return None
+
+    def _make_apisports_request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Any]:
+        """Make API-Sports Rugby request for live odds."""
+        if not self.apisports_api_key:
+            return None
+        url = f"{self.apisports_base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        try:
+            time.sleep(0.1)
+            response = self.apisports_session.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict):
+                errors = payload.get("errors")
+                if errors:
+                    # Different plans/filters can return validation-like errors.
+                    logger.debug("API-Sports odds request returned errors for %s %s: %s", endpoint, params, errors)
+            return payload
+        except requests.exceptions.RequestException as e:
+            logger.debug("API-Sports request failed for %s params=%s: %s", endpoint, params, e)
+            return None
     
-    def get_match_odds(self, match_id: int) -> Optional[Dict]:
-        """Get betting odds for a specific match"""
-        # For now, return None to avoid rate limiting
-        # In production, would implement proper match-specific odds lookup
+    @staticmethod
+    def _safe_int(value: Any) -> Optional[int]:
+        try:
+            if value is None:
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_team_name(name: Optional[str]) -> str:
+        txt = str(name or "").strip().lower()
+        if not txt:
+            return ""
+        # Strip common suffixes/prefixes seen across feeds.
+        txt = re.sub(r"\bsuper rugby\b", " ", txt)
+        txt = re.sub(r"\brugby\b", " ", txt)
+        txt = re.sub(r"\bunited rugby championship\b", " ", txt)
+        # Keep comparisons tolerant of punctuation/spacing differences.
+        normalized = re.sub(r"[^a-z0-9]+", "", txt)
+        return TEAM_NAME_ALIAS_BY_NORMALIZED.get(normalized, normalized)
+
+    def _team_names_match(self, left: str, right: str) -> bool:
+        l = self._normalize_team_name(left)
+        r = self._normalize_team_name(right)
+        if not l or not r:
+            return False
+        if l == r:
+            return True
+        # Handle provider/app naming variants (e.g. "queenslandreds" vs "reds").
+        return l in r or r in l
+
+    @staticmethod
+    def _season_from_match_date(match_date: Optional[str], league_id: Optional[int] = None) -> Optional[int]:
+        if not match_date:
+            return None
+        raw = str(match_date).strip()
+        if len(raw) < 10:
+            return None
+        try:
+            year = int(raw[:4])
+            month = int(raw[5:7])
+            lid = int(league_id) if league_id is not None else None
+            if lid in YEAR_SPAN_LOCAL_LEAGUE_IDS:
+                # Typical rugby club season crosses years (Aug->Jun).
+                return year if month >= 8 else (year - 1)
+            return year
+        except Exception:
+            return None
+
+    def _resolve_apisports_game_id(
+        self,
+        league_id: int,
+        season: int,
+        match_date: Optional[str],
+        home_team: Optional[str],
+        away_team: Optional[str],
+    ) -> Optional[int]:
+        params: Dict[str, Any] = {"league": int(league_id), "season": int(season)}
+        if match_date:
+            params["date"] = str(match_date)[:10]
+        payload = self._make_apisports_request("games", params=params)
+        if not isinstance(payload, dict):
+            return None
+        rows = payload.get("response")
+        if not isinstance(rows, list) or not rows:
+            return None
+
+        home_norm = self._normalize_team_name(home_team)
+        away_norm = self._normalize_team_name(away_team)
+        if not home_norm or not away_norm:
+            return None
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            teams = row.get("teams") or {}
+            h = self._normalize_team_name((teams.get("home") or {}).get("name"))
+            a = self._normalize_team_name((teams.get("away") or {}).get("name"))
+            game_id = self._safe_int(row.get("id"))
+            if game_id is None:
+                continue
+            if (self._team_names_match(h, home_norm) and self._team_names_match(a, away_norm)) or (
+                self._team_names_match(h, away_norm) and self._team_names_match(a, home_norm)
+            ):
+                return game_id
         return None
+
+    def _get_apisports_game(self, game_id: int) -> Optional[Dict[str, Any]]:
+        gid = self._safe_int(game_id)
+        if gid is None:
+            return None
+        if gid in self._apisports_game_cache:
+            return self._apisports_game_cache[gid]
+        payload = self._make_apisports_request("games", params={"id": int(gid)})
+        if not isinstance(payload, dict):
+            return None
+        rows = payload.get("response")
+        if not isinstance(rows, list) or not rows:
+            return None
+        row = rows[0] if isinstance(rows[0], dict) else None
+        if not isinstance(row, dict):
+            return None
+        self._apisports_game_cache[gid] = row
+        return row
+
+    def get_match_odds(
+        self,
+        match_id: Optional[int] = None,
+        league_id: Optional[int] = None,
+        match_date: Optional[str] = None,
+        home_team: Optional[str] = None,
+        away_team: Optional[str] = None,
+    ) -> Optional[Dict]:
+        """Get betting odds for a specific match"""
+        resolved_match_id = self._safe_int(match_id)
+
+        # 1) Prefer API-Sports Rugby odds (real bookmakers).
+        # Docs: odds endpoint supports `game`, `league`, `season`, `bookmaker`, `bet`.
+        if resolved_match_id is not None:
+            payload = self._make_apisports_request("odds", params={"game": int(resolved_match_id)})
+            parsed = self._extract_apisports_match_odds(
+                payload,
+                game_id=resolved_match_id,
+                home_team=home_team,
+                away_team=away_team,
+                match_date=match_date,
+            )
+            if parsed:
+                return parsed
+
+        # 1b) Resolve API-Sports game id by league/date/teams when local id doesn't match provider id.
+        season = self._season_from_match_date(match_date, league_id=league_id)
+        if league_id is not None and season is not None:
+            api_league_id = APISPORTS_LEAGUE_BY_LOCAL_ID.get(int(league_id), int(league_id))
+            resolved_game_id = self._resolve_apisports_game_id(
+                league_id=int(api_league_id),
+                season=int(season),
+                match_date=match_date,
+                home_team=home_team,
+                away_team=away_team,
+            )
+            if resolved_game_id is not None:
+                payload = self._make_apisports_request("odds", params={"game": int(resolved_game_id)})
+                parsed = self._extract_apisports_match_odds(
+                    payload,
+                    game_id=resolved_game_id,
+                    home_team=home_team,
+                    away_team=away_team,
+                    match_date=match_date,
+                )
+                if parsed:
+                    return parsed
+
+            # 1c) Fallback to league+season odds and match by team names (best-effort).
+            payload = self._make_apisports_request(
+                "odds",
+                params={"league": int(api_league_id), "season": int(season)},
+            )
+            parsed = self._extract_apisports_match_odds(
+                payload,
+                home_team=home_team,
+                away_team=away_team,
+                match_date=match_date,
+            )
+            if parsed:
+                return parsed
+
+        # 2) Fallback to legacy SportDevs if available (best-effort).
+        odds_data = self._make_request("odds/full-time-results")
+        if isinstance(odds_data, list):
+            for row in odds_data:
+                if resolved_match_id is not None and row.get("match_id") == resolved_match_id:
+                    return row
+        return None
+
+    def _extract_apisports_match_odds(
+        self,
+        payload: Optional[Dict[str, Any]],
+        game_id: Optional[int] = None,
+        home_team: Optional[str] = None,
+        away_team: Optional[str] = None,
+        match_date: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Normalize API-Sports Rugby odds payload into the existing `extract_odds_features` schema.
+        """
+        if not payload or not isinstance(payload, dict):
+            return None
+        resp = payload.get("response")
+        if not isinstance(resp, list) or not resp:
+            return None
+
+        entry: Optional[Dict[str, Any]] = None
+        if game_id is not None:
+            for item in resp:
+                if not isinstance(item, dict):
+                    continue
+                row_game_id = self._safe_int((item.get("game") or {}).get("id"))
+                if row_game_id is not None and int(row_game_id) == int(game_id):
+                    entry = item
+                    break
+
+        if entry is None and home_team and away_team:
+            home_norm = self._normalize_team_name(home_team)
+            away_norm = self._normalize_team_name(away_team)
+            target_date = str(match_date or "")[:10]
+            for item in resp:
+                if not isinstance(item, dict):
+                    continue
+                teams = (item.get("game") or {}).get("teams") or {}
+                h = self._normalize_team_name((teams.get("home") or {}).get("name"))
+                a = self._normalize_team_name((teams.get("away") or {}).get("name"))
+                game_meta = item.get("game") or {}
+                game_date = str(game_meta.get("date") or "")[:10]
+                row_game_id = self._safe_int(game_meta.get("id"))
+
+                if (not h or not a) and row_game_id is not None:
+                    resolved_game = self._get_apisports_game(int(row_game_id))
+                    if resolved_game:
+                        rteams = resolved_game.get("teams") or {}
+                        h = self._normalize_team_name((rteams.get("home") or {}).get("name"))
+                        a = self._normalize_team_name((rteams.get("away") or {}).get("name"))
+                        if not game_date:
+                            game_date = str(resolved_game.get("date") or "")[:10]
+
+                if (h == home_norm and a == away_norm) or (h == away_norm and a == home_norm):
+                    if target_date and game_date and target_date != game_date:
+                        continue
+                    entry = item
+                    break
+
+                if (
+                    self._team_names_match(h, home_norm)
+                    and self._team_names_match(a, away_norm)
+                ) or (
+                    self._team_names_match(h, away_norm)
+                    and self._team_names_match(a, home_norm)
+                ):
+                    if target_date and game_date and target_date != game_date:
+                        continue
+                    entry = item
+                    break
+
+        # Keep compatibility with previous behavior only for broad calls
+        # where no explicit game/team filters were provided.
+        if (
+            entry is None
+            and game_id is None
+            and not (home_team and away_team)
+            and isinstance(resp[0], dict)
+        ):
+            entry = resp[0]
+        if not isinstance(entry, dict):
+            return None
+
+        bookmakers = entry.get("bookmakers")
+        if not isinstance(bookmakers, list) or not bookmakers:
+            return None
+
+        rows: List[Dict[str, Any]] = []
+        for bk in bookmakers:
+            if not isinstance(bk, dict):
+                continue
+            bk_name = str(bk.get("name") or bk.get("key") or "Unknown")
+            bets = bk.get("bets")
+            if not isinstance(bets, list):
+                continue
+
+            match_bet = None
+            for bet in bets:
+                if not isinstance(bet, dict):
+                    continue
+                bet_name = str(bet.get("name") or "").lower()
+                # Common market names for winner lines.
+                if any(x in bet_name for x in ["match winner", "winner", "1x2", "full time"]):
+                    match_bet = bet
+                    break
+            if match_bet is None and bets:
+                match_bet = bets[0] if isinstance(bets[0], dict) else None
+            if not isinstance(match_bet, dict):
+                continue
+
+            values = match_bet.get("values")
+            if not isinstance(values, list):
+                continue
+
+            home = draw = away = None
+            for v in values:
+                if not isinstance(v, dict):
+                    continue
+                label = str(v.get("value", "")).strip().lower()
+                odd_raw = v.get("odd")
+                try:
+                    odd = float(odd_raw)
+                except (TypeError, ValueError):
+                    continue
+                if odd <= 0:
+                    continue
+                if label in {"1", "home"}:
+                    home = odd
+                elif label in {"x", "draw"}:
+                    draw = odd
+                elif label in {"2", "away"}:
+                    away = odd
+
+            if home is None and away is None:
+                continue
+
+            rows.append({
+                "bookmaker": bk_name,
+                "home": home,
+                "draw": draw,
+                "away": away,
+            })
+
+        if not rows:
+            return None
+
+        return {
+            "source": "api_sports",
+            "periods": [
+                {
+                    "period_type": "Match Winner",
+                    "odds": rows,
+                }
+            ],
+        }
     
     def get_all_odds(self) -> List[Dict]:
         """Get all available odds data"""
@@ -179,12 +585,18 @@ def extract_odds_features(odds_data: Optional[Dict]) -> Dict[str, float]:
     away_odds_list = []
     
     for bookmaker in full_time_odds:
-        if 'home' in bookmaker and bookmaker['home'] > 0:
-            home_odds_list.append(bookmaker['home'])
-        if 'draw' in bookmaker and bookmaker['draw'] > 0:
-            draw_odds_list.append(bookmaker['draw'])
-        if 'away' in bookmaker and bookmaker['away'] > 0:
-            away_odds_list.append(bookmaker['away'])
+        try:
+            h = float(bookmaker.get('home')) if bookmaker.get('home') is not None else None
+            d = float(bookmaker.get('draw')) if bookmaker.get('draw') is not None else None
+            a = float(bookmaker.get('away')) if bookmaker.get('away') is not None else None
+        except (TypeError, ValueError):
+            h = d = a = None
+        if h is not None and h > 0:
+            home_odds_list.append(h)
+        if d is not None and d > 0:
+            draw_odds_list.append(d)
+        if a is not None and a > 0:
+            away_odds_list.append(a)
     
     # Calculate averages
     avg_home_odds = sum(home_odds_list) / len(home_odds_list) if home_odds_list else 2.0
