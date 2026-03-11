@@ -40,8 +40,8 @@ jobs:
         
     - name: Check for completed matches
       env:
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_RUGBY_KEY || secrets.APISPORTS_API_KEY }}
-        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY || secrets.APISPORTS_API_KEY }}
+        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         PYTHONIOENCODING: utf-8
       run: |
@@ -56,15 +56,20 @@ jobs:
 
     - name: Full historical refresh from API-Sports
       env:
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_RUGBY_KEY || secrets.APISPORTS_API_KEY }}
-        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY || secrets.APISPORTS_API_KEY }}
+        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         PYTHONIOENCODING: utf-8
       run: |
         echo "📚 Pulling full historical + upcoming fixtures from API-Sports..."
         echo "🏉 This overwrites target leagues in SQLite from API-Sports authoritative data"
+        API_KEY="${APISPORTS_RUGBY_KEY:-${APISPORTS_API_KEY:-}}"
+        if [ -z "$API_KEY" ]; then
+          echo "Missing GitHub secret: set APISPORTS_RUGBY_KEY or APISPORTS_API_KEY in repository secrets."
+          exit 1
+        fi
         for i in 1 2 3; do
-          python override_all_target_leagues_from_apisports.py --api-key "${APISPORTS_RUGBY_KEY}" --db data.sqlite --max-requests 7500 && break
+          python override_all_target_leagues_from_apisports.py --api-key "$API_KEY" --db data.sqlite --max-requests 7500 && break
           [ "$i" -eq 3 ] && exit 1
           echo "Retry $i/3 failed. Waiting before retry..."
           sleep 15
@@ -72,8 +77,8 @@ jobs:
 
     - name: Incremental upcoming + recent sync from API-Sports
       env:
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_RUGBY_KEY || secrets.APISPORTS_API_KEY }}
-        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY || secrets.APISPORTS_API_KEY }}
+        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
         HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         PYTHONIOENCODING: utf-8
       run: |
@@ -145,6 +150,9 @@ jobs:
         FIREBASE_CLI_EXPERIMENTS: webframeworks
       run: |
         echo "🚀 Deploying Firebase Functions so History endpoints use the updated DB..."
+        python -m venv rugby-ai-predictor/venv
+        rugby-ai-predictor/venv/bin/python -m pip install --upgrade pip
+        rugby-ai-predictor/venv/bin/python -m pip install -r rugby-ai-predictor/requirements.txt
         npm i -g firebase-tools
         firebase --version
         for i in 1 2 3; do
