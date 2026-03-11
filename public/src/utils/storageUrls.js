@@ -7,20 +7,38 @@
  */
 
 const STORAGE_BASE_URL = 'https://firebasestorage.googleapis.com/v0/b/rugby-ai-61fd0.firebasestorage.app/o';
-const USE_STORAGE = true; // Using optimized MP4 files - ready for Storage!
+// Firebase Storage media can be blocked in dev by CORS (depends on bucket CORS config).
+// Default to local media unless explicitly enabled for production builds.
+const USE_STORAGE = (process.env.REACT_APP_USE_STORAGE === '1') && (process.env.NODE_ENV === 'production');
 
 // Performance: Test Storage availability and fallback to local if slow
 let storageTested = false;
 let storageAvailable = true;
 
+const isDebugEnabled = (key) => {
+  try {
+    return typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+};
+
+// Enable via localStorage.setItem('debug_media', '1')
+const DEBUG_MEDIA = isDebugEnabled('debug_media');
+const debugLog = (...args) => DEBUG_MEDIA && console.log(...args);
+const debugWarn = (...args) => DEBUG_MEDIA && console.warn(...args);
+
 /**
  * Test if Storage is fast enough (timeout after 3 seconds)
  */
 const testStorageSpeed = async () => {
+  // Never probe Storage in local/dev mode to avoid CORS noise.
+  if (!USE_STORAGE) return false;
   if (storageTested) return storageAvailable;
   
   storageTested = true;
-  const testUrl = `${STORAGE_BASE_URL}/${encodeURIComponent('media/image_rugby.jpeg')}?alt=media`;
+  // Use a file that should exist in Storage (videos are uploaded more reliably than images).
+  const testUrl = `${STORAGE_BASE_URL}/${encodeURIComponent('media/video_rugby.mp4')}?alt=media`;
   
   try {
     const startTime = performance.now();
@@ -28,16 +46,16 @@ const testStorageSpeed = async () => {
     const loadTime = performance.now() - startTime;
     
     if (response.ok && loadTime < 2000) {
-      console.log(`✅ [Storage] Storage is fast (${Math.round(loadTime)}ms)`);
+      debugLog(`✅ [Storage] Storage is fast (${Math.round(loadTime)}ms)`);
       storageAvailable = true;
       return true;
     } else {
-      console.warn(`⚠️ [Storage] Storage is slow (${Math.round(loadTime)}ms), using local files`);
+      debugWarn(`⚠️ [Storage] Storage is slow (${Math.round(loadTime)}ms), using local files`);
       storageAvailable = false;
       return false;
     }
   } catch (error) {
-    console.warn(`⚠️ [Storage] Storage test failed, using local files:`, error.message);
+    debugWarn(`⚠️ [Storage] Storage test failed, using local files:`, error.message);
     storageAvailable = false;
     return false;
   }
@@ -52,7 +70,7 @@ export const getStorageUrl = (fileName) => {
   // Encode the path (media/filename)
   const encodedPath = encodeURIComponent(`media/${fileName}`);
   const url = `${STORAGE_BASE_URL}/${encodedPath}?alt=media`;
-  console.log(`📦 [Storage] Generated Storage URL for ${fileName}:`, url);
+  debugLog(`📦 [Storage] Generated Storage URL for ${fileName}:`, url);
   return url;
 };
 
@@ -86,11 +104,11 @@ export const getMediaUrl = (fileName, preferStorage = USE_STORAGE) => {
 const getMediaUrlWithLogging = (fileName, fileType) => {
   if (USE_STORAGE && storageAvailable) {
     const url = getStorageUrl(fileName);
-    console.log(`✅ [Storage] Using Firebase Storage for ${fileType} (${fileName})`);
+    debugLog(`✅ [Storage] Using Firebase Storage for ${fileType} (${fileName})`);
     return url;
   } else {
     const url = `/${fileName}`;
-    console.log(`📁 [Local] Using local file for ${fileType} (${fileName})`);
+    debugLog(`📁 [Local] Using local file for ${fileType} (${fileName})`);
     return url;
   }
 };
@@ -103,21 +121,24 @@ export const MEDIA_URLS = {
   loginVideo: getMediaUrlWithLogging('login_video.mp4', 'Login Video'),
   
   // Images
-  imageRugby: getMediaUrlWithLogging('image_rugby.jpeg', 'Rugby Image'),
+  // Keep this local by default to avoid noisy 404s if the image isn't uploaded to Storage.
+  imageRugby: '/image_rugby.jpeg',
 };
 
-// Test Storage speed on module load (non-blocking)
-testStorageSpeed().then(isFast => {
-  if (!isFast && USE_STORAGE) {
-    console.warn('⚠️ [Storage] Storage is slow, consider using local files or optimizing videos');
-    // Update URLs to use local if Storage is slow
-    Object.keys(MEDIA_URLS).forEach(key => {
-      const fileName = key === 'videoRugby' ? 'video_rugby.mp4' :
-                       key === 'videoRugbyBall' ? 'video_rugby_ball.mp4' :
-                       key === 'loginVideo' ? 'login_video.mp4' :
-                       'image_rugby.jpeg';
-      MEDIA_URLS[key] = `/${fileName}`;
-    });
-  }
-});
+// Test Storage speed on module load (non-blocking) only when Storage usage is enabled.
+if (USE_STORAGE) {
+  testStorageSpeed().then(isFast => {
+    if (!isFast && USE_STORAGE) {
+      debugWarn('⚠️ [Storage] Storage is slow, consider using local files or optimizing videos');
+      // Update URLs to use local if Storage is slow
+      Object.keys(MEDIA_URLS).forEach(key => {
+        const fileName = key === 'videoRugby' ? 'video_rugby.mp4' :
+                         key === 'videoRugbyBall' ? 'video_rugby_ball.mp4' :
+                         key === 'loginVideo' ? 'login_video.mp4' :
+                         'image_rugby.jpeg';
+        MEDIA_URLS[key] = `/${fileName}`;
+      });
+    }
+  });
+}
 

@@ -1,19 +1,26 @@
 import React, { memo } from 'react';
 import { Box, Typography, TextField, Grid } from '@mui/material';
-import { getLocalYYYYMMDD } from '../utils/date';
+import { getLocalYYYYMMDD, getKickoffAtFromMatch, formatSASTTimePM, formatSASTDateYMD } from '../utils/date';
 
-const ManualOddsInput = memo(function ManualOddsInput({ matches, manualOdds, onOddsChange }) {
+const ManualOddsInput = memo(function ManualOddsInput({ matches, selectedLeague, manualOdds, onOddsChange }) {
   return (
-    <Box sx={{ mb: 4 }}>
-      <Typography variant="h6" sx={{ mb: 2, color: '#fafafa', fontWeight: 700 }}>
-        ✍️ Manual Odds (optional)
-      </Typography>
-      <Typography variant="caption" sx={{ display: 'block', mb: 2, color: '#a0aec0' }}>
-        Enter decimal odds for each matchup. Leave blank (0.00) to use AI only.
-      </Typography>
-
+    <Box sx={{ 
+      mb: 4, 
+      width: '100%', 
+      maxWidth: { xs: 420, sm: '100%', md: '100%' }, 
+      mx: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+    }}>
       {matches.map((match) => {
-        const matchDate = match.date_event ? match.date_event.split('T')[0] : getLocalYYYYMMDD();
+        const kickoffAt = getKickoffAtFromMatch(match, selectedLeague);
+        const fixtureDate =
+          (match.date_event && match.date_event.split('T')[0]) ||
+          (match.dateEvent && String(match.dateEvent).split('T')[0]) ||
+          getLocalYYYYMMDD();
+        const matchDate = fixtureDate || (kickoffAt && formatSASTDateYMD(kickoffAt)) || getLocalYYYYMMDD();
+        const kickoffTimeLabel = kickoffAt ? formatSASTTimePM(kickoffAt) : null;
         // Support both ID-based and name-based keys (matching Streamlit)
         const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
         const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
@@ -21,7 +28,7 @@ const ManualOddsInput = memo(function ManualOddsInput({ matches, manualOdds, onO
         const odds = { home: existingOdds.home || 0, away: existingOdds.away || 0 };
 
         return (
-          <Box key={match.id || idKey || nameKey} className="manual-odds-match-box" sx={{ mb: 2, p: 2, backgroundColor: '#1f2937', borderRadius: 2 }}>
+          <Box key={match.id || idKey || nameKey} className="manual-odds-match-box" sx={{ mb: 2, p: 2, backgroundColor: '#1f2937', borderRadius: 2, width: '100%' }}>
             <Grid container spacing={2} alignItems="center" justifyContent={{ xs: 'center', md: 'flex-start' }}>
               <Grid item xs={12} md={6} sx={{ display: 'flex', justifyContent: { xs: 'center', md: 'flex-start' }, mb: { xs: 1, md: 0 } }}>
                 <Typography sx={{ 
@@ -30,6 +37,7 @@ const ManualOddsInput = memo(function ManualOddsInput({ matches, manualOdds, onO
                   textAlign: { xs: 'center', md: 'left' }
                 }}>
                   {match.home_team} vs {match.away_team} — {matchDate}
+                  {kickoffTimeLabel ? ` • ${kickoffTimeLabel}` : ''}
                 </Typography>
               </Grid>
               <Grid item xs={6} md={3} sx={{ 

@@ -51,6 +51,141 @@ def _coerce_int(value: Any) -> Optional[int]:
         return None
 
 
+def _get_live_model_version() -> str:
+    """
+    Stable model-version identifier used for historical snapshot rows.
+    Override via LIVE_MODEL_VERSION if needed.
+    """
+    explicit = str(os.getenv("LIVE_MODEL_VERSION", "")).strip()
+    if explicit:
+        return explicit
+    return f"{LIVE_MODEL_FAMILY}:{LIVE_MODEL_CHANNEL}"
+
+
+def _ensure_prediction_snapshot_table(conn: Any) -> None:
+    """
+    Create persistent prediction snapshot table if it does not exist.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prediction_snapshot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            league_id INTEGER,
+            model_version TEXT NOT NULL,
+            snapshot_type TEXT NOT NULL, -- historical_backfill | pre_kickoff_live
+            predicted_at TEXT NOT NULL,
+            kickoff_at TEXT,
+            home_team TEXT,
+            away_team TEXT,
+            predicted_winner TEXT,
+            predicted_home_score REAL,
+            predicted_away_score REAL,
+            confidence REAL,
+            home_win_prob REAL,
+            away_win_prob REAL,
+            actual_home_score INTEGER,
+            actual_away_score INTEGER,
+            actual_winner TEXT,
+            prediction_correct INTEGER, -- 1=true,0=false,NULL=unknown
+            score_error REAL,
+            source_note TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(match_id, model_version, snapshot_type)
+        )
+        """
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prediction_snapshot_match ON prediction_snapshot(match_id)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prediction_snapshot_league ON prediction_snapshot(league_id)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prediction_snapshot_model ON prediction_snapshot(model_version, snapshot_type)"
+    )
+    conn.commit()
+
+
+def _upsert_prediction_snapshot_row(
+    conn: Any,
+    *,
+    match_id: int,
+    league_id: Optional[int],
+    model_version: str,
+    snapshot_type: str,
+    predicted_at: str,
+    kickoff_at: Optional[str],
+    home_team: Optional[str],
+    away_team: Optional[str],
+    predicted_winner: Optional[str],
+    predicted_home_score: Optional[float],
+    predicted_away_score: Optional[float],
+    confidence: Optional[float],
+    home_win_prob: Optional[float],
+    away_win_prob: Optional[float],
+    actual_home_score: Optional[int],
+    actual_away_score: Optional[int],
+    actual_winner: Optional[str],
+    prediction_correct: Optional[int],
+    score_error: Optional[float],
+    source_note: Optional[str] = None,
+) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO prediction_snapshot (
+            match_id, league_id, model_version, snapshot_type, predicted_at, kickoff_at,
+            home_team, away_team, predicted_winner, predicted_home_score, predicted_away_score,
+            confidence, home_win_prob, away_win_prob, actual_home_score, actual_away_score,
+            actual_winner, prediction_correct, score_error, source_note, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(match_id, model_version, snapshot_type)
+        DO UPDATE SET
+            league_id=excluded.league_id,
+            predicted_at=excluded.predicted_at,
+            kickoff_at=excluded.kickoff_at,
+            home_team=excluded.home_team,
+            away_team=excluded.away_team,
+            predicted_winner=excluded.predicted_winner,
+            predicted_home_score=excluded.predicted_home_score,
+            predicted_away_score=excluded.predicted_away_score,
+            confidence=excluded.confidence,
+            home_win_prob=excluded.home_win_prob,
+            away_win_prob=excluded.away_win_prob,
+            actual_home_score=excluded.actual_home_score,
+            actual_away_score=excluded.actual_away_score,
+            actual_winner=excluded.actual_winner,
+            prediction_correct=excluded.prediction_correct,
+            score_error=excluded.score_error,
+            source_note=excluded.source_note,
+            updated_at=CURRENT_TIMESTAMP
+        """,
+        (
+            int(match_id),
+            league_id,
+            model_version,
+            snapshot_type,
+            predicted_at,
+            kickoff_at,
+            home_team,
+            away_team,
+            predicted_winner,
+            predicted_home_score,
+            predicted_away_score,
+            confidence,
+            home_win_prob,
+            away_win_prob,
+            actual_home_score,
+            actual_away_score,
+            actual_winner,
+            prediction_correct,
+            score_error,
+            source_note,
+        ),
+    )
 def _parse_firestore_date(date_event: Any) -> Optional[datetime]:
     """Best-effort conversion of Firestore date field to a `datetime`."""
     try:
@@ -700,8 +835,15 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                 logger.info("Using standard predictor...")
                 predictor = get_predictor()
                 logger.info("Predictor obtained, calling predict_match...")
+                raw_match_id = data.get('event_id') or data.get('match_id') or data.get('id')
+                match_id = None
+                try:
+                    if raw_match_id is not None and str(raw_match_id).strip() != "":
+                        match_id = int(raw_match_id)
+                except (TypeError, ValueError):
+                    match_id = None
                 prediction = predictor.predict_match(
-                    str(home_team), str(away_team), league_id_int, str(match_date)
+                    str(home_team), str(away_team), league_id_int, str(match_date), match_id=match_id
                 )
                 logger.info(f"Prediction received: {prediction}")
             except FileNotFoundError as fnf:
@@ -856,7 +998,7 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e), 'traceback': error_trace}
 
 
-@https_fn.on_request()
+@https_fn.on_request(timeout_sec=120, memory=1024)
 def predict_match_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for match prediction with explicit CORS support
@@ -944,8 +1086,15 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                 logger.info("Using standard predictor...")
                 predictor = get_predictor()
                 logger.info("Predictor obtained, calling predict_match...")
+                raw_match_id = data.get('event_id') or data.get('match_id') or data.get('id')
+                match_id = None
+                try:
+                    if raw_match_id is not None and str(raw_match_id).strip() != "":
+                        match_id = int(raw_match_id)
+                except (TypeError, ValueError):
+                    match_id = None
                 prediction = predictor.predict_match(
-                    str(home_team), str(away_team), league_id_int, str(match_date)
+                    str(home_team), str(away_team), league_id_int, str(match_date), match_id=match_id
                 )
                 logger.info(f"Prediction received: {prediction}")
             except Exception as e:
@@ -3436,6 +3585,107 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
 
 
 @https_fn.on_request(timeout_sec=300, memory=512)
+def proxy_video_http(req: https_fn.Request) -> https_fn.Response:
+    """
+    Proxy X/Twitter-hosted MP4 files so browser playback works in-app.
+    `video.twimg.com` often rejects direct cross-site hotlink requests with 403.
+    """
+    import logging
+    import requests
+    from urllib.parse import urlparse
+
+    logger = logging.getLogger(__name__)
+
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Range",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, Content-Type",
+        "Access-Control-Max-Age": "3600",
+    }
+
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204, headers=cors_headers)
+
+    if req.method != "GET":
+        return https_fn.Response(
+            json.dumps({"success": False, "error": "Method not allowed"}),
+            status=405,
+            headers={**cors_headers, "Content-Type": "application/json"},
+        )
+
+    target_url = (req.args.get("url") or "").strip()
+    if not target_url:
+        return https_fn.Response(
+            json.dumps({"success": False, "error": "Missing required query param: url"}),
+            status=400,
+            headers={**cors_headers, "Content-Type": "application/json"},
+        )
+
+    try:
+        parsed = urlparse(target_url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("Invalid URL scheme")
+        # Keep strict to avoid SSRF and only allow known X/Twitter media hosts.
+        allowed_hosts = {"video.twimg.com", "pbs.twimg.com", "ton.twimg.com"}
+        if host not in allowed_hosts:
+            raise ValueError(f"Host not allowed: {host}")
+    except Exception as url_error:
+        return https_fn.Response(
+            json.dumps({"success": False, "error": f"Invalid media URL: {url_error}"}),
+            status=400,
+            headers={**cors_headers, "Content-Type": "application/json"},
+        )
+
+    try:
+        upstream_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "video/*,*/*;q=0.8",
+            "Referer": "https://x.com/",
+            "Origin": "https://x.com",
+        }
+        range_header = req.headers.get("Range")
+        if range_header:
+            upstream_headers["Range"] = range_header
+
+        upstream = requests.get(
+            target_url,
+            headers=upstream_headers,
+            timeout=(8, 30),
+            stream=True,
+            allow_redirects=True,
+        )
+
+        response_headers = {
+            **cors_headers,
+            "Content-Type": upstream.headers.get("Content-Type", "video/mp4"),
+            "Cache-Control": "public, max-age=3600",
+        }
+        for header_name in ("Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"):
+            header_value = upstream.headers.get(header_name)
+            if header_value:
+                response_headers[header_name] = header_value
+
+        return https_fn.Response(
+            upstream.content,
+            status=upstream.status_code,
+            headers=response_headers,
+        )
+    except Exception as proxy_error:
+        logger.error(f"proxy_video_http error: {proxy_error}")
+        return https_fn.Response(
+            json.dumps({"success": False, "error": "Media proxy request failed"}),
+            status=502,
+            headers={**cors_headers, "Content-Type": "application/json"},
+        )
+
+
+@https_fn.on_request(timeout_sec=300, memory=512)
 def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for trending topics with explicit CORS support.
@@ -4270,6 +4520,641 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
 
 
 @https_fn.on_request(timeout_sec=120, memory=1024)
+def capture_upcoming_prediction_snapshots_http(req: https_fn.Request) -> https_fn.Response:
+    """
+    Capture immutable pre-kickoff prediction snapshots for upcoming fixtures.
+    Run this on a schedule (e.g. every 15 minutes) to build true forward history.
+    """
+    import logging
+    import sqlite3
+    from datetime import datetime, timezone, timedelta
+
+    logger = logging.getLogger(__name__)
+    response_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json",
+    }
+
+    if req.method == "OPTIONS":
+        preflight_headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "3600",
+        }
+        return https_fn.Response("", status=204, headers=preflight_headers)
+
+    try:
+        data = req.get_json(silent=True) or {}
+        hours_ahead = int(data.get("hours_ahead", 36))
+        # "Just before kickoff" window (defaults to 0-20 minutes before kickoff).
+        min_minutes_before_kickoff = int(data.get("min_minutes_before_kickoff", 0))
+        max_minutes_before_kickoff = int(data.get("max_minutes_before_kickoff", 20))
+        limit = int(data.get("limit", 400))
+        league_id_filter = data.get("league_id")
+        dry_run = bool(data.get("dry_run", False))
+        model_version = str(data.get("model_version") or _get_live_model_version())
+
+        hours_ahead = max(1, min(hours_ahead, 168))
+        min_minutes_before_kickoff = max(0, min(min_minutes_before_kickoff, 240))
+        max_minutes_before_kickoff = max(min_minutes_before_kickoff, min(max_minutes_before_kickoff, 360))
+        limit = max(1, min(limit, 2000))
+
+        db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+        db_path = os.path.abspath(db_path)
+        if not os.path.exists(db_path):
+            return https_fn.Response(
+                json.dumps({"success": False, "error": f"Database file not found at {db_path}"}),
+                status=404,
+                headers=response_headers,
+            )
+
+        from prediction.db import connect
+        conn = connect(db_path)
+        cursor = conn.cursor()
+        _ensure_prediction_snapshot_table(conn)
+
+        now_utc = datetime.now(timezone.utc)
+        cutoff_utc = now_utc + timedelta(hours=hours_ahead)
+        query = """
+            SELECT
+                e.id,
+                e.league_id,
+                e.date_event,
+                e.timestamp,
+                t1.name as home_team_name,
+                t2.name as away_team_name
+            FROM event e
+            LEFT JOIN team t1 ON e.home_team_id = t1.id
+            LEFT JOIN team t2 ON e.away_team_id = t2.id
+            WHERE e.home_team_id IS NOT NULL
+              AND e.away_team_id IS NOT NULL
+              AND (e.home_score IS NULL OR e.away_score IS NULL)
+        """
+        params: list[Any] = []
+        if league_id_filter is not None:
+            query += " AND e.league_id = ?"
+            params.append(int(league_id_filter))
+        query += " ORDER BY COALESCE(e.timestamp, e.date_event) ASC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        predictor = get_predictor()
+        scanned = 0
+        within_window = 0
+        created_or_updated = 0
+        skipped_existing = 0
+        failed = 0
+        finalized_completed = 0
+        failures: list[dict] = []
+
+        for row in rows:
+            scanned += 1
+            match_id, league_id_val, date_event, kickoff_ts, home_team_name, away_team_name = row
+            if not home_team_name or not away_team_name:
+                continue
+
+            kickoff_raw = kickoff_ts or date_event
+            if not kickoff_raw:
+                continue
+            try:
+                kickoff_norm = str(kickoff_raw).replace("Z", "+00:00")
+                kickoff_dt = datetime.fromisoformat(kickoff_norm)
+                if kickoff_dt.tzinfo is None:
+                    kickoff_dt = kickoff_dt.replace(tzinfo=timezone.utc)
+                else:
+                    kickoff_dt = kickoff_dt.astimezone(timezone.utc)
+            except Exception:
+                # Date-only fallback.
+                try:
+                    kickoff_dt = datetime.fromisoformat(str(date_event)[:10]).replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+
+            if kickoff_dt < now_utc or kickoff_dt > cutoff_utc:
+                continue
+            minutes_to_kickoff = (kickoff_dt - now_utc).total_seconds() / 60.0
+            in_snapshot_window = (
+                minutes_to_kickoff >= float(min_minutes_before_kickoff)
+                and minutes_to_kickoff <= float(max_minutes_before_kickoff)
+            )
+            if not in_snapshot_window:
+                continue
+            within_window += 1
+
+            cursor.execute(
+                """
+                SELECT 1
+                FROM prediction_snapshot
+                WHERE match_id = ?
+                  AND model_version = ?
+                  AND snapshot_type = 'pre_kickoff_live'
+                LIMIT 1
+                """,
+                (int(match_id), model_version),
+            )
+            if cursor.fetchone() is not None:
+                skipped_existing += 1
+                continue
+
+            try:
+                pred = predictor.predict_match(
+                    home_team=home_team_name,
+                    away_team=away_team_name,
+                    league_id=int(league_id_val),
+                    match_date=str(date_event),
+                    match_id=int(match_id),
+                )
+                if not dry_run:
+                    _upsert_prediction_snapshot_row(
+                        conn,
+                        match_id=int(match_id),
+                        league_id=int(league_id_val) if league_id_val is not None else None,
+                        model_version=model_version,
+                        snapshot_type="pre_kickoff_live",
+                        predicted_at=now_utc.isoformat(),
+                        kickoff_at=kickoff_dt.isoformat(),
+                        home_team=home_team_name,
+                        away_team=away_team_name,
+                        predicted_winner=pred.get("predicted_winner"),
+                        predicted_home_score=float(pred.get("predicted_home_score")) if pred.get("predicted_home_score") is not None else None,
+                        predicted_away_score=float(pred.get("predicted_away_score")) if pred.get("predicted_away_score") is not None else None,
+                        confidence=float(pred.get("confidence")) if pred.get("confidence") is not None else None,
+                        home_win_prob=float(pred.get("home_win_prob")) if pred.get("home_win_prob") is not None else None,
+                        away_win_prob=float(pred.get("away_win_prob")) if pred.get("away_win_prob") is not None else None,
+                        actual_home_score=None,
+                        actual_away_score=None,
+                        actual_winner=None,
+                        prediction_correct=None,
+                        score_error=None,
+                        source_note="auto_upcoming_window",
+                    )
+                created_or_updated += 1
+            except Exception as e:
+                failed += 1
+                failures.append({"match_id": int(match_id), "error": str(e)})
+
+        if not dry_run:
+            # Finalize completed matches: store actuals + correctness for existing pre-kickoff snapshots.
+            cursor.execute(
+                """
+                SELECT
+                    s.match_id,
+                    s.model_version,
+                    s.predicted_home_score,
+                    s.predicted_away_score,
+                    s.predicted_winner,
+                    e.home_score,
+                    e.away_score
+                FROM prediction_snapshot s
+                JOIN event e ON e.id = s.match_id
+                WHERE s.snapshot_type = 'pre_kickoff_live'
+                  AND s.actual_home_score IS NULL
+                  AND s.actual_away_score IS NULL
+                  AND e.home_score IS NOT NULL
+                  AND e.away_score IS NOT NULL
+                """
+            )
+            completed_rows = cursor.fetchall()
+            for (
+                match_id_val,
+                model_version_val,
+                pred_home,
+                pred_away,
+                pred_winner,
+                actual_home,
+                actual_away,
+            ) in completed_rows:
+                if actual_home > actual_away:
+                    actual_winner = "Home"
+                elif actual_away > actual_home:
+                    actual_winner = "Away"
+                else:
+                    actual_winner = "Draw"
+
+                prediction_correct = None
+                if pred_winner in {"Home", "Away", "Draw"}:
+                    prediction_correct = 1 if pred_winner == actual_winner else 0
+
+                score_error = None
+                if pred_home is not None and pred_away is not None:
+                    try:
+                        score_error = abs(float(pred_home) - float(actual_home)) + abs(float(pred_away) - float(actual_away))
+                    except Exception:
+                        score_error = None
+
+                cursor.execute(
+                    """
+                    UPDATE prediction_snapshot
+                    SET actual_home_score = ?,
+                        actual_away_score = ?,
+                        actual_winner = ?,
+                        prediction_correct = ?,
+                        score_error = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE match_id = ?
+                      AND model_version = ?
+                      AND snapshot_type = 'pre_kickoff_live'
+                    """,
+                    (
+                        int(actual_home),
+                        int(actual_away),
+                        actual_winner,
+                        prediction_correct,
+                        score_error,
+                        int(match_id_val),
+                        str(model_version_val),
+                    ),
+                )
+                finalized_completed += 1
+
+            conn.commit()
+        conn.close()
+
+        response_data = {
+            "success": True,
+            "dry_run": dry_run,
+            "model_version": model_version,
+            "hours_ahead": hours_ahead,
+            "min_minutes_before_kickoff": min_minutes_before_kickoff,
+            "max_minutes_before_kickoff": max_minutes_before_kickoff,
+            "limit": limit,
+            "scanned": scanned,
+            "within_window": within_window,
+            "created_or_updated": created_or_updated,
+            "skipped_existing": skipped_existing,
+            "finalized_completed": finalized_completed,
+            "failed": failed,
+            "failures": failures[:30],
+        }
+        return https_fn.Response(json.dumps(response_data), status=200, headers=response_headers)
+    except Exception as e:
+        logger.error(f"capture_upcoming_prediction_snapshots_http error: {e}")
+        return https_fn.Response(
+            json.dumps({"success": False, "error": str(e)}),
+            status=500,
+            headers=response_headers,
+        )
+
+
+@https_fn.on_request(timeout_sec=120, memory=1024)
+def apisports_rugby_webhook_http(req: https_fn.Request) -> https_fn.Response:
+    """
+    Webhook endpoint for match lifecycle automation:
+    - On match started/live: create pre-kickoff/live snapshot if missing
+    - On match finished: finalize actual vs AI fields in snapshot history
+    """
+    import logging
+    from datetime import datetime, timezone
+
+    logger = logging.getLogger(__name__)
+    response_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json",
+    }
+
+    if req.method == "OPTIONS":
+        preflight_headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Webhook-Secret",
+            "Access-Control-Max-Age": "3600",
+        }
+        return https_fn.Response("", status=204, headers=preflight_headers)
+
+    try:
+        # Optional shared-secret guard (recommended in production).
+        expected_secret = str(os.getenv("APISPORTS_WEBHOOK_SECRET", "")).strip()
+        received_secret = (
+            req.headers.get("X-Webhook-Secret")
+            or req.headers.get("x-webhook-secret")
+            or req.args.get("secret")
+            or ""
+        )
+        if expected_secret and received_secret != expected_secret:
+            return https_fn.Response(
+                json.dumps({"success": False, "error": "Unauthorized webhook request"}),
+                status=401,
+                headers=response_headers,
+            )
+
+        payload = req.get_json(silent=True)
+        if payload is None:
+            return https_fn.Response(
+                json.dumps({"success": True, "received": 0, "processed": 0, "note": "No JSON body"}),
+                status=200,
+                headers=response_headers,
+            )
+
+        # Support common webhook shapes: dict, list, {"data":[...]}.
+        if isinstance(payload, list):
+            events = payload
+        elif isinstance(payload, dict):
+            if isinstance(payload.get("data"), list):
+                events = payload.get("data") or []
+            elif isinstance(payload.get("events"), list):
+                events = payload.get("events") or []
+            else:
+                events = [payload]
+        else:
+            events = []
+
+        db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+        db_path = os.path.abspath(db_path)
+        if not os.path.exists(db_path):
+            return https_fn.Response(
+                json.dumps({"success": False, "error": f"Database file not found at {db_path}"}),
+                status=404,
+                headers=response_headers,
+            )
+
+        from prediction.db import connect
+        conn = connect(db_path)
+        cur = conn.cursor()
+        _ensure_prediction_snapshot_table(conn)
+
+        predictor = get_predictor()
+        model_version = _get_live_model_version()
+
+        started_statuses = {
+            "LIVE", "IN PLAY", "1H", "2H", "3Q", "4Q", "HT", "ET", "P", "AET", "BREAK",
+            "1ST HALF", "2ND HALF",
+        }
+        finished_statuses = {
+            "FT", "FULL TIME", "FINISHED", "AFTER EXTRA TIME", "AET", "PEN", "PENALTIES",
+        }
+
+        processed = 0
+        snapshots_created = 0
+        snapshots_finalized = 0
+        errors = 0
+        error_samples: list[dict] = []
+
+        def _to_int(v: Any) -> Optional[int]:
+            try:
+                if v is None:
+                    return None
+                return int(v)
+            except Exception:
+                return None
+
+        def _first_match_id(obj: dict) -> Optional[int]:
+            candidates = [
+                obj.get("id"),
+                obj.get("event_id"),
+                (obj.get("game") or {}).get("id") if isinstance(obj.get("game"), dict) else None,
+                (obj.get("fixture") or {}).get("id") if isinstance(obj.get("fixture"), dict) else None,
+                (obj.get("match") or {}).get("id") if isinstance(obj.get("match"), dict) else None,
+            ]
+            for c in candidates:
+                val = _to_int(c)
+                if val is not None:
+                    return val
+            return None
+
+        def _extract_status_text(obj: dict) -> str:
+            status_obj = obj.get("status")
+            parts = []
+            if isinstance(status_obj, dict):
+                parts.append(str(status_obj.get("short") or ""))
+                parts.append(str(status_obj.get("long") or ""))
+            else:
+                parts.append(str(status_obj or ""))
+            game_obj = obj.get("game") if isinstance(obj.get("game"), dict) else {}
+            if isinstance(game_obj, dict):
+                game_status = game_obj.get("status")
+                if isinstance(game_status, dict):
+                    parts.append(str(game_status.get("short") or ""))
+                    parts.append(str(game_status.get("long") or ""))
+                else:
+                    parts.append(str(game_status or ""))
+            return " ".join(p for p in parts if p).strip().upper()
+
+        def _extract_scores(obj: dict) -> tuple[Optional[int], Optional[int]]:
+            # Prefer explicit top-level score structure.
+            score_obj = obj.get("scores")
+            if isinstance(score_obj, dict):
+                hs = _to_int(score_obj.get("home"))
+                aws = _to_int(score_obj.get("away"))
+                if hs is not None and aws is not None:
+                    return hs, aws
+                h_struct = score_obj.get("home")
+                a_struct = score_obj.get("away")
+                if isinstance(h_struct, dict) and isinstance(a_struct, dict):
+                    hs = _to_int(h_struct.get("total") or h_struct.get("points") or h_struct.get("score"))
+                    aws = _to_int(a_struct.get("total") or a_struct.get("points") or a_struct.get("score"))
+                    if hs is not None and aws is not None:
+                        return hs, aws
+            # Fallback common keys.
+            hs = _to_int(obj.get("home_score"))
+            aws = _to_int(obj.get("away_score"))
+            return hs, aws
+
+        def _extract_kickoff_iso(obj: dict) -> Optional[str]:
+            for v in [
+                obj.get("date"),
+                obj.get("date_event"),
+                obj.get("timestamp"),
+                (obj.get("game") or {}).get("date") if isinstance(obj.get("game"), dict) else None,
+            ]:
+                if not v:
+                    continue
+                try:
+                    raw = str(v).replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(raw)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    else:
+                        dt = dt.astimezone(timezone.utc)
+                    return dt.isoformat()
+                except Exception:
+                    continue
+            return None
+
+        for item in events:
+            if not isinstance(item, dict):
+                continue
+            try:
+                match_id = _first_match_id(item)
+                if match_id is None:
+                    continue
+
+                status_text = _extract_status_text(item)
+                home_score, away_score = _extract_scores(item)
+                kickoff_iso = _extract_kickoff_iso(item)
+
+                # Load current DB row details used by predictor/snapshot.
+                cur.execute(
+                    """
+                    SELECT
+                        e.id, e.league_id, e.date_event, e.timestamp, e.home_score, e.away_score,
+                        t1.name as home_team_name, t2.name as away_team_name
+                    FROM event e
+                    LEFT JOIN team t1 ON e.home_team_id = t1.id
+                    LEFT JOIN team t2 ON e.away_team_id = t2.id
+                    WHERE e.id = ?
+                    LIMIT 1
+                    """,
+                    (int(match_id),),
+                )
+                row = cur.fetchone()
+                if not row:
+                    # Unknown match in local DB; skip safely.
+                    continue
+
+                event_id, league_id_val, db_date_event, db_timestamp, db_home_score, db_away_score, home_team_name, away_team_name = row
+
+                # Update event score/status quickly from webhook payload.
+                if status_text:
+                    cur.execute("UPDATE event SET status = COALESCE(?, status) WHERE id = ?", (status_text, int(event_id)))
+                if kickoff_iso:
+                    cur.execute(
+                        "UPDATE event SET timestamp = COALESCE(?, timestamp), date_event = COALESCE(date_event, substr(?, 1, 10)) WHERE id = ?",
+                        (kickoff_iso, kickoff_iso, int(event_id)),
+                    )
+                if home_score is not None and away_score is not None:
+                    cur.execute(
+                        "UPDATE event SET home_score = ?, away_score = ? WHERE id = ?",
+                        (int(home_score), int(away_score), int(event_id)),
+                    )
+                    db_home_score, db_away_score = int(home_score), int(away_score)
+
+                # Refresh values from payload/DB for processing.
+                match_date_for_pred = str(db_date_event or (kickoff_iso[:10] if kickoff_iso else ""))
+
+                is_started = any(token in status_text for token in started_statuses)
+                is_finished = any(token in status_text for token in finished_statuses) or (
+                    db_home_score is not None and db_away_score is not None
+                )
+
+                if is_started and not is_finished:
+                    # Create snapshot once at start/live if missing.
+                    cur.execute(
+                        """
+                        SELECT 1 FROM prediction_snapshot
+                        WHERE match_id = ? AND model_version = ? AND snapshot_type = 'pre_kickoff_live'
+                        LIMIT 1
+                        """,
+                        (int(event_id), model_version),
+                    )
+                    if cur.fetchone() is None and home_team_name and away_team_name and league_id_val is not None and match_date_for_pred:
+                        pred = predictor.predict_match(
+                            home_team=str(home_team_name),
+                            away_team=str(away_team_name),
+                            league_id=int(league_id_val),
+                            match_date=str(match_date_for_pred),
+                            match_id=None,  # AI-only snapshot
+                        )
+                        _upsert_prediction_snapshot_row(
+                            conn,
+                            match_id=int(event_id),
+                            league_id=int(league_id_val),
+                            model_version=model_version,
+                            snapshot_type="pre_kickoff_live",
+                            predicted_at=datetime.now(timezone.utc).isoformat(),
+                            kickoff_at=kickoff_iso or (str(db_timestamp) if db_timestamp else None),
+                            home_team=str(home_team_name),
+                            away_team=str(away_team_name),
+                            predicted_winner=pred.get("predicted_winner"),
+                            predicted_home_score=float(pred.get("predicted_home_score")) if pred.get("predicted_home_score") is not None else None,
+                            predicted_away_score=float(pred.get("predicted_away_score")) if pred.get("predicted_away_score") is not None else None,
+                            confidence=float(pred.get("confidence")) if pred.get("confidence") is not None else None,
+                            home_win_prob=float(pred.get("home_win_prob")) if pred.get("home_win_prob") is not None else None,
+                            away_win_prob=float(pred.get("away_win_prob")) if pred.get("away_win_prob") is not None else None,
+                            actual_home_score=None,
+                            actual_away_score=None,
+                            actual_winner=None,
+                            prediction_correct=None,
+                            score_error=None,
+                            source_note="webhook_match_started",
+                        )
+                        snapshots_created += 1
+
+                if is_finished and db_home_score is not None and db_away_score is not None:
+                    # Finalize snapshot with actual outcomes.
+                    if db_home_score > db_away_score:
+                        actual_winner = "Home"
+                    elif db_away_score > db_home_score:
+                        actual_winner = "Away"
+                    else:
+                        actual_winner = "Draw"
+
+                    cur.execute(
+                        """
+                        SELECT predicted_home_score, predicted_away_score, predicted_winner
+                        FROM prediction_snapshot
+                        WHERE match_id = ? AND model_version = ? AND snapshot_type = 'pre_kickoff_live'
+                        LIMIT 1
+                        """,
+                        (int(event_id), model_version),
+                    )
+                    srow = cur.fetchone()
+                    if srow:
+                        pred_home, pred_away, pred_winner = srow
+                        prediction_correct = None
+                        if pred_winner in {"Home", "Away", "Draw"}:
+                            prediction_correct = 1 if pred_winner == actual_winner else 0
+                        score_error = None
+                        if pred_home is not None and pred_away is not None:
+                            score_error = abs(float(pred_home) - float(db_home_score)) + abs(float(pred_away) - float(db_away_score))
+                        cur.execute(
+                            """
+                            UPDATE prediction_snapshot
+                            SET actual_home_score = ?,
+                                actual_away_score = ?,
+                                actual_winner = ?,
+                                prediction_correct = ?,
+                                score_error = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE match_id = ? AND model_version = ? AND snapshot_type = 'pre_kickoff_live'
+                            """,
+                            (
+                                int(db_home_score),
+                                int(db_away_score),
+                                actual_winner,
+                                prediction_correct,
+                                score_error,
+                                int(event_id),
+                                model_version,
+                            ),
+                        )
+                        snapshots_finalized += 1
+
+                processed += 1
+            except Exception as item_error:
+                errors += 1
+                if len(error_samples) < 20:
+                    error_samples.append({"error": str(item_error), "raw": str(item)[:300]})
+
+        conn.commit()
+        conn.close()
+
+        return https_fn.Response(
+            json.dumps(
+                {
+                    "success": True,
+                    "received": len(events),
+                    "processed": processed,
+                    "snapshots_created": snapshots_created,
+                    "snapshots_finalized": snapshots_finalized,
+                    "errors": errors,
+                    "error_samples": error_samples,
+                }
+            ),
+            status=200,
+            headers=response_headers,
+        )
+    except Exception as e:
+        logger.error(f"apisports_rugby_webhook_http error: {e}")
+        return https_fn.Response(
+            json.dumps({"success": False, "error": str(e)}),
+            status=500,
+            headers=response_headers,
+        )
+
+
+@https_fn.on_request(timeout_sec=120, memory=1024)
 def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for historical predictions with explicit CORS support.
@@ -4286,6 +5171,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
     import sys
     import os
     from datetime import datetime
+    from time import perf_counter
     from collections import defaultdict
     
     logger = logging.getLogger(__name__)
@@ -4294,6 +5180,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
     logger.info("="*80)
     logger.info("=== get_historical_predictions_http CALLED ===")
     logger.info("="*80)
+    request_started_at = perf_counter()
     
     # Handle CORS preflight (match pattern used by other HTTP functions)
     if req.method == "OPTIONS":
@@ -4318,8 +5205,19 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         league_id = data.get('league_id')
         year = data.get('year')
         limit = data.get('limit')
+        offset = data.get('offset', 0)
+        try:
+            limit = int(limit) if limit is not None else 500
+        except Exception:
+            limit = 500
+        try:
+            offset = int(offset) if offset is not None else 0
+        except Exception:
+            offset = 0
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
         
-        logger.info(f"Request data: league_id={league_id}, year={year}, limit={limit}")
+        logger.info(f"Request data: league_id={league_id}, year={year}, limit={limit}, offset={offset}")
         
         # Get database path
         db_path = os.getenv("DB_PATH")
@@ -4365,6 +5263,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         # Connect to database
         conn = connect(db_path)
         cursor = conn.cursor()
+        _ensure_prediction_snapshot_table(conn)
         
         # If year is not provided, pick a sensible default year and return all available years
         # so the UI can switch years without loading everything at once.
@@ -4372,6 +5271,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         selected_year = None
         year_summary = {}
         try:
+            t0_years = perf_counter()
             year_query = """
             SELECT DISTINCT substr(e.date_event, 1, 4) AS yr
             FROM event e
@@ -4384,6 +5284,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             year_query += " ORDER BY yr DESC"
             cursor.execute(year_query, year_params)
             available_years = [r[0] for r in cursor.fetchall() if r and r[0]]
+            logger.info(f"[hist] available_years query completed in {(perf_counter() - t0_years) * 1000:.1f} ms (count={len(available_years)})")
         except Exception as e:
             logger.warning(f"Could not compute available years: {e}")
             available_years = []
@@ -4391,6 +5292,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         # Build a lightweight year summary (total matches vs completed matches).
         # This helps the UI explain why a year exists (scheduled games) but has 0 completed.
         try:
+            t0_summary = perf_counter()
             sum_sql = """
                 SELECT
                     substr(e.date_event, 1, 4) AS yr,
@@ -4416,6 +5318,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                     }
                 except Exception:
                     continue
+            logger.info(f"[hist] year_summary query completed in {(perf_counter() - t0_summary) * 1000:.1f} ms (years={len(year_summary)})")
         except Exception as e:
             logger.warning(f"Could not compute year summary: {e}")
             year_summary = {}
@@ -4436,8 +5339,264 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         else:
             selected_year = str(year)
 
+        # Fast path: serve immutable snapshot predictions if available.
+        model_version = _get_live_model_version()
+        snapshot_where = [
+            "e.home_score IS NOT NULL",
+            "e.away_score IS NOT NULL",
+            "e.date_event IS NOT NULL",
+            "date(e.date_event) <= date('now')",
+            "s.model_version = ?",
+        ]
+        snapshot_params: list[Any] = [model_version]
+        if league_id:
+            snapshot_where.append("e.league_id = ?")
+            snapshot_params.append(league_id)
+        if selected_year:
+            try:
+                yr = int(str(selected_year).strip()[:4])
+                prev_yr = str(yr - 1)
+                snapshot_where.append("(substr(e.date_event, 1, 4) = ? OR substr(e.date_event, 1, 4) = ?)")
+                snapshot_params.extend([str(yr), prev_yr])
+            except (ValueError, TypeError):
+                snapshot_where.append("substr(e.date_event, 1, 4) = ?")
+                snapshot_params.append(str(selected_year))
+
+        snapshot_filter_sql = " AND ".join(snapshot_where)
+        snapshot_count_sql = f"""
+            SELECT COUNT(1)
+            FROM prediction_snapshot s
+            JOIN event e ON e.id = s.match_id
+            WHERE {snapshot_filter_sql}
+        """
+        cursor.execute(snapshot_count_sql, snapshot_params)
+        snapshot_total_rows = int((cursor.fetchone() or [0])[0] or 0)
+        logger.info(
+            f"[hist] snapshot rows available={snapshot_total_rows} "
+            f"(model_version={model_version}, year={selected_year}, league_id={league_id})"
+        )
+
+        if snapshot_total_rows > 0:
+            snapshot_data_sql = f"""
+                SELECT
+                    e.id,
+                    e.league_id,
+                    l.name as league_name,
+                    e.date_event,
+                    e.timestamp,
+                    e.home_team_id,
+                    e.away_team_id,
+                    e.home_score,
+                    e.away_score,
+                    t1.name as home_team_name,
+                    t2.name as away_team_name,
+                    e.season,
+                    e.round,
+                    e.venue,
+                    e.status,
+                    s.predicted_winner,
+                    s.predicted_home_score,
+                    s.predicted_away_score,
+                    s.confidence,
+                    s.home_win_prob,
+                    s.away_win_prob,
+                    s.prediction_correct,
+                    s.score_error,
+                    s.predicted_at,
+                    s.snapshot_type
+                FROM prediction_snapshot s
+                JOIN event e ON e.id = s.match_id
+                LEFT JOIN league l ON e.league_id = l.id
+                LEFT JOIN team t1 ON e.home_team_id = t1.id
+                LEFT JOIN team t2 ON e.away_team_id = t2.id
+                WHERE {snapshot_filter_sql}
+                ORDER BY e.date_event ASC, e.league_id
+                LIMIT ? OFFSET ?
+            """
+            cursor.execute(snapshot_data_sql, [*snapshot_params, limit, offset])
+            snapshot_rows = cursor.fetchall()
+
+            matches_by_year_week = defaultdict(lambda: defaultdict(list))
+            all_matches = []
+            correct_predictions = 0
+            total_predictions = 0
+            score_errors: list[float] = []
+
+            for row in snapshot_rows:
+                (
+                    match_id,
+                    league_id_val,
+                    league_name,
+                    date_event,
+                    kickoff_ts,
+                    home_team_id,
+                    away_team_id,
+                    home_score,
+                    away_score,
+                    home_team_name,
+                    away_team_name,
+                    season,
+                    round_num,
+                    venue,
+                    status,
+                    predicted_winner,
+                    predicted_home_score,
+                    predicted_away_score,
+                    prediction_confidence,
+                    home_win_prob,
+                    away_win_prob,
+                    prediction_correct_raw,
+                    prediction_error,
+                    _predicted_at,
+                    _snapshot_type,
+                ) = row
+
+                if not home_team_name or not away_team_name or not date_event:
+                    continue
+
+                if home_score > away_score:
+                    actual_winner = "Home"
+                    actual_winner_team = home_team_name
+                elif away_score > home_score:
+                    actual_winner = "Away"
+                    actual_winner_team = away_team_name
+                else:
+                    actual_winner = "Draw"
+                    actual_winner_team = None
+
+                prediction_correct = None
+                if prediction_correct_raw is not None:
+                    prediction_correct = bool(int(prediction_correct_raw))
+                elif predicted_winner and predicted_winner != "Error":
+                    prediction_correct = (predicted_winner == actual_winner)
+
+                if prediction_correct is not None:
+                    total_predictions += 1
+                    if prediction_correct:
+                        correct_predictions += 1
+                if prediction_error is not None:
+                    try:
+                        score_errors.append(float(prediction_error))
+                    except Exception:
+                        pass
+
+                year = date_event[:4] if date_event else "Unknown"
+                try:
+                    round_key = str(int(round_num)) if round_num is not None else get_year_week_key(date_event)
+                except Exception:
+                    round_key = get_year_week_key(date_event)
+                week = get_week_number(date_event)
+
+                def _has_meaningful_time(v: Any) -> bool:
+                    try:
+                        s = str(v or "")
+                    except Exception:
+                        return False
+                    if "T" not in s:
+                        return False
+                    return ("T00:00" not in s)
+
+                kickoff_at = kickoff_ts if (kickoff_ts and _has_meaningful_time(kickoff_ts)) else None
+                status_norm = str(status or "").upper()
+                went_to_extra_time = ("AET" in status_norm) or ("EXTRA" in status_norm) or ("ET" in status_norm and "SET" not in status_norm)
+
+                match_data = {
+                    "match_id": match_id,
+                    "league_id": league_id_val,
+                    "league_name": league_name or f"League {league_id_val}",
+                    "date": date_event,
+                    "kickoff_at": kickoff_at,
+                    "went_to_extra_time": went_to_extra_time,
+                    "year": year,
+                    "week": week,
+                    "year_week": round_key,
+                    "season": season,
+                    "round": round_num,
+                    "venue": venue,
+                    "status": status,
+                    "home_team": home_team_name,
+                    "away_team": away_team_name,
+                    "home_team_id": home_team_id,
+                    "away_team_id": away_team_id,
+                    "actual_home_score": home_score,
+                    "actual_away_score": away_score,
+                    "actual_winner": actual_winner,
+                    "actual_winner_team": actual_winner_team,
+                    "predicted_home_score": predicted_home_score,
+                    "predicted_away_score": predicted_away_score,
+                    "predicted_winner": predicted_winner,
+                    "prediction_confidence": prediction_confidence,
+                    "prediction_error": prediction_error,
+                    "prediction_correct": prediction_correct,
+                    "score_difference": abs(home_score - away_score) if home_score is not None and away_score is not None else None,
+                    "predicted_score_difference": abs(predicted_home_score - predicted_away_score) if predicted_home_score is not None and predicted_away_score is not None else None,
+                    "home_win_prob": home_win_prob,
+                    "away_win_prob": away_win_prob,
+                }
+
+                matches_by_year_week[year][round_key].append(match_data)
+                all_matches.append(match_data)
+
+            accuracy = (correct_predictions / total_predictions * 100) if total_predictions > 0 else 0
+            avg_score_error = (sum(score_errors) / len(score_errors)) if score_errors else None
+
+            result = {
+                "available_years": available_years,
+                "selected_year": selected_year,
+                "year_summary": year_summary,
+                "matches_by_year_week": {
+                    year_key: {week_key: matches for week_key, matches in weeks.items()}
+                    for year_key, weeks in matches_by_year_week.items()
+                },
+                "all_matches": all_matches,
+                "statistics": {
+                    "total_matches": len(all_matches),
+                    "total_predictions": total_predictions,
+                    "correct_predictions": correct_predictions,
+                    "accuracy_percentage": round(accuracy, 2),
+                    "average_score_error": round(avg_score_error, 2) if avg_score_error is not None else None,
+                },
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "total_rows": snapshot_total_rows,
+                    "returned_rows": len(snapshot_rows),
+                    "has_more": (offset + len(snapshot_rows)) < snapshot_total_rows,
+                    "next_offset": (offset + len(snapshot_rows)) if (offset + len(snapshot_rows)) < snapshot_total_rows else None,
+                },
+                "by_league": {},
+                "debug": {
+                    "data_source": "prediction_snapshot",
+                    "model_version": model_version,
+                },
+            }
+
+            leagues_dict = defaultdict(list)
+            for match in all_matches:
+                leagues_dict[match["league_id"]].append(match)
+            for league_id_val, league_matches in leagues_dict.items():
+                league_correct = sum(1 for m in league_matches if m.get("prediction_correct") is True)
+                league_total = sum(1 for m in league_matches if m.get("prediction_correct") is not None)
+                league_accuracy = (league_correct / league_total * 100) if league_total > 0 else 0
+                league_losses = max(0, league_total - league_correct)
+                league_errors = [float(m.get("prediction_error")) for m in league_matches if m.get("prediction_error") is not None]
+                league_mae = (sum(league_errors) / len(league_errors)) if league_errors else None
+                result["by_league"][league_id_val] = {
+                    "league_name": league_matches[0]["league_name"] if league_matches else f"League {league_id_val}",
+                    "total_matches": len(league_matches),
+                    "total_predictions": league_total,
+                    "correct_predictions": league_correct,
+                    "incorrect_predictions": league_losses,
+                    "accuracy_percentage": round(league_accuracy, 2),
+                    "average_score_error": round(league_mae, 2) if league_mae is not None else None,
+                }
+
+            conn.close()
+            logger.info("[hist] served from prediction_snapshot table")
+            return https_fn.Response(json.dumps(result), status=200, headers=response_headers)
+
         # Query for completed matches with scores
-        query = """
+        base_query = """
         SELECT 
             e.id,
             e.league_id,
@@ -4463,30 +5622,34 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         AND e.date_event IS NOT NULL
         AND date(e.date_event) <= date('now')
         """
-        
+
         params = []
         if league_id:
-            query += " AND e.league_id = ?"
+            base_query += " AND e.league_id = ?"
             params.append(league_id)
 
         if selected_year:
             try:
                 yr = int(str(selected_year).strip()[:4])
                 prev_yr = str(yr - 1)
-                query += " AND (substr(e.date_event, 1, 4) = ? OR substr(e.date_event, 1, 4) = ?)"
+                base_query += " AND (substr(e.date_event, 1, 4) = ? OR substr(e.date_event, 1, 4) = ?)"
                 params.extend([str(yr), prev_yr])
             except (ValueError, TypeError):
-                query += " AND substr(e.date_event, 1, 4) = ?"
+                base_query += " AND substr(e.date_event, 1, 4) = ?"
                 params.append(str(selected_year))
-        
-        query += " ORDER BY e.date_event ASC, e.league_id"
-        
-        if limit:
-            query += " LIMIT ?"
-            params.append(limit)
-        
-        cursor.execute(query, params)
+
+        count_query = f"SELECT COUNT(1) FROM ({base_query}) q"
+        t0_count = perf_counter()
+        cursor.execute(count_query, params)
+        total_rows = int((cursor.fetchone() or [0])[0] or 0)
+        logger.info(f"[hist] count query completed in {(perf_counter() - t0_count) * 1000:.1f} ms (rows={total_rows}, limit={limit}, offset={offset})")
+
+        query = base_query + " ORDER BY e.date_event ASC, e.league_id LIMIT ? OFFSET ?"
+        query_params = [*params, limit, offset]
+        t0_data = perf_counter()
+        cursor.execute(query, query_params)
         results = cursor.fetchall()
+        logger.info(f"[hist] data query completed in {(perf_counter() - t0_data) * 1000:.1f} ms (returned={len(results)})")
         
         # Compute league round for matches missing round (season-based: Week 1 = first week of season)
         def _compute_league_rounds(rows):
@@ -4528,6 +5691,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         
         logger.info(f"Processing {len(results)} completed matches...")
         
+        t0_process = perf_counter()
         for row in results:
             match_id, league_id_val, league_name, date_event, kickoff_ts, home_team_id, away_team_id, \
             home_score, away_score, home_team_name, away_team_name, season, round_num, \
@@ -4561,7 +5725,8 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                         home_team=home_team_name,
                         away_team=away_team_name,
                         league_id=league_id_val,
-                        match_date=date_event
+                        match_date=date_event,
+                        match_id=match_id,
                     )
                     
                     predicted_home_score = pred.get('predicted_home_score', 0)
@@ -4649,6 +5814,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             matches_by_year_week[year][year_week_key].append(match_data)
             if not selected_year or year == selected_year:
                 all_matches.append(match_data)
+        logger.info(f"[hist] prediction/mapping loop completed in {(perf_counter() - t0_process) * 1000:.1f} ms")
         
         conn.close()
         
@@ -4676,6 +5842,14 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 'accuracy_percentage': round(accuracy, 2),
                 'average_score_error': round(avg_score_error, 2) if avg_score_error else None,
             },
+            'pagination': {
+                'limit': limit,
+                'offset': offset,
+                'total_rows': total_rows,
+                'returned_rows': len(results),
+                'has_more': (offset + len(results)) < total_rows,
+                'next_offset': (offset + len(results)) if (offset + len(results)) < total_rows else None,
+            },
             'by_league': {}
         }
         
@@ -4688,18 +5862,24 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             league_correct = sum(1 for m in league_matches if m.get('prediction_correct') is True)
             league_total = sum(1 for m in league_matches if m.get('prediction_correct') is not None)
             league_accuracy = (league_correct / league_total * 100) if league_total > 0 else 0
+            league_losses = max(0, league_total - league_correct)
+            league_errors = [float(m.get('prediction_error')) for m in league_matches if m.get('prediction_error') is not None]
+            league_mae = (sum(league_errors) / len(league_errors)) if league_errors else None
             
             result['by_league'][league_id_val] = {
                 'league_name': league_matches[0]['league_name'] if league_matches else f"League {league_id_val}",
                 'total_matches': len(league_matches),
                 'total_predictions': league_total,
                 'correct_predictions': league_correct,
+                'incorrect_predictions': league_losses,
                 'accuracy_percentage': round(league_accuracy, 2),
+                'average_score_error': round(league_mae, 2) if league_mae is not None else None,
             }
         
         logger.info(f"Retrieved {result['statistics']['total_matches']} matches")
         logger.info(f"Generated {result['statistics']['total_predictions']} predictions")
         logger.info(f"Accuracy: {result['statistics'].get('accuracy_percentage', 0):.2f}%")
+        logger.info(f"[hist] total endpoint time {(perf_counter() - request_started_at) * 1000:.1f} ms")
         
         # Convert any datetime objects to strings for JSON serialization
         def convert_for_json(obj):

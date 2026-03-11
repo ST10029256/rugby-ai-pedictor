@@ -9,8 +9,10 @@ import pickle
 import numpy as np
 import pandas as pd
 import os
+import json
 import logging
 import hashlib
+from pathlib import Path
 from typing import Dict, Optional, Tuple, Any
 from prediction.features import build_feature_table, FeatureConfig
 from prediction.sportdevs_client import SportDevsClient, extract_odds_features
@@ -151,32 +153,43 @@ class HybridPredictor:
     
     def get_bookmaker_prediction(self, match_id: int) -> Dict[str, Any]:
         """Get prediction from bookmaker odds"""
-        
-        # For now, simulate realistic bookmaker odds based on match context
-        # This avoids API rate limiting while providing useful data
-        
-        # Get some context about the match to make realistic odds
+        if not match_id:
+            return {
+                'home_win_prob': 0.5,
+                'away_win_prob': 0.5,
+                'draw_prob': 0.0,
+                'confidence': 0.5,
+                'bookmaker_count': 0,
+            }
         try:
-            # Use a simple heuristic: if match_id is even, slightly favor home team
-            # This creates realistic variation without API calls
-            if match_id % 2 == 0:
-                home_win_prob = 0.52  # Slight home advantage
-                confidence = 0.65
-                bookmaker_count = 8
-            else:
-                home_win_prob = 0.48  # Slight away advantage
-                confidence = 0.62
-                bookmaker_count = 6
-        except:
-            # Fallback to neutral
-            home_win_prob = 0.5
-            confidence = 0.6
-            bookmaker_count = 5
-        
+            odds_data = self.sportdevs_client.get_match_odds(int(match_id))
+            odds_features = extract_odds_features(odds_data)
+            bookmaker_count = int(odds_features.get('bookmaker_count', 0) or 0)
+            if bookmaker_count <= 0:
+                return {
+                    'home_win_prob': 0.5,
+                    'away_win_prob': 0.5,
+                    'draw_prob': 0.0,
+                    'confidence': 0.5,
+                    'bookmaker_count': 0,
+                }
+            home_win_prob = float(odds_features.get('home_win_probability', 0.5))
+            away_win_prob = float(odds_features.get('away_win_probability', 0.5))
+            draw_prob = float(odds_features.get('draw_probability', 0.0))
+            confidence = float(odds_features.get('odds_confidence', 0.5))
+        except Exception:
+            return {
+                'home_win_prob': 0.5,
+                'away_win_prob': 0.5,
+                'draw_prob': 0.0,
+                'confidence': 0.5,
+                'bookmaker_count': 0,
+            }
+
         return {
             'home_win_prob': home_win_prob,
-            'away_win_prob': 1.0 - home_win_prob,
-            'draw_prob': 0.0,
+            'away_win_prob': away_win_prob,
+            'draw_prob': draw_prob,
             'confidence': confidence,
             'bookmaker_count': bookmaker_count
         }
@@ -472,6 +485,12 @@ class HybridPredictor:
             'confidence': prediction.get('hybrid_confidence', prediction.get('confidence', 0.5)),
             'home_win_prob': home_win_prob,
             'away_win_prob': 1.0 - home_win_prob,
+            'prediction_type': 'Hybrid AI + Live Odds' if prediction.get('method') == 'hybrid' else 'AI Only (No Odds)',
+            'ai_home_win_prob': float(prediction.get('ai_prediction', {}).get('home_win_prob', home_win_prob)),
+            'hybrid_home_win_prob': float(prediction.get('hybrid_home_win_prob', home_win_prob)),
+            'bookmaker_home_win_prob': float(prediction.get('bookmaker_prediction', {}).get('home_win_prob', 0.5)),
+            'bookmaker_count': int(prediction.get('bookmaker_prediction', {}).get('bookmaker_count', 0) or 0),
+            'bookmaker_confidence': float(prediction.get('bookmaker_prediction', {}).get('confidence', 0.5)),
             'additional_metrics': {
                 'home_advantage': 0.0,  # Could be calculated from features
                 'form_difference': 0.0,  # Could be calculated from features
@@ -505,19 +524,60 @@ class MultiLeaguePredictor:
                 "or pass storage_bucket parameter. Models are loaded from Cloud Storage only."
             )
         self.sportdevs_api_key = sportdevs_api_key or os.getenv('SPORTDEVS_API_KEY', '')
-        self._predictors: Dict[int, HybridPredictor] = {}
+        self._predictors: Dict[Tuple[str, int], Any] = {}
+
+    @staticmethod
+    def _load_champion_map() -> Dict[str, str]:
+        raw_json = str(os.getenv("LIVE_MODEL_FAMILY_BY_LEAGUE_JSON", "")).strip()
+        if raw_json:
+            try:
+                data = json.loads(raw_json)
+                return {str(k): str(v).strip().lower() for k, v in (data or {}).items()}
+            except Exception as e:
+                logger.warning("Failed to parse LIVE_MODEL_FAMILY_BY_LEAGUE_JSON: %s", e)
+        file_override = str(os.getenv("LIVE_MODEL_CHAMPIONS_FILE", "")).strip()
+        candidate_paths = []
+        if file_override:
+            candidate_paths.append(Path(file_override))
+        candidate_paths.append(Path(__file__).resolve().parents[1] / "league_model_champions.json")
+        candidate_paths.append(Path(__file__).resolve().parents[2] / "artifacts" / "league_model_champions.json")
+        for path in candidate_paths:
+            try:
+                if not path.exists():
+                    continue
+                data = json.loads(path.read_text(encoding="utf-8"))
+                league_map = data.get("model_family_by_league") if isinstance(data, dict) else None
+                if isinstance(league_map, dict):
+                    return {str(k): str(v).strip().lower() for k, v in league_map.items()}
+            except Exception as e:
+                logger.warning("Failed to read league champion map from %s: %s", path, e)
+        return {}
+
+    def _requested_model_family(self, league_id: int) -> str:
+        family = str(os.getenv("LIVE_MODEL_FAMILY", "v4")).strip().lower()
+        if family in {"v4", "v5"}:
+            return family
+        if family == "champion":
+            champion_map = self._load_champion_map()
+            chosen = champion_map.get(str(int(league_id)), "v5")
+            if chosen in {"v4", "v5"}:
+                return chosen
+            return "v5"
+        return "v4"
     
     def _get_predictor(self, league_id: int) -> HybridPredictor:
         """Get or create predictor for a specific league"""
         import logging
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG)
-        
-        logger.info(f"=== _get_predictor called for league {league_id} ===")
-        
-        if league_id in self._predictors:
-            logger.info(f"✅ Using cached predictor for league {league_id}")
-            return self._predictors[league_id]
+
+        requested_family = self._requested_model_family(league_id)
+        cache_key = (requested_family, int(league_id))
+        logger.info(f"=== _get_predictor called for league {league_id} family={requested_family} ===")
+
+        if cache_key in self._predictors:
+            logger.info(f"✅ Using cached predictor for league {league_id} family={requested_family}")
+            return self._predictors[cache_key]
         
         logger.info(f"Creating new predictor for league {league_id}")
         logger.info(f"storage_bucket={self.storage_bucket}, db_path={self.db_path}")
@@ -531,6 +591,60 @@ class MultiLeaguePredictor:
             logger.error(f"❌ {error_msg}")
             raise ValueError(error_msg)
         
+        runtime_families = [requested_family]
+        if requested_family == "v5":
+            runtime_families.append("v4")
+
+        for runtime_family in runtime_families:
+            try:
+                if runtime_family == "v5":
+                    from .storage_loader import load_v5_assets_from_storage
+                    from .v5_runtime import V5RuntimePredictor
+
+                    runtime_assets = load_v5_assets_from_storage(
+                        league_id=league_id,
+                        bucket_name=self.storage_bucket,
+                    )
+                    if runtime_assets:
+                        predictor = V5RuntimePredictor(
+                            v5_assets=runtime_assets,
+                            db_path=self.db_path,
+                            sportdevs_api_key=self.sportdevs_api_key,
+                        )
+                        logger.info(f"✅ V5RuntimePredictor initialized for league {league_id}")
+                        self._predictors[cache_key] = predictor
+                        return predictor
+                else:
+                    from .storage_loader import load_v4_assets_from_storage
+                    from .v4_runtime import V4RuntimePredictor
+
+                    runtime_assets = load_v4_assets_from_storage(
+                        league_id=league_id,
+                        bucket_name=self.storage_bucket,
+                    )
+                    if runtime_assets:
+                        predictor = V4RuntimePredictor(
+                            v4_assets=runtime_assets,
+                            db_path=self.db_path,
+                            sportdevs_api_key=self.sportdevs_api_key,
+                        )
+                        logger.info(f"✅ V4RuntimePredictor initialized for league {league_id}")
+                        self._predictors[cache_key] = predictor
+                        return predictor
+                logger.warning(
+                    "No %s runtime assets found for league %s; trying next fallback.",
+                    runtime_family.upper(),
+                    league_id,
+                )
+            except Exception as runtime_error:
+                logger.warning(
+                    "%s runtime path failed for league %s: %s",
+                    runtime_family.upper(),
+                    league_id,
+                    runtime_error,
+                )
+
+        # Fallback path (legacy .pkl models).
         try:
             from .storage_loader import load_model_from_storage
             logger.info("storage_loader imported, calling load_model_from_storage...")
@@ -547,24 +661,23 @@ class MultiLeaguePredictor:
             logger.error(f"❌ {error_msg}")
             raise ImportError(error_msg) from import_err
         except FileNotFoundError as fnf_err:
-            # Preserve the original error message from storage_loader
             logger.error(f"❌ FileNotFoundError from storage_loader: {fnf_err}")
             raise FileNotFoundError(str(fnf_err)) from fnf_err
         except Exception as e:
             error_msg = f"Error loading model for league {league_id} from Cloud Storage: {e}"
             logger.error(f"❌ {error_msg}", exc_info=True)
             raise RuntimeError(error_msg) from e
-        
+
         if not model_path:
             error_msg = f"Model path is None for league {league_id}"
             logger.error(f"❌ {error_msg}")
             raise FileNotFoundError(error_msg)
-        
+
         logger.info(f"Initializing HybridPredictor with model_path={model_path}")
         try:
             predictor = HybridPredictor(model_path, self.sportdevs_api_key, self.db_path)
             logger.info(f"✅ HybridPredictor initialized successfully for league {league_id}")
-            self._predictors[league_id] = predictor
+            self._predictors[cache_key] = predictor
             return predictor
         except Exception as e:
             logger.error(f"❌ Failed to initialize HybridPredictor: {e}", exc_info=True)

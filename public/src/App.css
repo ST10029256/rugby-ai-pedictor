@@ -119,24 +119,24 @@ video,
   font-size: 0.875rem !important; /* 14px instead of default 16px */
 }
 
-/* Desktop only: Make drawer sticky and main content scrollable */
+/* Desktop only: keep control panel fixed while main content scrolls */
 @media (min-width: 769px) {
-  /* Make drawer sticky on desktop - only for permanent drawers */
+  /* Keep permanent control panel pinned to viewport */
   .MuiDrawer-root[class*="MuiDrawer-permanent"] .MuiDrawer-paper,
   .MuiDrawer-root:not([class*="MuiDrawer-temporary"]) .MuiDrawer-paper {
-    position: sticky !important;
+    position: fixed !important;
     top: 0 !important;
+    left: 0 !important;
     height: 100vh !important;
     max-height: 100vh !important;
   }
   
-  /* Ensure main content scrolls independently on desktop */
+  /* Use full-page document scrolling on desktop */
   main {
-    overflow-y: auto !important;
+    overflow-y: visible !important;
     overflow-x: hidden !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
-    -webkit-overflow-scrolling: touch; /* Smooth scrolling */
+    height: auto !important;
+    max-height: none !important;
   }
   
   /* Fix Select League input width on desktop - prevent expansion */
@@ -308,27 +308,40 @@ video,
   }
 }
 
+/* Full-page scroll mode for top-level app views */
+html.news-page-scroll,
+body.news-page-scroll,
+#root.news-page-scroll {
+  overflow-y: auto !important;
+  height: auto !important;
+}
+
+.main-news-page-scroll {
+  overflow-y: visible !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
 /* Allow menu to be visible but constrained */
 .MuiDrawer-paper .MuiMenu-root {
   overflow: visible !important;
 }
 
 .MuiDrawer-paper .MuiMenu-root {
-  z-index: 1400 !important;
+  z-index: 2300 !important;
 }
 
 .MuiDrawer-paper .MuiPaper-root.MuiMenu-paper {
-  z-index: 1400 !important;
+  z-index: 2301 !important;
 }
 
 /* Ensure menu list doesn't get clipped */
 .MuiMenu-list {
-  z-index: 1400 !important;
+  z-index: 2301 !important;
 }
 
-/* Constrain menu to drawer width and prevent overflow into main content */
-.MuiDrawer-paper .MuiPaper-root.MuiMenu-paper,
-.MuiMenu-paper {
+/* Constrain drawer menu to drawer width only */
+.MuiDrawer-paper .MuiPaper-root.MuiMenu-paper {
   max-width: 280px !important; /* Never exceed control panel width */
   width: 100% !important;
   box-sizing: border-box !important;

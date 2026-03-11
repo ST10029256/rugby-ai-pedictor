@@ -1,0 +1,161 @@
+2026-02-11 17:12:12,068 - INFO - 
+============================================================
+2026-02-11 17:12:12,068 - INFO - Starting Firestore Sync (Duplicate-Aware)
+2026-02-11 17:12:12,068 - INFO - ============================================================
+2026-02-11 17:12:12,068 - INFO - Fetching existing match IDs from Firestore...
+2026-02-11 17:12:15,471 - INFO - Found 2895 existing matches in Firestore
+2026-02-11 17:12:15,471 - INFO - Fetching existing team IDs from Firestore...
+2026-02-11 17:12:15,832 - INFO - Found 180 existing teams in Firestore
+2026-02-11 17:12:56,927 - INFO - 
+============================================================
+2026-02-11 17:12:56,928 - INFO - Sync Complete!
+2026-02-11 17:12:56,928 - INFO -    Total synced: 5
+2026-02-11 17:12:56,929 - INFO -    Total updated: 220
+2026-02-11 17:12:56,929 - INFO -    Duration: 44.9s
+2026-02-11 17:12:56,929 - INFO - ============================================================
+2026-02-11 17:29:23,937 - INFO - 
+============================================================
+2026-02-11 17:29:23,937 - INFO - Starting Firestore Sync (Duplicate-Aware)
+2026-02-11 17:29:23,937 - INFO - ============================================================
+2026-02-11 17:29:23,937 - INFO - Fetching existing match IDs from Firestore...
+2026-02-11 17:29:27,913 - INFO - Found 2895 existing matches in Firestore
+2026-02-11 17:29:27,915 - INFO - Fetching existing team IDs from Firestore...
+2026-02-11 17:29:28,266 - INFO - Found 180 existing teams in Firestore
+2026-02-11 17:30:07,161 - INFO - 
+============================================================
+2026-02-11 17:30:07,161 - INFO - Sync Complete!
+2026-02-11 17:30:07,161 - INFO -    Total synced: 5
+2026-02-11 17:30:07,162 - INFO -    Total updated: 24
+2026-02-11 17:30:07,162 - INFO -    Duration: 43.2s
+2026-02-11 17:30:07,162 - INFO - ============================================================
+2026-02-22 19:57:07,382 - INFO - 
+============================================================
+2026-02-22 19:57:07,382 - INFO - Starting Firestore Sync (Duplicate-Aware)
+2026-02-22 19:57:07,382 - INFO - ============================================================
+2026-02-22 19:57:07,382 - INFO - Fetching existing match IDs from Firestore...
+2026-02-22 19:57:09,634 - INFO - Found 2906 existing matches in Firestore
+2026-02-22 19:57:09,635 - INFO - Fetching existing team IDs from Firestore...
+2026-02-22 19:57:09,875 - INFO - Found 180 existing teams in Firestore
+2026-02-22 19:57:52,368 - INFO - 
+============================================================
+2026-02-22 19:57:52,369 - INFO - Sync Complete!
+2026-02-22 19:57:52,369 - INFO -    Total synced: 5
+2026-02-22 19:57:52,369 - INFO -    Total updated: 144
+2026-02-22 19:57:52,370 - INFO -    Duration: 45.0s
+2026-02-22 19:57:52,370 - INFO - ============================================================
+2026-03-01 18:38:23,804 - INFO - [OK] Connected to SQLite database: data.sqlite
+2026-03-01 18:38:26,843 - INFO - [OK] Connected to Firestore project: rugby-ai-61fd0
+2026-03-01 18:38:26,843 - INFO - 
+============================================================
+2026-03-01 18:38:26,843 - INFO - Starting Firestore Sync (Duplicate-Aware)
+2026-03-01 18:38:26,843 - INFO - ============================================================
+2026-03-01 18:38:26,843 - INFO - Fetching existing match IDs from Firestore...
+2026-03-01 18:38:29,435 - INFO - Found 2906 existing matches in Firestore
+2026-03-01 18:38:29,435 - INFO - Fetching existing team IDs from Firestore...
+2026-03-01 18:38:29,655 - INFO - Found 180 existing teams in Firestore
+2026-03-01 18:38:29,656 - INFO - 
+Syncing leagues...
+2026-03-01 18:38:30,635 - INFO - [OK] Leagues: 5 synced
+2026-03-01 18:38:30,635 - INFO - 
+Syncing teams...
+2026-03-01 18:38:30,636 - INFO - [OK] Teams: 0 synced, 149 already exist
+2026-03-01 18:38:30,636 - INFO - 
+Syncing matches...
+2026-03-01 18:38:46,019 - INFO -   Synced 208 new, updated 292 matches...
+2026-03-01 18:38:50,423 - INFO -   Synced 470 new, updated 530 matches...
+2026-03-01 18:39:26,529 - INFO - [OK] Matches: 709 new, 707 updated, 2199 skipped
+2026-03-01 18:39:26,530 - INFO - 
+============================================================
+2026-03-01 18:39:26,530 - INFO - Sync Complete!
+2026-03-01 18:39:26,530 - INFO -    Total synced: 714
+2026-03-01 18:39:26,530 - INFO -    Total updated: 707
+2026-03-01 18:39:26,530 - INFO -    Duration: 59.7s
+2026-03-01 18:39:26,530 - INFO - ============================================================
+2026-03-03 10:14:33,867 - INFO - [OK] Connected to SQLite database: data.sqlite
+2026-03-03 10:14:39,070 - INFO - [OK] Connected to Firestore project: rugby-ai-61fd0
+2026-03-03 10:14:39,070 - INFO - 
+============================================================
+2026-03-03 10:14:39,070 - INFO - Starting Firestore Sync (Duplicate-Aware)
+2026-03-03 10:14:39,070 - INFO - ============================================================
+2026-03-03 10:14:39,071 - INFO - Fetching existing match IDs from Firestore...
+2026-03-03 10:14:42,071 - INFO - Found 3615 existing matches in Firestore
+2026-03-03 10:14:42,072 - INFO - Fetching existing team IDs from Firestore...
+2026-03-03 10:14:42,591 - INFO - Found 180 existing teams in Firestore
+2026-03-03 10:14:42,591 - INFO - 
+Syncing leagues...
+2026-03-03 10:14:43,230 - INFO - [OK] Leagues: 5 synced
+2026-03-03 10:14:43,230 - INFO - 
+Syncing teams...
+2026-03-03 10:14:43,231 - INFO - [OK] Teams: 0 synced, 149 already exist
+2026-03-03 10:14:43,231 - INFO - 
+Syncing matches...
+2026-03-03 10:15:21,299 - INFO - [OK] Matches: 0 new, 35 updated, 2871 skipped
+2026-03-03 10:15:21,300 - INFO - 
+============================================================
+2026-03-03 10:15:21,300 - INFO - Sync Complete!
+2026-03-03 10:15:21,300 - INFO -    Total synced: 5
+2026-03-03 10:15:21,300 - INFO -    Total updated: 35
+2026-03-03 10:15:21,301 - INFO -    Duration: 42.2s
+2026-03-03 10:15:21,301 - INFO - ============================================================
+2026-03-03 20:32:02,091 - INFO - [OK] Connected to SQLite database: data.sqlite
+2026-03-03 20:32:07,002 - INFO - [OK] Connected to Firestore project: rugby-ai-61fd0
+2026-03-03 20:32:07,003 - INFO - 
+============================================================
+2026-03-03 20:32:07,003 - INFO - Starting Firestore Sync (Duplicate-Aware)
+2026-03-03 20:32:07,003 - INFO - ============================================================
+2026-03-03 20:32:07,003 - INFO - Fetching existing match IDs from Firestore...
+2026-03-03 20:32:10,988 - INFO - Found 3615 existing matches in Firestore
+2026-03-03 20:32:10,988 - INFO - Fetching existing team IDs from Firestore...
+2026-03-03 20:32:11,367 - INFO - Found 180 existing teams in Firestore
+2026-03-03 20:32:11,367 - INFO - 
+Syncing leagues...
+2026-03-03 20:32:12,313 - INFO - [OK] Leagues: 5 synced
+2026-03-03 20:32:12,314 - INFO - 
+Syncing teams...
+2026-03-03 20:32:12,315 - INFO - [OK] Teams: 0 synced, 149 already exist
+2026-03-03 20:32:12,315 - INFO - 
+Syncing matches...
+2026-03-03 20:33:21,685 - INFO - [OK] Matches: 0 new, 7 updated, 2892 skipped
+2026-03-03 20:33:21,686 - INFO - 
+============================================================
+2026-03-03 20:33:21,687 - INFO - Sync Complete!
+2026-03-03 20:33:21,687 - INFO -    Total synced: 5
+2026-03-03 20:33:21,687 - INFO -    Total updated: 7
+2026-03-03 20:33:21,687 - INFO -    Duration: 74.7s
+2026-03-03 20:33:21,687 - INFO - ============================================================
+2026-03-09 17:54:32,244 - INFO - 
+============================================================
+2026-03-09 17:54:32,244 - INFO - Starting Firestore Sync (Duplicate-Aware)
+2026-03-09 17:54:32,244 - INFO - ============================================================
+2026-03-09 17:54:32,244 - INFO - Fetching existing match IDs from Firestore...
+2026-03-09 17:54:35,351 - INFO - Found 3615 existing matches in Firestore
+2026-03-09 17:54:35,352 - INFO - Fetching existing team IDs from Firestore...
+2026-03-09 17:54:35,602 - INFO - Found 180 existing teams in Firestore
+2026-03-09 17:54:37,059 - INFO -   Synced 500 new, updated 0 matches...
+2026-03-09 17:54:38,246 - INFO -   Synced 1000 new, updated 0 matches...
+2026-03-09 17:54:39,155 - INFO -   Synced 1500 new, updated 0 matches...
+2026-03-09 17:54:39,969 - INFO -   Synced 2000 new, updated 0 matches...
+2026-03-09 17:54:40,958 - INFO -   Synced 2500 new, updated 0 matches...
+2026-03-09 17:54:41,974 - INFO -   Synced 3000 new, updated 0 matches...
+2026-03-09 17:54:42,913 - INFO -   Synced 3500 new, updated 0 matches...
+2026-03-09 17:54:43,832 - INFO -   Synced 4000 new, updated 0 matches...
+2026-03-09 17:54:44,693 - INFO -   Synced 4500 new, updated 0 matches...
+2026-03-09 17:54:45,692 - INFO -   Synced 5000 new, updated 0 matches...
+2026-03-09 17:54:46,684 - INFO -   Synced 5500 new, updated 0 matches...
+2026-03-09 17:54:47,504 - INFO -   Synced 6000 new, updated 0 matches...
+2026-03-09 17:54:48,293 - INFO -   Synced 6500 new, updated 0 matches...
+2026-03-09 17:54:49,152 - INFO -   Synced 7000 new, updated 0 matches...
+2026-03-09 17:54:50,028 - INFO -   Synced 7500 new, updated 0 matches...
+2026-03-09 17:54:51,446 - INFO -   Synced 8000 new, updated 0 matches...
+2026-03-09 17:54:54,723 - INFO -   Synced 8500 new, updated 0 matches...
+2026-03-09 17:54:57,884 - INFO -   Synced 9000 new, updated 0 matches...
+2026-03-09 17:55:01,953 - INFO -   Synced 9500 new, updated 0 matches...
+2026-03-09 17:55:05,042 - INFO -   Synced 10000 new, updated 0 matches...
+2026-03-09 17:55:09,256 - INFO -   Synced 10500 new, updated 0 matches...
+2026-03-09 17:55:12,145 - INFO - 
+============================================================
+2026-03-09 17:55:12,145 - INFO - Sync Complete!
+2026-03-09 17:55:12,145 - INFO -    Total synced: 10884
+2026-03-09 17:55:12,145 - INFO -    Total updated: 0
+2026-03-09 17:55:12,145 - INFO -    Duration: 39.9s
+2026-03-09 17:55:12,145 - INFO - ============================================================

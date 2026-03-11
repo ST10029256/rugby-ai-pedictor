@@ -31,6 +31,11 @@ class NewsItem:
     clickable_stats: Optional[List[Dict[str, str]]] = None  # Stats with explanations
     source_url: Optional[str] = None  # URL to original news source
     image_url: Optional[str] = None  # News image/thumbnail
+    video_url: Optional[str] = None  # Direct playable video URL when available
+    author_name: Optional[str] = None
+    author_handle: Optional[str] = None
+    author_avatar: Optional[str] = None
+    author_verified: Optional[bool] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -38,6 +43,8 @@ class NewsItem:
 
 class NewsService:
     """Service for generating AI-powered rugby news"""
+    URC_LEAGUE_ID = 4446
+    URC_OFFICIAL_X_HANDLE = "URCOfficial"
     
     def __init__(self, db_path: str, predictor=None, sportdevs_client=None, sportsdb_client=None, social_media_fetcher=None):
         self.db_path = db_path
@@ -94,7 +101,8 @@ class NewsService:
         return news_items
     
     def fetch_social_media_news(self, followed_teams: Optional[List[int]] = None,
-                                limit: int = 10) -> List[NewsItem]:
+                                limit: int = 10,
+                                league_id: Optional[int] = None) -> List[NewsItem]:
         """Fetch social media posts from X/Instagram/Facebook and convert to NewsItems"""
         news_items = []
         
@@ -109,7 +117,8 @@ class NewsService:
             conn = self._get_db_connection()
             cursor = conn.cursor()
             
-            # Get team names for followed teams
+            # Get team names for followed teams.
+            # If none are followed but league_id is provided, use teams from that league.
             team_names = []
             if followed_teams:
                 placeholders = ','.join(['?'] * len(followed_teams))
@@ -117,51 +126,174 @@ class NewsService:
                     SELECT id, name FROM team WHERE id IN ({placeholders})
                 """, followed_teams)
                 team_names = {row[1]: row[0] for row in cursor.fetchall()}
+            elif league_id is not None:
+                cursor.execute("""
+                    SELECT DISTINCT t.id, t.name
+                    FROM event e
+                    JOIN team t ON (t.id = e.home_team_id OR t.id = e.away_team_id)
+                    WHERE e.league_id = ?
+                    ORDER BY t.name ASC
+                    LIMIT 40
+                """, (int(league_id),))
+                team_names = {row[1]: row[0] for row in cursor.fetchall()}
+
+            def _resolve_item_league_id(team_id: Optional[int]) -> Optional[int]:
+                if league_id is not None:
+                    return int(league_id)
+                if not team_id:
+                    return None
+                try:
+                    cursor.execute("""
+                        SELECT league_id
+                        FROM event
+                        WHERE (home_team_id = ? OR away_team_id = ?)
+                          AND league_id IS NOT NULL
+                        ORDER BY date_event DESC
+                        LIMIT 1
+                    """, (team_id, team_id))
+                    row = cursor.fetchone()
+                    return int(row[0]) if row and row[0] is not None else None
+                except Exception:
+                    return None
             
             # Fetch posts for each team
-            for team_name, team_id in team_names.items():
-                if team_name not in TEAM_SOCIAL_HANDLES:
-                    continue
-                
-                social_handles = TEAM_SOCIAL_HANDLES[team_name]
-                posts = self.social_media_fetcher.fetch_team_social_posts(
-                    team_name, social_handles, limit_per_platform=3
+            if league_id is not None and int(league_id) == self.URC_LEAGUE_ID:
+                # URC strict mode: use only official URC X account.
+                posts = self.social_media_fetcher.fetch_twitter_posts(
+                    self.URC_OFFICIAL_X_HANDLE,
+                    limit=max(limit, 10),
                 )
-                
-                # Convert posts to NewsItems
-                for post in posts[:limit]:
+                for post in posts:
                     try:
-                        # Parse URL to create embed
                         embed_obj = SocialMediaService.create_embed_object(
                             url=post.get("url", ""),
-                            context="team_update",
+                            context="league_update",
                             ai_explanation=SocialMediaService.generate_ai_explanation(
-                                embed_type=post.get("platform", ""),
+                                embed_type="twitter",
                                 context="announcement",
-                                related_data={"team": team_name}
-                            )
+                                related_data={"league": "URC"},
+                            ),
                         )
-                        
-                        # Extract text content
+
                         text = post.get("text") or post.get("message", "")
-                        if len(text) > 200:
-                            text = text[:200] + "..."
-                        
+                        if len(text) > 240:
+                            text = text[:240] + "..."
+
                         news_item = NewsItem(
-                            id=f"social_{post.get('platform')}_{post.get('id', hash(str(post)))}",
+                            id=f"social_twitter_{post.get('id', hash(str(post)))}",
                             type="social_media",
-                            title=f"{team_name} - {post.get('platform', 'Social Media').title()} Update",
+                            title="",
                             content=text,
                             timestamp=post.get("created_at", datetime.now().isoformat()),
-                            team_id=team_id,
+                            league_id=self.URC_LEAGUE_ID,
+                            team_id=None,
                             embedded_content=embed_obj if embed_obj.get("type") == "embed" else None,
-                            source_url=post.get("url")
+                            source_url=post.get("url"),
+                            image_url=post.get("image_url") or post.get("media_url"),
+                            video_url=post.get("video_url"),
+                            author_name=post.get("author_name") or "URC Official",
+                            author_handle=post.get("author_handle") or self.URC_OFFICIAL_X_HANDLE,
+                            author_avatar=post.get("author_avatar"),
+                            author_verified=bool(post.get("author_verified", False)),
+                            related_stats={
+                                "platform": "twitter",
+                                "is_video": bool(post.get("is_video", False)),
+                                "account": self.URC_OFFICIAL_X_HANDLE,
+                                "media_urls": post.get("media_urls", []),
+                                "video_variants": post.get("video_variants", []),
+                                "image_url": post.get("image_url") or post.get("media_url"),
+                                "video_url": post.get("video_url"),
+                            },
                         )
                         news_items.append(news_item)
                     except Exception as e:
-                        logger.error(f"Error converting social media post: {e}")
+                        logger.error(f"Error converting URC official X post: {e}")
                         continue
+            else:
+                for team_name, team_id in team_names.items():
+                    if team_name not in TEAM_SOCIAL_HANDLES:
+                        continue
+                    
+                    social_handles = TEAM_SOCIAL_HANDLES[team_name]
+                    posts = self.social_media_fetcher.fetch_team_social_posts(
+                        team_name, social_handles, limit_per_platform=3
+                    )
+                    
+                    # Convert posts to NewsItems
+                    for post in posts[:limit]:
+                        try:
+                            # Parse URL to create embed
+                            embed_obj = SocialMediaService.create_embed_object(
+                                url=post.get("url", ""),
+                                context="team_update",
+                                ai_explanation=SocialMediaService.generate_ai_explanation(
+                                    embed_type=post.get("platform", ""),
+                                    context="announcement",
+                                    related_data={"team": team_name}
+                                )
+                            )
+                            
+                            # Extract text content
+                            text = post.get("text") or post.get("message", "")
+                            if len(text) > 200:
+                                text = text[:200] + "..."
+                            
+                            news_item = NewsItem(
+                                id=f"social_{post.get('platform')}_{post.get('id', hash(str(post)))}",
+                                type="social_media",
+                                title=f"{team_name} - {post.get('platform', 'Social Media').title()} Update",
+                                content=text,
+                                timestamp=post.get("created_at", datetime.now().isoformat()),
+                                league_id=_resolve_item_league_id(team_id),
+                                team_id=team_id,
+                                embedded_content=embed_obj if embed_obj.get("type") == "embed" else None,
+                                source_url=post.get("url"),
+                                image_url=post.get("image_url") or post.get("media_url"),
+                                video_url=post.get("video_url"),
+                                author_name=post.get("author_name"),
+                                author_handle=post.get("author_handle"),
+                                author_avatar=post.get("author_avatar"),
+                                author_verified=bool(post.get("author_verified", False)),
+                                related_stats={
+                                    "platform": post.get("platform"),
+                                    "is_video": bool(post.get("is_video", False)),
+                                    "media_urls": post.get("media_urls", []),
+                                    "video_variants": post.get("video_variants", []),
+                                    "image_url": post.get("image_url") or post.get("media_url"),
+                                    "video_url": post.get("video_url"),
+                                }
+                            )
+                            news_items.append(news_item)
+                        except Exception as e:
+                            logger.error(f"Error converting social media post: {e}")
+                            continue
             
+            # URC strict social mode: exactly 1 video + 1 non-video post from X only.
+            if league_id is not None and int(league_id) == self.URC_LEAGUE_ID:
+                twitter_items = [
+                    n for n in news_items
+                    if (getattr(n, "related_stats", {}) or {}).get("platform") == "twitter"
+                ]
+                twitter_items.sort(key=lambda n: n.timestamp, reverse=True)
+                video_item = next(
+                    (n for n in twitter_items if bool((getattr(n, "related_stats", {}) or {}).get("is_video"))),
+                    None,
+                )
+                text_item = next(
+                    (n for n in twitter_items if not bool((getattr(n, "related_stats", {}) or {}).get("is_video"))),
+                    None,
+                )
+                picked: List[NewsItem] = []
+                if video_item:
+                    picked.append(video_item)
+                if text_item:
+                    # Avoid duplicates if API marks same item inconsistently.
+                    if not any(p.id == text_item.id for p in picked):
+                        picked.append(text_item)
+                if not picked and twitter_items:
+                    picked = twitter_items[:2]
+                news_items = picked[:2]
+
             conn.close()
             
         except Exception as e:
@@ -641,26 +773,19 @@ class NewsService:
                 except (ValueError, TypeError):
                     logger.warning(f"⚠️ Invalid league_id: {league_id}, ignoring filter")
                     filter_league_id = None
+
+            urc_x_only_mode = bool(filter_league_id == self.URC_LEAGUE_ID)
+            if urc_x_only_mode:
+                logger.info("🎯 URC X-only mode enabled: returning only 1 video + 1 post from X API")
             
             # 1. Get AI-generated news from upcoming matches (next 7 days)
-            # CRITICAL: Build query with explicit league filter
-            if filter_league_id:
-                query = """
-                SELECT e.id, e.league_id, e.date_event, e.home_team_id, e.away_team_id,
-                       t1.name as home_team, t2.name as away_team
-                FROM event e
-                LEFT JOIN team t1 ON e.home_team_id = t1.id
-                LEFT JOIN team t2 ON e.away_team_id = t2.id
-                WHERE e.date_event >= date('now')
-                AND e.date_event <= date('now', '+7 days')
-                AND e.home_team_id IS NOT NULL
-                AND e.away_team_id IS NOT NULL
-                    AND e.league_id = ?
-                ORDER BY e.date_event ASC
-                """
-                league_params = [filter_league_id]
+            # Skip in URC X-only mode.
+            if urc_x_only_mode:
+                matches = []
             else:
-                query = """
+            # CRITICAL: Build query with explicit league filter
+                if filter_league_id:
+                    query = """
                     SELECT e.id, e.league_id, e.date_event, e.home_team_id, e.away_team_id,
                            t1.name as home_team, t2.name as away_team
                     FROM event e
@@ -670,14 +795,29 @@ class NewsService:
                     AND e.date_event <= date('now', '+7 days')
                     AND e.home_team_id IS NOT NULL
                     AND e.away_team_id IS NOT NULL
+                        AND e.league_id = ?
                     ORDER BY e.date_event ASC
-                """
-                league_params = []
-            
-            logger.info(f"🔍 EXECUTING UPCOMING MATCHES QUERY with filter_league_id={filter_league_id}")
-            cursor.execute(query, league_params)
-            matches = cursor.fetchall()
-            logger.info(f"✅ Found {len(matches)} upcoming matches for news generation (filter_league_id={filter_league_id})")
+                    """
+                    league_params = [filter_league_id]
+                else:
+                    query = """
+                        SELECT e.id, e.league_id, e.date_event, e.home_team_id, e.away_team_id,
+                               t1.name as home_team, t2.name as away_team
+                        FROM event e
+                        LEFT JOIN team t1 ON e.home_team_id = t1.id
+                        LEFT JOIN team t2 ON e.away_team_id = t2.id
+                        WHERE e.date_event >= date('now')
+                        AND e.date_event <= date('now', '+7 days')
+                        AND e.home_team_id IS NOT NULL
+                        AND e.away_team_id IS NOT NULL
+                        ORDER BY e.date_event ASC
+                    """
+                    league_params = []
+                
+                logger.info(f"🔍 EXECUTING UPCOMING MATCHES QUERY with filter_league_id={filter_league_id}")
+                cursor.execute(query, league_params)
+                matches = cursor.fetchall()
+                logger.info(f"✅ Found {len(matches)} upcoming matches for news generation (filter_league_id={filter_league_id})")
             
             # CRITICAL: Verify all matches match the filter - THIS IS THE SAFETY CHECK
             if filter_league_id:
@@ -725,7 +865,7 @@ class NewsService:
                     all_news_items.append(preview)
             
             # 2. If no upcoming matches, generate news from recent completed matches (fallback)
-            if len(all_news_items) == 0:
+            if len(all_news_items) == 0 and not urc_x_only_mode:
                 logger.info("No upcoming matches found, generating news from recent completed matches")
                 cursor.execute("""
                     SELECT e.id, e.league_id, e.date_event, e.home_team_id, e.away_team_id,
@@ -791,7 +931,7 @@ class NewsService:
                     all_news_items.append(recap_item)
             
             # 3. Fetch external news from SportDevs (if available)
-            if include_external and self.sportdevs_client:
+            if include_external and self.sportdevs_client and not urc_x_only_mode:
                 try:
                     external_news = self.fetch_external_news(
                         league_id=followed_leagues[0] if followed_leagues else None,
@@ -807,6 +947,7 @@ class NewsService:
                 try:
                     social_news = self.fetch_social_media_news(
                         followed_teams=followed_teams,
+                        league_id=filter_league_id,
                         limit=min(10, limit - len(all_news_items))
                     )
                     all_news_items.extend(social_news)

@@ -48,14 +48,24 @@ class SocialMediaFetcher:
             
             # Get user ID first
             user_url = f"https://api.twitter.com/2/users/by/username/{username}"
-            user_response = requests.get(user_url, headers=headers, timeout=10)
+            user_response = requests.get(
+                user_url,
+                headers=headers,
+                params={"user.fields": "name,username,profile_image_url,verified"},
+                timeout=10,
+            )
             
             if user_response.status_code != 200:
                 logger.error(f"Twitter API error: {user_response.status_code}")
                 return []
             
             user_data = user_response.json()
-            user_id = user_data.get("data", {}).get("id")
+            user_obj = user_data.get("data", {}) if isinstance(user_data, dict) else {}
+            user_id = user_obj.get("id")
+            author_name = user_obj.get("name") or username
+            author_handle = user_obj.get("username") or username
+            author_avatar = user_obj.get("profile_image_url")
+            author_verified = bool(user_obj.get("verified", False))
             
             if not user_id:
                 logger.warning(f"User {username} not found on Twitter")
@@ -65,7 +75,9 @@ class SocialMediaFetcher:
             params = {
                 "query": f"from:{username}",
                 "max_results": limit,
-                "tweet.fields": "created_at,public_metrics,text"
+                "tweet.fields": "created_at,public_metrics,text,attachments",
+                "expansions": "attachments.media_keys",
+                "media.fields": "type,url,preview_image_url,duration_ms,variants"
             }
             
             response = requests.get(url, headers=headers, params=params, timeout=10)
@@ -76,15 +88,74 @@ class SocialMediaFetcher:
             
             data = response.json()
             tweets = []
+            media_index = {}
+            includes = data.get("includes", {}) if isinstance(data, dict) else {}
+            for media in includes.get("media", []) if isinstance(includes, dict) else []:
+                key = media.get("media_key")
+                if key:
+                    media_index[key] = media
             
             for tweet in data.get("data", []):
+                media_items: List[Dict[str, Any]] = []
+                attachments = tweet.get("attachments", {}) if isinstance(tweet, dict) else {}
+                media_keys = attachments.get("media_keys", []) if isinstance(attachments, dict) else []
+                for mk in media_keys:
+                    m = media_index.get(mk)
+                    if m:
+                        media_items.append(m)
+
+                has_video = any((m.get("type") in {"video", "animated_gif"}) for m in media_items)
+                video_url = None
+                image_url = None
+                media_urls: List[str] = []
+                video_variants: List[str] = []
+
+                for media in media_items:
+                    m_type = media.get("type")
+                    if m_type == "photo":
+                        u = media.get("url")
+                        if u:
+                            media_urls.append(u)
+                            if not image_url:
+                                image_url = u
+                    elif m_type in {"video", "animated_gif"}:
+                        variants = media.get("variants", []) if isinstance(media.get("variants"), list) else []
+                        mp4_variants = [v for v in variants if isinstance(v, dict) and "video/mp4" in str(v.get("content_type", ""))]
+                        if mp4_variants:
+                            # Keep all MP4 variants so frontend can retry lower bitrates if needed.
+                            sorted_variants = sorted(
+                                mp4_variants,
+                                key=lambda v: int(v.get("bit_rate", 0) or 0),
+                                reverse=True,
+                            )
+                            for variant in sorted_variants:
+                                v_url = variant.get("url")
+                                if v_url and v_url not in video_variants:
+                                    video_variants.append(v_url)
+                                    media_urls.append(v_url)
+                            if video_variants and not video_url:
+                                video_url = video_variants[0]
+                        preview = media.get("preview_image_url")
+                        if preview and not image_url:
+                            image_url = preview
+
                 tweets.append({
                     "platform": "twitter",
                     "id": tweet.get("id"),
                     "text": tweet.get("text", ""),
                     "created_at": tweet.get("created_at"),
                     "url": f"https://twitter.com/{username}/status/{tweet.get('id')}",
-                    "metrics": tweet.get("public_metrics", {})
+                    "metrics": tweet.get("public_metrics", {}),
+                    "media": media_items,
+                    "is_video": has_video,
+                    "video_url": video_url,
+                    "video_variants": video_variants,
+                    "image_url": image_url,
+                    "media_urls": media_urls,
+                    "author_name": author_name,
+                    "author_handle": author_handle,
+                    "author_avatar": author_avatar,
+                    "author_verified": author_verified,
                 })
             
             return tweets
@@ -170,6 +241,8 @@ class SocialMediaFetcher:
                     "text": caption,
                     "media_type": item.get("media_type", "IMAGE"),  # IMAGE, VIDEO, CAROUSEL_ALBUM
                     "media_url": item.get("media_url") or item.get("thumbnail_url"),
+                    "video_url": item.get("media_url") if item.get("media_type") == "VIDEO" else None,
+                    "image_url": item.get("media_url") if item.get("media_type") in {"IMAGE", "CAROUSEL_ALBUM"} else item.get("thumbnail_url"),
                     "created_at": item.get("timestamp"),
                     "url": item.get("permalink", f"https://www.instagram.com/p/{item.get('id', '')}/"),
                     "metrics": {
@@ -282,6 +355,36 @@ TEAM_SOCIAL_HANDLES = {
         "instagram": "bathrugby",
         "facebook": "BathRugby"
     },
+    # URC and common aliases
+    "Leinster": {"twitter": "leinsterrugby"},
+    "Leinster Rugby": {"twitter": "leinsterrugby"},
+    "Munster": {"twitter": "Munsterrugby"},
+    "Munster Rugby": {"twitter": "Munsterrugby"},
+    "Ulster": {"twitter": "UlsterRugby"},
+    "Ulster Rugby": {"twitter": "UlsterRugby"},
+    "Connacht": {"twitter": "connachtrugby"},
+    "Connacht Rugby": {"twitter": "connachtrugby"},
+    "Glasgow": {"twitter": "GlasgowWarriors"},
+    "Glasgow Warriors": {"twitter": "GlasgowWarriors"},
+    "Edinburgh": {"twitter": "EdinburghRugby"},
+    "Edinburgh Rugby": {"twitter": "EdinburghRugby"},
+    "Ospreys": {"twitter": "ospreys"},
+    "Scarlets": {"twitter": "scarlets_rugby"},
+    "Cardiff Rugby": {"twitter": "Cardiff_Rugby"},
+    "Cardiff Blues": {"twitter": "Cardiff_Rugby"},
+    "Dragons": {"twitter": "dragonsrugby"},
+    "Newport Gwent Dragons": {"twitter": "dragonsrugby"},
+    "Benetton": {"twitter": "BenettonRugby"},
+    "Benetton Treviso": {"twitter": "BenettonRugby"},
+    "Benneton": {"twitter": "BenettonRugby"},
+    "Zebre": {"twitter": "ZebreParma"},
+    "Zebre Rugby": {"twitter": "ZebreParma"},
+    "Bulls": {"twitter": "BlueBullsRugby"},
+    "Blue Bulls": {"twitter": "BlueBullsRugby"},
+    "The Sharks": {"twitter": "SharksRugby"},
+    "Stormers": {"twitter": "THESTORMERS"},
+    "Lions": {"twitter": "LionsRugbyCo"},
+    "Lions Super Rugby": {"twitter": "LionsRugbyCo"},
     # Add more teams as needed
     # Format: "Team Name": {"twitter": "handle", "instagram": "handle", "facebook": "page_id"}
 }

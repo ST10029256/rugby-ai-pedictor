@@ -78,12 +78,37 @@ function Get-FailedFunctionNames {
     $names = New-Object System.Collections.Generic.HashSet[string]
     $patterns = @(
         "failed to update function .*?/functions/([A-Za-z0-9_-]+)",
-        "failed to create function .*?/functions/([A-Za-z0-9_-]+)"
+        "failed to create function .*?/functions/([A-Za-z0-9_-]+)",
+        "Failed to update function ([A-Za-z0-9_-]+) in region",
+        "Failed to create function ([A-Za-z0-9_-]+) in region",
+        "Functions deploy had errors with the following functions:\s*(?:\r?\n)+\s*[A-Za-z0-9_-]+:([A-Za-z0-9_-]+)\([^)]+\)"
     )
 
     foreach ($pattern in $patterns) {
-        $matches = [regex]::Matches($DeployOutput, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        foreach ($m in $matches) {
+        $regexMatches = [regex]::Matches($DeployOutput, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        foreach ($m in $regexMatches) {
+            if ($m.Groups.Count -gt 1) {
+                [void]$names.Add($m.Groups[1].Value)
+            }
+        }
+    }
+
+    # Also parse block-form failures, e.g.:
+    # Functions deploy had errors with the following functions:
+    #         rugby-ai-predictor:get_x(us-central1)
+    $blockMatch = [regex]::Match(
+        $DeployOutput,
+        "Functions deploy had errors with the following functions:\s*(?<block>(?:\r?\n\s+.+)+)",
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if ($blockMatch.Success) {
+        $blockText = $blockMatch.Groups["block"].Value
+        $lineMatches = [regex]::Matches(
+            $blockText,
+            "[A-Za-z0-9_-]+:([A-Za-z0-9_-]+)\([^)]+\)",
+            [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        )
+        foreach ($m in $lineMatches) {
             if ($m.Groups.Count -gt 1) {
                 [void]$names.Add($m.Groups[1].Value)
             }
@@ -106,6 +131,14 @@ if ($fullExitCode -eq 0) {
 $failedFunctions = Get-FailedFunctionNames -DeployOutput $fullText
 
 if (-not $failedFunctions -or $failedFunctions.Count -eq 0) {
+    $isListFailure = $fullText -match "Failed to list functions"
+    if ($isListFailure) {
+        Write-Host ""
+        Write-Host "Detected transient Firebase listing failure. Retrying functions codebase deploy..." -ForegroundColor Yellow
+        Invoke-DeployWithRetry -DeployTarget "functions:rugby-ai-predictor" -MaxAttempts $MaxRetries -BaseDelaySeconds $InitialDelaySeconds
+        Write-Host "Functions deploy recovered after list failure." -ForegroundColor Green
+        return
+    }
     throw "firebase deploy failed, and no failed function names could be parsed. Please inspect output above."
 }
 
@@ -114,7 +147,7 @@ Write-Host "Retrying failed functions sequentially with backoff..." -ForegroundC
 Write-Host ("Failed functions: " + ($failedFunctions -join ", ")) -ForegroundColor Yellow
 
 foreach ($fn in $failedFunctions) {
-    Invoke-DeployWithRetry -DeployTarget "functions:$fn" -MaxAttempts $MaxRetries -BaseDelaySeconds $InitialDelaySeconds
+    Invoke-DeployWithRetry -DeployTarget "functions:rugby-ai-predictor:$fn" -MaxAttempts $MaxRetries -BaseDelaySeconds $InitialDelaySeconds
 }
 
 Write-Host ""

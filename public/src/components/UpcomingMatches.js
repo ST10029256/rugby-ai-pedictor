@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Paper, Typography, CircularProgress, Alert, Card, CardContent } from '@mui/material';
+import { Box, Paper, Typography, Alert, Card, CardContent } from '@mui/material';
+import RugbyBallLoader from './RugbyBallLoader';
 import { getUpcomingMatches } from '../firebase';
 
 function UpcomingMatches({ leagueId }) {
@@ -28,13 +29,8 @@ function UpcomingMatches({ leagueId }) {
 
   if (loading) {
     return (
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Upcoming Matches
-        </Typography>
-        <Box display="flex" justifyContent="center" p={3}>
-          <CircularProgress />
-        </Box>
+      <Paper sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 200 }}>
+        <RugbyBallLoader size={80} color="#10b981" />
       </Paper>
     );
   }

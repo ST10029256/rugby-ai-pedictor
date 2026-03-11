@@ -21,6 +21,7 @@ def upload_models_to_storage(
     models_dir: str = 'artifacts',
     dry_run: bool = False,
     only_v4: bool = True,
+    family_filter: str = "",
 ) -> List[str]:
     """
     Upload all model files to Cloud Storage
@@ -37,8 +38,11 @@ def upload_models_to_storage(
         print(f"Error: Models directory not found: {models_dir}")
         return []
     
+    active_family_filter = (family_filter or "").strip().lower()
+    if not active_family_filter and only_v4:
+        active_family_filter = "v4"
+
     # Find all supported model/report artifacts.
-    # V4 runtime assets are primarily .pt + .pkl (meta) plus .json reports.
     model_files = []
     allowed_ext = ('.pkl', '.json', '.pt')
     for root, dirs, files in os.walk(models_dir):
@@ -46,7 +50,7 @@ def upload_models_to_storage(
             if not file.endswith(allowed_ext):
                 continue
             full_path = os.path.join(root, file)
-            if only_v4 and 'v4' not in file.lower():
+            if active_family_filter and active_family_filter not in file.lower():
                 continue
             model_files.append(full_path)
     
@@ -54,7 +58,7 @@ def upload_models_to_storage(
         print(f"No model files found in {models_dir}")
         return []
     
-    mode_text = "V4-only" if only_v4 else "all supported artifacts"
+    mode_text = f"{active_family_filter.upper()}-only" if active_family_filter else "all supported artifacts"
     print(f"Found {len(model_files)} model files to upload ({mode_text})")
     
     if dry_run:
@@ -100,9 +104,14 @@ def main():
     parser.add_argument('--models-dir', default='artifacts', help='Directory containing model artifacts')
     parser.add_argument('--dry-run', action='store_true', help='Dry run (no upload)')
     parser.add_argument(
+        '--family-filter',
+        default='',
+        help='Only upload artifacts whose filename contains this family tag (for example: v4 or v5)',
+    )
+    parser.add_argument(
         '--include-legacy',
         action='store_true',
-        help='Include non-v4 artifacts (default behavior uploads only files with v4 in filename)',
+        help='Include all supported artifacts regardless of model family filter',
     )
     
     args = parser.parse_args()
@@ -119,6 +128,7 @@ def main():
         models_dir=args.models_dir,
         dry_run=args.dry_run,
         only_v4=not args.include_legacy,
+        family_filter=("" if args.include_legacy else args.family_filter),
     )
     
     if not args.dry_run:
