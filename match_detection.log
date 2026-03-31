@@ -1068,3 +1068,7 @@
 2026-03-30 22:36:06,360 - INFO - Completion state not initialized - bootstrapping snapshot (no retrain this run)
 2026-03-30 22:36:06,421 - INFO - Saved checkpoint: 2026-03-30T22:36:06.420997
 2026-03-30 22:36:06,421 - INFO - Initialized completion state with 11126 completed matches
+2026-03-31 22:35:01,562 - INFO - Starting match completion detection and retraining
+2026-03-31 22:35:01,562 - INFO - Completion state not initialized - bootstrapping snapshot (no retrain this run)
+2026-03-31 22:35:01,603 - INFO - Saved checkpoint: 2026-03-31T22:35:01.603091
+2026-03-31 22:35:01,603 - INFO - Initialized completion state with 11126 completed matches
