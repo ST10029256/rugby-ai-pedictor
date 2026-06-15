@@ -3,7 +3,19 @@
     {
       "source": "rugby-ai-predictor",
       "codebase": "rugby-ai-predictor",
-      "runtime": "python311"
+      "runtime": "python311",
+      "ignore": [
+        "venv/",
+        "venv/**",
+        ".venv/",
+        ".venv/**",
+        "__pycache__/",
+        "__pycache__/**",
+        "*.pyc",
+        "*.pyo",
+        ".pytest_cache/",
+        ".pytest_cache/**"
+      ]
     }
   ],
   "hosting": {

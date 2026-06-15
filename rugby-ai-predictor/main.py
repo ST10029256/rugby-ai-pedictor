@@ -6,8 +6,14 @@ Handles callable functions for predictions, matches, and data
 from firebase_functions import https_fn
 from firebase_functions.options import set_global_options
 from firebase_admin import initialize_app, firestore
+from collections import Counter
+import hashlib
+from html import unescape
+import logging
 import os
 import json
+import re
+import requests
 import secrets
 import string
 from datetime import datetime, timedelta
@@ -18,6 +24,170 @@ try:
     from google.cloud.firestore_v1 import Timestamp as FirestoreTimestamp  # type: ignore
 except ImportError:
     FirestoreTimestamp = None
+
+
+_TRANSLATABLE_NEWS_TYPES = {"social_media", "external_news"}
+_TRANSLATION_CACHE: Dict[str, Dict[str, str]] = {}
+_TRANSLATION_CLIENT = None
+_TRANSLATION_CLIENT_READY = False
+_EMOJI_JOINER_CHARS = {"\u200d", "\ufe0f", "\ufe0e", "\u20e3"}
+
+
+def _get_translation_client():
+    """Lazily create a Google Translate client when the dependency is available."""
+    global _TRANSLATION_CLIENT, _TRANSLATION_CLIENT_READY
+    if _TRANSLATION_CLIENT_READY:
+        return _TRANSLATION_CLIENT
+
+    _TRANSLATION_CLIENT_READY = True
+    try:
+        from google.cloud import translate_v2 as translate
+
+        _TRANSLATION_CLIENT = translate.Client()
+    except Exception as exc:
+        logging.getLogger(__name__).warning("News translation unavailable: %s", exc)
+        _TRANSLATION_CLIENT = None
+    return _TRANSLATION_CLIENT
+
+
+def _should_attempt_translation(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    alpha_chars = sum(1 for char in text if char.isalpha())
+    return alpha_chars >= 3
+
+
+def _is_emoji_char(char: str) -> bool:
+    code = ord(char)
+    return (
+        0x1F1E6 <= code <= 0x1F1FF  # regional indicator flags
+        or 0x1F300 <= code <= 0x1FAFF  # emoji / symbols / pictographs
+        or 0x2600 <= code <= 0x27BF  # misc symbols + dingbats
+        or 0x1F900 <= code <= 0x1F9FF  # supplemental symbols
+        or 0x1FA70 <= code <= 0x1FAFF  # symbols and pictographs extended
+        or 0x1F3FB <= code <= 0x1F3FF  # skin tone modifiers
+    )
+
+
+def _extract_emoji_sequences(text: str) -> list[str]:
+    sequences: list[str] = []
+    i = 0
+    length = len(text)
+    while i < length:
+        current = text[i]
+
+        if "\U0001F1E6" <= current <= "\U0001F1FF":
+            cluster = current
+            if i + 1 < length and "\U0001F1E6" <= text[i + 1] <= "\U0001F1FF":
+                cluster += text[i + 1]
+                i += 1
+            sequences.append(cluster)
+            i += 1
+            continue
+
+        if not _is_emoji_char(current):
+            i += 1
+            continue
+
+        cluster = current
+        i += 1
+        while i < length:
+            nxt = text[i]
+            if nxt in _EMOJI_JOINER_CHARS or _is_emoji_char(nxt):
+                cluster += nxt
+                i += 1
+                continue
+            break
+        sequences.append(cluster)
+
+    return sequences
+
+
+def _restore_missing_emojis(original_text: str, translated_text: str) -> str:
+    original_emojis = _extract_emoji_sequences(original_text)
+    if not original_emojis:
+        return translated_text
+
+    translated_emojis = Counter(_extract_emoji_sequences(translated_text))
+    missing_emojis: list[str] = []
+    for emoji_seq in original_emojis:
+        if translated_emojis[emoji_seq] > 0:
+            translated_emojis[emoji_seq] -= 1
+            continue
+        missing_emojis.append(emoji_seq)
+
+    if not missing_emojis:
+        return translated_text
+
+    suffix = "".join(missing_emojis)
+    if not translated_text:
+        return suffix
+    if re.search(r"\s$", translated_text):
+        return f"{translated_text}{suffix}"
+    return f"{translated_text} {suffix}"
+
+
+def _normalize_text_for_compare(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _translate_text_to_english(value: Any) -> str:
+    """Translate arbitrary post text to English with a small process cache."""
+    text = str(value or "").strip()
+    if not _should_attempt_translation(text):
+        return text
+
+    cache_key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    cached = _TRANSLATION_CACHE.get(cache_key)
+    if cached:
+        return cached.get("text", text)
+
+    client = _get_translation_client()
+    if client is None:
+        return text
+
+    try:
+        result = client.translate(text, target_language="en", format_="text")
+        translated = unescape(str(result.get("translatedText") or text)).strip() or text
+        translated = _restore_missing_emojis(text, translated)
+        _TRANSLATION_CACHE[cache_key] = {"text": translated}
+        return translated
+    except Exception as exc:
+        logging.getLogger(__name__).warning("News translation failed: %s", exc)
+        return text
+
+
+def _translate_news_items_to_english(news_items: Any) -> int:
+    """
+    Force third-party news items into English before the UI renders them.
+    Returns the number of fields updated.
+    """
+    if not isinstance(news_items, list):
+        return 0
+
+    translated_fields = 0
+    for item in news_items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").strip() not in _TRANSLATABLE_NEWS_TYPES:
+            continue
+
+        original_title = str(item.get("title") or "").strip()
+        if original_title:
+            translated_title = _translate_text_to_english(original_title)
+            if translated_title != original_title:
+                item["title"] = translated_title
+                translated_fields += 1
+
+        original_content = str(item.get("content") or "").strip()
+        if original_content:
+            translated_content = _translate_text_to_english(original_content)
+            if translated_content != original_content:
+                item["content"] = translated_content
+                translated_fields += 1
+
+    return translated_fields
 
 
 def _sqlite_has_table(db_path: str, table_name: str) -> bool:
@@ -3135,11 +3305,14 @@ def get_news_feed(req: https_fn.CallableRequest) -> Dict[str, Any]:
         sqlite_ok = bool(db_path) and os.path.exists(db_path) and _sqlite_has_table(db_path, "event")
         if not sqlite_ok:
             fs = _build_firestore_news_feed(league_id=league_id, limit=int(limit) if limit is not None else 50)
+            news_data = fs.get('news', [])
+            translated_fields = _translate_news_items_to_english(news_data)
             return {
                 'success': True,
-                'news': fs.get('news', []),
-                'count': len(fs.get('news', [])),
+                'news': news_data,
+                'count': len(news_data),
                 'debug': fs.get('debug', {}),
+                'translated_fields': translated_fields,
                 'warning': 'SQLite not available; used Firestore fallback for news.'
             }
 
@@ -3163,11 +3336,13 @@ def get_news_feed(req: https_fn.CallableRequest) -> Dict[str, Any]:
         
         # Convert to dict format
         news_data = [item.to_dict() for item in news_items]
+        translated_fields = _translate_news_items_to_english(news_data)
         
         return {
             'success': True,
             'news': news_data,
             'count': len(news_data),
+            'translated_fields': translated_fields,
             'debug': {
                 'data_source': 'sqlite',
                 'db_path': db_path,
@@ -3477,6 +3652,7 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
                     limit=int(limit) if limit is not None else 50,
                 )
                 news_data = fs.get("news", []) or []
+                translated_fields = _translate_news_items_to_english(news_data)
                 news_items = []  # for downstream debug calculations
                 logger.warning(
                     f"Using Firestore fallback for news (league_id={league_id_int}, reason={firestore_fallback_reason}). "
@@ -3516,6 +3692,9 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
                         logger.error(f"  Error converting item {i+1} to dict: {convert_error}")
                 
                 logger.info(f"✅ Converted {len(news_data)} items to dict format")
+                translated_fields = _translate_news_items_to_english(news_data)
+                if translated_fields:
+                    logger.info("Translated %s third-party news fields to English", translated_fields)
                 
                 # Log first few items for debugging
                 if len(news_data) > 0:
@@ -3549,6 +3728,7 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
                 'request_limit': limit,
                 'news_items_count': len(news_data),
                 'news_service_returned': news_service_count,
+                'translated_fields': translated_fields if 'translated_fields' in locals() else 0,
                 'sqlite_league_total': sqlite_league_total if 'sqlite_league_total' in locals() else None,
                 'sqlite_upcoming_7d': sqlite_upcoming_7d if 'sqlite_upcoming_7d' in locals() else None,
                 'sqlite_recent_30d': sqlite_recent_30d if 'sqlite_recent_30d' in locals() else None,
@@ -5191,6 +5371,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
     logger.info("=== get_historical_predictions_http CALLED ===")
     logger.info("="*80)
     request_started_at = perf_counter()
+    request_id = None
     
     # Handle CORS preflight (match pattern used by other HTTP functions)
     if req.method == "OPTIONS":
@@ -5198,8 +5379,9 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         preflight_headers = {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Request-Id",
             "Access-Control-Max-Age": "3600",
+            "Access-Control-Expose-Headers": "X-History-Request-Id",
         }
         return https_fn.Response("", status=204, headers=preflight_headers)
     
@@ -5207,11 +5389,18 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
     response_headers = {
         "Access-Control-Allow-Origin": "*",
         "Content-Type": "application/json",
+        "Access-Control-Expose-Headers": "X-History-Request-Id",
     }
     
     try:
         # Parse request data
         data = req.get_json(silent=True) or {}
+        request_id = str(
+            data.get("client_request_id")
+            or req.headers.get("X-Client-Request-Id")
+            or f"hist-{secrets.token_hex(6)}"
+        )
+        response_headers["X-History-Request-Id"] = request_id
         league_id = data.get('league_id')
         year = data.get('year')
         limit = data.get('limit')
@@ -5227,7 +5416,18 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         limit = max(1, min(limit, 500))
         offset = max(0, offset)
         
-        logger.info(f"Request data: league_id={league_id}, year={year}, limit={limit}, offset={offset}")
+        logger.info(
+            f"[hist][{request_id}] request metadata: "
+            f"method={req.method}, origin={req.headers.get('Origin')}, "
+            f"content_type={req.headers.get('Content-Type')}, "
+            f"content_length={req.headers.get('Content-Length')}, "
+            f"user_agent={req.headers.get('User-Agent')}"
+        )
+        logger.info(
+            f"[hist][{request_id}] request payload: "
+            f"league_id={league_id}, year={year}, limit={limit}, offset={offset}, "
+            f"refresh={data.get('refresh')}"
+        )
         
         # Get database path
         db_path = os.getenv("DB_PATH")
@@ -5237,11 +5437,17 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             if not os.path.exists(db_path):
                 db_path = os.path.join(os.path.dirname(__file__), "..", "data.sqlite")
         
-        logger.info(f"Using database path: {db_path}")
+        db_exists = os.path.exists(db_path)
+        db_size_bytes = os.path.getsize(db_path) if db_exists else None
+        logger.info(
+            f"[hist][{request_id}] database path resolved: "
+            f"path={db_path}, exists={db_exists}, size_bytes={db_size_bytes}"
+        )
         
-        if not os.path.exists(db_path):
-            logger.error(f"Database file not found at {db_path}")
+        if not db_exists:
+            logger.error(f"[hist][{request_id}] database file not found at {db_path}")
             response_data = {
+                'request_id': request_id,
                 'error': f'Database file not found at {db_path}',
                 'matches_by_year_week': {},
                 'statistics': {},
@@ -5268,12 +5474,17 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         
         # Import needed modules
         from prediction.db import connect
-        predictor = get_predictor()
+        predictor = None
         
         # Connect to database
+        t0_connect = perf_counter()
         conn = connect(db_path)
         cursor = conn.cursor()
         _ensure_prediction_snapshot_table(conn)
+        logger.info(
+            f"[hist][{request_id}] database connected and snapshot table ensured in "
+            f"{(perf_counter() - t0_connect) * 1000:.1f} ms"
+        )
         
         # If year is not provided, pick a sensible default year and return all available years
         # so the UI can switch years without loading everything at once.
@@ -5294,9 +5505,9 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             year_query += " ORDER BY yr DESC"
             cursor.execute(year_query, year_params)
             available_years = [r[0] for r in cursor.fetchall() if r and r[0]]
-            logger.info(f"[hist] available_years query completed in {(perf_counter() - t0_years) * 1000:.1f} ms (count={len(available_years)})")
+            logger.info(f"[hist][{request_id}] available_years query completed in {(perf_counter() - t0_years) * 1000:.1f} ms (count={len(available_years)})")
         except Exception as e:
-            logger.warning(f"Could not compute available years: {e}")
+            logger.warning(f"[hist][{request_id}] could not compute available years: {e}")
             available_years = []
 
         # Build a lightweight year summary (total matches vs completed matches).
@@ -5328,9 +5539,9 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                     }
                 except Exception:
                     continue
-            logger.info(f"[hist] year_summary query completed in {(perf_counter() - t0_summary) * 1000:.1f} ms (years={len(year_summary)})")
+            logger.info(f"[hist][{request_id}] year_summary query completed in {(perf_counter() - t0_summary) * 1000:.1f} ms (years={len(year_summary)})")
         except Exception as e:
-            logger.warning(f"Could not compute year summary: {e}")
+            logger.warning(f"[hist][{request_id}] could not compute year summary: {e}")
             year_summary = {}
 
         # Prefer current calendar year when available (but keep Rugby World Cup on tournament years).
@@ -5382,7 +5593,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         cursor.execute(snapshot_count_sql, snapshot_params)
         snapshot_total_rows = int((cursor.fetchone() or [0])[0] or 0)
         logger.info(
-            f"[hist] snapshot rows available={snapshot_total_rows} "
+            f"[hist][{request_id}] snapshot rows available={snapshot_total_rows} "
             f"(model_version={model_version}, year={selected_year}, league_id={league_id})"
         )
 
@@ -5551,6 +5762,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             avg_score_error = (sum(score_errors) / len(score_errors)) if score_errors else None
 
             result = {
+                "request_id": request_id,
                 "available_years": available_years,
                 "selected_year": selected_year,
                 "year_summary": year_summary,
@@ -5602,8 +5814,20 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 }
 
             conn.close()
-            logger.info("[hist] served from prediction_snapshot table")
+            logger.info(
+                f"[hist][{request_id}] served from prediction_snapshot table "
+                f"(returned_rows={len(snapshot_rows)}, total_rows={snapshot_total_rows}, "
+                f"duration_ms={(perf_counter() - request_started_at) * 1000:.1f})"
+            )
             return https_fn.Response(json.dumps(result), status=200, headers=response_headers)
+
+        # Only initialize the predictor if we actually need the replay fallback.
+        # Snapshot-backed responses should not fail just because model bootstrap fails.
+        try:
+            predictor = get_predictor()
+        except Exception as pred_error:
+            predictor = None
+            logger.warning(f"[hist][{request_id}] predictor unavailable for replay fallback: {pred_error}")
 
         # Query for completed matches with scores
         base_query = """
@@ -5652,14 +5876,14 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         t0_count = perf_counter()
         cursor.execute(count_query, params)
         total_rows = int((cursor.fetchone() or [0])[0] or 0)
-        logger.info(f"[hist] count query completed in {(perf_counter() - t0_count) * 1000:.1f} ms (rows={total_rows}, limit={limit}, offset={offset})")
+        logger.info(f"[hist][{request_id}] count query completed in {(perf_counter() - t0_count) * 1000:.1f} ms (rows={total_rows}, limit={limit}, offset={offset})")
 
         query = base_query + " ORDER BY e.date_event ASC, e.league_id LIMIT ? OFFSET ?"
         query_params = [*params, limit, offset]
         t0_data = perf_counter()
         cursor.execute(query, query_params)
         results = cursor.fetchall()
-        logger.info(f"[hist] data query completed in {(perf_counter() - t0_data) * 1000:.1f} ms (returned={len(results)})")
+        logger.info(f"[hist][{request_id}] data query completed in {(perf_counter() - t0_data) * 1000:.1f} ms (returned={len(results)})")
         
         # Compute league round for matches missing round (season-based: Week 1 = first week of season)
         def _compute_league_rounds(rows):
@@ -5699,7 +5923,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         total_predictions = 0
         score_errors = []
         
-        logger.info(f"Processing {len(results)} completed matches...")
+        logger.info(f"[hist][{request_id}] processing {len(results)} completed matches...")
         
         t0_process = perf_counter()
         for row in results:
@@ -5824,7 +6048,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             matches_by_year_week[year][year_week_key].append(match_data)
             if not selected_year or year == selected_year:
                 all_matches.append(match_data)
-        logger.info(f"[hist] prediction/mapping loop completed in {(perf_counter() - t0_process) * 1000:.1f} ms")
+        logger.info(f"[hist][{request_id}] prediction/mapping loop completed in {(perf_counter() - t0_process) * 1000:.1f} ms")
         
         conn.close()
         
@@ -5834,6 +6058,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         
         # Convert defaultdict to regular dict for JSON serialization
         result = {
+            'request_id': request_id,
             'available_years': available_years,
             'selected_year': selected_year,
             'year_summary': year_summary,
@@ -5886,10 +6111,10 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 'average_score_error': round(league_mae, 2) if league_mae is not None else None,
             }
         
-        logger.info(f"Retrieved {result['statistics']['total_matches']} matches")
-        logger.info(f"Generated {result['statistics']['total_predictions']} predictions")
-        logger.info(f"Accuracy: {result['statistics'].get('accuracy_percentage', 0):.2f}%")
-        logger.info(f"[hist] total endpoint time {(perf_counter() - request_started_at) * 1000:.1f} ms")
+        logger.info(f"[hist][{request_id}] retrieved {result['statistics']['total_matches']} matches")
+        logger.info(f"[hist][{request_id}] generated {result['statistics']['total_predictions']} predictions")
+        logger.info(f"[hist][{request_id}] accuracy {result['statistics'].get('accuracy_percentage', 0):.2f}%")
+        logger.info(f"[hist][{request_id}] total endpoint time {(perf_counter() - request_started_at) * 1000:.1f} ms")
         
         # Convert any datetime objects to strings for JSON serialization
         def convert_for_json(obj):
@@ -5906,16 +6131,17 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
         
         result = convert_for_json(result)
         
-        logger.info("=== get_historical_predictions_http completed successfully ===")
+        logger.info(f"=== get_historical_predictions_http completed successfully [{request_id}] ===")
         return https_fn.Response(json.dumps(result), status=200, headers=response_headers)
         
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        logger.error(f"=== get_historical_predictions_http exception ===")
-        logger.error(f"Error: {str(e)}")
-        logger.error(f"Traceback: {error_trace}")
+        logger.error(f"=== get_historical_predictions_http exception [{request_id}] ===")
+        logger.error(f"[hist][{request_id}] Error: {str(e)}")
+        logger.error(f"[hist][{request_id}] Traceback: {error_trace}")
         response_data = {
+            "request_id": request_id,
             "error": str(e),
             "traceback": error_trace,
             "matches_by_year_week": {},

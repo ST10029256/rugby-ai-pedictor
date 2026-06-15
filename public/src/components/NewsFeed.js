@@ -25,6 +25,7 @@ const URL_EXACT_PATTERN = /^https?:\/\/[^\s]+$/i;
 const DEFAULT_AVATAR_URL = 'https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png';
 const VERIFIED_BADGE_URL = 'https://abs.twimg.com/icons/apple-touch-icon-192x192.png';
 const VIDEO_PROXY_ENDPOINT = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/proxy_video_http';
+const REEL_CONTROLS_HIDE_DELAY_MS = 2000;
 
 function RugbyPoleGlyph({ width = 22, height = 36 } = {}) {
   const sideInset = Math.max(1, Math.round(width * 0.08));
@@ -126,6 +127,13 @@ function formatTimeAgo(timestamp) {
   if (hr < 24) return `${hr}h`;
   if (day < 7) return `${day}d`;
   return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatMediaTime(seconds) {
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
 function isLikelyVideoUrl(url) {
@@ -296,7 +304,89 @@ function linkifyText(text) {
   const value = String(text || '');
   if (!value) return null;
   const parts = value.split(URL_PATTERN);
-  const HASHTAG_PATTERN = /(#[A-Za-z][A-Za-z0-9_]*)/g;
+  const HASHTAG_OR_MENTION_PATTERN = /(^|[^A-Za-z0-9_])(@[A-Za-z0-9_]{1,15})|(#[A-Za-z][A-Za-z0-9_]*)/g;
+
+  const renderSocialTokens = (segment, keyPrefix) => {
+    const nodes = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = HASHTAG_OR_MENTION_PATTERN.exec(segment)) !== null) {
+      const fullMatch = match[0];
+      const boundary = match[1] || '';
+      const mention = match[2] || '';
+      const hashtag = match[3] || '';
+      const matchStart = match.index;
+      const tokenOffset = boundary ? boundary.length : 0;
+      const tokenStart = matchStart + tokenOffset;
+
+      if (matchStart > lastIndex) {
+        nodes.push(
+          <React.Fragment key={`${keyPrefix}-text-${lastIndex}`}>
+            {segment.slice(lastIndex, matchStart)}
+          </React.Fragment>
+        );
+      }
+
+      if (boundary) {
+        nodes.push(
+          <React.Fragment key={`${keyPrefix}-boundary-${matchStart}`}>
+            {boundary}
+          </React.Fragment>
+        );
+      }
+
+      if (mention) {
+        const handle = mention.replace(/^@/, '');
+        nodes.push(
+          <Link
+            key={`${keyPrefix}-mention-${tokenStart}`}
+            href={`https://x.com/${handle}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            underline="hover"
+            sx={{ color: '#93c5fd', fontWeight: 700 }}
+          >
+            {mention}
+          </Link>
+        );
+      } else if (hashtag) {
+        const tag = hashtag.replace(/^#/, '');
+        nodes.push(
+          <Link
+            key={`${keyPrefix}-hashtag-${tokenStart}`}
+            href={`https://x.com/hashtag/${encodeURIComponent(tag)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            underline="hover"
+            sx={{ color: '#60a5fa', fontWeight: 700 }}
+          >
+            {hashtag}
+          </Link>
+        );
+      } else {
+        nodes.push(
+          <React.Fragment key={`${keyPrefix}-fallback-${matchStart}`}>
+            {fullMatch}
+          </React.Fragment>
+        );
+      }
+
+      lastIndex = matchStart + fullMatch.length;
+    }
+
+    if (lastIndex < segment.length) {
+      nodes.push(
+        <React.Fragment key={`${keyPrefix}-tail-${lastIndex}`}>
+          {segment.slice(lastIndex)}
+        </React.Fragment>
+      );
+    }
+
+    return nodes.length > 0
+      ? nodes
+      : [<React.Fragment key={`${keyPrefix}-plain`}>{segment}</React.Fragment>];
+  };
 
   return parts.flatMap((part, idx) => {
     if (URL_EXACT_PATTERN.test(part)) {
@@ -316,25 +406,7 @@ function linkifyText(text) {
       ];
     }
 
-    const hashtagParts = part.split(HASHTAG_PATTERN);
-    return hashtagParts.map((segment, segmentIdx) => {
-      if (/^#[A-Za-z][A-Za-z0-9_]*$/.test(segment)) {
-        const tag = segment.replace(/^#/, '');
-        return (
-          <Link
-            key={`hashtag-${idx}-${segmentIdx}`}
-            href={`https://x.com/hashtag/${encodeURIComponent(tag)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            underline="hover"
-            sx={{ color: '#60a5fa', fontWeight: 700 }}
-          >
-            {segment}
-          </Link>
-        );
-      }
-      return <React.Fragment key={`text-${idx}-${segmentIdx}`}>{segment}</React.Fragment>;
-    });
+    return renderSocialTokens(part, `segment-${idx}`);
   });
 }
 
@@ -424,6 +496,8 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
   const [loading, setLoading] = useState(true);
   const [failedVideoSrcs, setFailedVideoSrcs] = useState({});
   const [imageIndexByPost, setImageIndexByPost] = useState({});
+  const [reelPlaybackByPost, setReelPlaybackByPost] = useState({});
+  const [reelControlsVisibleByPost, setReelControlsVisibleByPost] = useState({});
   const [reelsMode, setReelsMode] = useState(false);
   const [activeReelIndex, setActiveReelIndex] = useState(0);
   const requestRunRef = useRef(0);
@@ -431,6 +505,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
   const touchStartXByPostRef = useRef({});
   const reelsScrollRef = useRef(null);
   const reelVideoRefs = useRef({});
+  const reelControlsTimeoutsRef = useRef({});
   const isSmallScreen = useMediaQuery('(max-width:600px)');
   const isMobileReels = useMediaQuery('(max-width:768px)');
 
@@ -467,7 +542,6 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           .flatMap((candidateUrl) => getPlayableVideoSources(candidateUrl))
           .filter((src) => !failedVideoSrcs[src]);
         const videoSrc = videoSources[0] || null;
-        const imageUrl = media.imageUrls[0] || null;
         const sourceUrl = item?.embedded_content?.url || item?.source_url || item?.url || null;
         const rawHandle = String(item?.author_handle || item?.source_handle || '').trim();
         const inferredHandle = extractHandleFromUrl(sourceUrl || '');
@@ -487,7 +561,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           itemKey,
           item,
           videoSrc,
-          imageUrl,
+          imageUrls: media.imageUrls,
           authorName,
           authorHandle,
           authorAvatar,
@@ -495,7 +569,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           content,
         };
       })
-      .filter((entry) => Boolean(entry.videoSrc || entry.imageUrl));
+      .filter((entry) => Boolean(entry.videoSrc || entry.imageUrls?.length));
   }, [sortedItems, failedVideoSrcs]);
 
   useEffect(() => {
@@ -581,6 +655,121 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
     if (deltaX < 0) goToNextImage(postKey, count);
     else goToPreviousImage(postKey, count);
   };
+
+  const clearReelControlsTimer = (postKey) => {
+    if (!postKey) return;
+    const timeoutId = reelControlsTimeoutsRef.current[postKey];
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      delete reelControlsTimeoutsRef.current[postKey];
+    }
+  };
+
+  const setReelControlsVisible = (postKey, visible) => {
+    if (!postKey) return;
+    setReelControlsVisibleByPost((prev) => {
+      if (Boolean(prev[postKey]) === Boolean(visible)) return prev;
+      return { ...prev, [postKey]: Boolean(visible) };
+    });
+  };
+
+  const showReelControlsTemporarily = (postKey) => {
+    if (!postKey) return;
+    clearReelControlsTimer(postKey);
+    setReelControlsVisible(postKey, true);
+    reelControlsTimeoutsRef.current[postKey] = setTimeout(() => {
+      setReelControlsVisible(postKey, false);
+      delete reelControlsTimeoutsRef.current[postKey];
+    }, REEL_CONTROLS_HIDE_DELAY_MS);
+  };
+
+  const updateReelPlayback = (postKey, nextState) => {
+    if (!postKey) return;
+    setReelPlaybackByPost((prev) => {
+      const current = prev[postKey] || {};
+      const resolved = typeof nextState === 'function' ? nextState(current) : nextState;
+      const merged = { ...current, ...resolved };
+      const currentTimeChanged = Math.abs((merged.currentTime || 0) - (current.currentTime || 0)) >= 0.2;
+      const durationChanged = Math.abs((merged.duration || 0) - (current.duration || 0)) >= 0.2;
+      const pausedChanged = Boolean(merged.paused) !== Boolean(current.paused);
+      if (!currentTimeChanged && !durationChanged && !pausedChanged) return prev;
+      return { ...prev, [postKey]: merged };
+    });
+  };
+
+  const handleReelMetadata = (postKey, event) => {
+    const video = event?.currentTarget;
+    if (!video) return;
+    updateReelPlayback(postKey, {
+      currentTime: Number(video.currentTime) || 0,
+      duration: Number(video.duration) || 0,
+      paused: Boolean(video.paused),
+    });
+  };
+
+  const handleReelTimeUpdate = (postKey, event) => {
+    const video = event?.currentTarget;
+    if (!video) return;
+    updateReelPlayback(postKey, {
+      currentTime: Number(video.currentTime) || 0,
+      duration: Number(video.duration) || 0,
+      paused: Boolean(video.paused),
+    });
+  };
+
+  const handleReelPlayState = (postKey, paused) => {
+    updateReelPlayback(postKey, { paused });
+    if (paused) {
+      clearReelControlsTimer(postKey);
+      setReelControlsVisible(postKey, true);
+    } else {
+      showReelControlsTemporarily(postKey);
+    }
+  };
+
+  const toggleReelPlayback = (reelIndex, postKey) => {
+    const videoEl = reelVideoRefs.current[reelIndex];
+    if (!videoEl) return;
+    if (videoEl.paused) {
+      const playPromise = videoEl.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {});
+      }
+    } else {
+      videoEl.pause();
+    }
+    updateReelPlayback(postKey, {
+      currentTime: Number(videoEl.currentTime) || 0,
+      duration: Number(videoEl.duration) || 0,
+      paused: Boolean(videoEl.paused),
+    });
+  };
+
+  const handleReelSeek = (reelIndex, postKey, nextValue) => {
+    const videoEl = reelVideoRefs.current[reelIndex];
+    if (!videoEl) return;
+    const duration = Number(videoEl.duration) || 0;
+    const clampedValue = Math.max(0, Math.min(duration || 0, Number(nextValue) || 0));
+    videoEl.currentTime = clampedValue;
+    if (videoEl.paused) {
+      clearReelControlsTimer(postKey);
+      setReelControlsVisible(postKey, true);
+    } else {
+      showReelControlsTemporarily(postKey);
+    }
+    updateReelPlayback(postKey, {
+      currentTime: clampedValue,
+      duration,
+      paused: Boolean(videoEl.paused),
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      Object.values(reelControlsTimeoutsRef.current).forEach((timeoutId) => clearTimeout(timeoutId));
+      reelControlsTimeoutsRef.current = {};
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -720,11 +909,13 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
               }}
             >
               <Typography sx={{ color: '#f8fafc', fontWeight: 900, fontSize: { xs: '0.98rem', sm: '1.1rem' }, letterSpacing: 0.2, lineHeight: 1.2 }}>
-                Rugby Feed
+                {isSmallScreen ? 'News Feed' : 'Rugby Feed'}
               </Typography>
-              <Typography sx={{ color: '#a7b2c7', fontSize: { xs: '0.72rem', sm: '0.78rem' }, mt: { xs: 0.05, sm: 0.15 }, lineHeight: 1.15 }}>
-                Latest updates and social highlights
-              </Typography>
+              {!isSmallScreen ? (
+                <Typography sx={{ color: '#a7b2c7', fontSize: { xs: '0.72rem', sm: '0.78rem' }, mt: { xs: 0.05, sm: 0.15 }, lineHeight: 1.15 }}>
+                  Latest updates and social highlights
+                </Typography>
+              ) : null}
             </Box>
             <Chip
               icon={<SportsIcon sx={{ fontSize: '0.9rem !important' }} />}
@@ -818,8 +1009,8 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                 width: '100%',
                 maxWidth: { xs: '100%', md: 920, lg: 1040 },
                 mx: 'auto',
-                height: { xs: 'calc(100svh - 190px)', sm: 'calc(100vh - 210px)', lg: 'calc(100vh - 170px)' },
-                minHeight: { xs: 420, sm: 520 },
+                height: { xs: 'calc(100dvh - 150px)', sm: 'calc(100vh - 170px)', lg: 'calc(100vh - 170px)' },
+                minHeight: { xs: 'calc(100dvh - 150px)', sm: 'calc(100vh - 170px)' },
                 borderRadius: 3,
                 overflowY: 'auto',
                 overflowX: 'hidden',
@@ -835,12 +1026,20 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                 const isActiveReel = idx === activeReelIndex;
                 const titleLine = reelItem.title || '';
                 const contentLine = String(reelItem.content || '').trim();
+                const reelImageUrls = Array.isArray(reelItem.imageUrls) ? reelItem.imageUrls : [];
+                const activeReelImageIndex = getActiveImageIndex(reelItem.itemKey, reelImageUrls.length);
+                const hasReelImageCarousel = reelImageUrls.length > 1;
+                const reelPlayback = reelPlaybackByPost[reelItem.itemKey] || {};
+                const reelDuration = Number(reelPlayback.duration) || 0;
+                const reelCurrentTime = Math.min(Number(reelPlayback.currentTime) || 0, reelDuration || Number.MAX_SAFE_INTEGER);
+                const reelProgress = reelDuration > 0 ? (reelCurrentTime / reelDuration) * 100 : 0;
+                const areReelControlsVisible = Boolean(reelPlayback.paused || reelControlsVisibleByPost[reelItem.itemKey]);
                 return (
                   <Box
                     key={reelItem.itemKey}
                     sx={{
                       height: '100%',
-                      minHeight: { xs: 'calc(100svh - 190px)', sm: 'calc(100vh - 210px)', lg: 'calc(100vh - 170px)' },
+                      minHeight: { xs: 'calc(100dvh - 150px)', sm: 'calc(100vh - 170px)', lg: 'calc(100vh - 170px)' },
                       position: 'relative',
                       scrollSnapAlign: 'start',
                       overflow: 'hidden',
@@ -851,9 +1050,14 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                     <Box
                       sx={{
                         position: 'absolute',
-                        inset: 0,
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: reelItem.videoSrc
+                          ? { xs: 180, sm: 205, md: 220 }
+                          : { xs: 132, sm: 152, md: 168 },
                         display: 'grid',
-                        placeItems: 'center',
+                        placeItems: 'start center',
                         px: { xs: 0, sm: 1.5, md: 2.5 },
                       }}
                     >
@@ -868,7 +1072,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                           backgroundColor: '#020617',
                           boxShadow: { xs: 'none', md: '0 22px 40px rgba(0,0,0,0.5)' },
                           display: 'grid',
-                          placeItems: 'center',
+                          placeItems: 'start center',
                         }}
                       >
                         {reelItem.videoSrc ? (
@@ -882,38 +1086,121 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                             loop
                             autoPlay={isActiveReel}
                             preload="metadata"
-                            controls={isActiveReel}
+                            controls={false}
+                            onLoadedMetadata={(event) => handleReelMetadata(reelItem.itemKey, event)}
+                            onTimeUpdate={(event) => handleReelTimeUpdate(reelItem.itemKey, event)}
+                            onPlay={() => handleReelPlayState(reelItem.itemKey, false)}
+                            onPause={() => handleReelPlayState(reelItem.itemKey, true)}
                             onError={() => {
                               markVideoSrcFailed(reelItem.videoSrc);
                             }}
+                            onClick={() => toggleReelPlayback(idx, reelItem.itemKey)}
                             style={{
                               width: '100%',
                               maxWidth: '100%',
                               height: '100%',
                               maxHeight: '100%',
-                              objectFit: 'contain',
+                              objectFit: isMobileReels ? 'contain' : 'cover',
+                              objectPosition: 'center',
                               display: 'block',
                               backgroundColor: '#020617',
+                              cursor: 'pointer',
                             }}
                           >
                             Your browser cannot play this video.
                           </video>
                         ) : (
                           <Box
-                            component="img"
-                            src={reelItem.imageUrl}
-                            alt={reelItem.title || 'Post media'}
-                            loading="lazy"
-                            sx={{
-                              width: '100%',
-                              maxWidth: '100%',
-                              height: '100%',
-                              maxHeight: '100%',
-                              objectFit: 'contain',
-                              display: 'block',
-                              backgroundColor: '#020617',
-                            }}
-                          />
+                            sx={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
+                            onTouchStart={(event) => handleImageTouchStart(reelItem.itemKey, event)}
+                            onTouchEnd={(event) => handleImageTouchEnd(reelItem.itemKey, reelImageUrls.length, event)}
+                          >
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                width: '100%',
+                                height: '100%',
+                                transform: `translateX(-${activeReelImageIndex * 100}%)`,
+                                transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)',
+                                willChange: 'transform',
+                              }}
+                            >
+                              {reelImageUrls.map((img, imageIndex) => (
+                                <Box
+                                  key={`${reelItem.itemKey}-${img}-${imageIndex}`}
+                                  sx={{
+                                    minWidth: '100%',
+                                    width: '100%',
+                                    height: '100%',
+                                    flexShrink: 0,
+                                    display: 'grid',
+                                    placeItems: 'start center',
+                                    backgroundColor: '#020617',
+                                  }}
+                                >
+                                  <Box
+                                    component="img"
+                                    src={img}
+                                    alt={reelItem.title || 'Post media'}
+                                    loading="lazy"
+                                    sx={{
+                                      width: '100%',
+                                      maxWidth: '100%',
+                                      height: '100%',
+                                      maxHeight: '100%',
+                                      objectFit: 'cover',
+                                      objectPosition: 'top center',
+                                      display: 'block',
+                                      backgroundColor: '#020617',
+                                      userSelect: 'none',
+                                    }}
+                                  />
+                                </Box>
+                              ))}
+                            </Box>
+                            {hasReelImageCarousel ? (
+                              <>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => goToPreviousImage(reelItem.itemKey, reelImageUrls.length)}
+                                  aria-label="Previous image"
+                                  sx={{
+                                    position: 'absolute',
+                                    left: 10,
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    color: '#f8fafc',
+                                    backgroundColor: 'rgba(15,23,42,0.58)',
+                                    border: '1px solid rgba(148,163,184,0.35)',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(30,41,59,0.78)',
+                                    },
+                                  }}
+                                >
+                                  <ChevronLeftIcon fontSize="small" />
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => goToNextImage(reelItem.itemKey, reelImageUrls.length)}
+                                  aria-label="Next image"
+                                  sx={{
+                                    position: 'absolute',
+                                    right: 10,
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    color: '#f8fafc',
+                                    backgroundColor: 'rgba(15,23,42,0.58)',
+                                    border: '1px solid rgba(148,163,184,0.35)',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(30,41,59,0.78)',
+                                    },
+                                  }}
+                                >
+                                  <ChevronRightIcon fontSize="small" />
+                                </IconButton>
+                              </>
+                            ) : null}
+                          </Box>
                         )}
                       </Box>
                     </Box>
@@ -926,7 +1213,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                         bottom: 0,
                         px: { xs: 1.2, sm: 1.8, md: 2.2 },
                         pb: { xs: 1.25, sm: 1.45 },
-                        pt: { xs: 4, sm: 5 },
+                        pt: reelItem.videoSrc ? { xs: 2.8, sm: 3.6 } : { xs: 1.6, sm: 2.1 },
                         background:
                           'linear-gradient(180deg, rgba(2,6,23,0) 0%, rgba(2,6,23,0.64) 38%, rgba(2,6,23,0.9) 100%)',
                         pointerEvents: 'none',
@@ -982,8 +1269,127 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                             overflow: 'hidden',
                           }}
                         >
-                          {contentLine}
+                          {linkifyText(contentLine)}
                         </Typography>
+                      ) : null}
+                      {!reelItem.videoSrc && hasReelImageCarousel ? (
+                        <Box
+                          sx={{
+                            mt: 1.05,
+                            display: 'flex',
+                            justifyContent: 'center',
+                            pointerEvents: 'auto',
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.9,
+                              px: 1.25,
+                              py: 0.6,
+                              borderRadius: 999,
+                              background: 'linear-gradient(135deg, rgba(15,23,42,0.92), rgba(30,41,59,0.86))',
+                              border: '1px solid rgba(255,255,255,0.2)',
+                              boxShadow: '0 10px 26px rgba(2,6,23,0.35), inset 0 1px 0 rgba(255,255,255,0.08)',
+                            }}
+                          >
+                            {reelImageUrls.map((img, dotIndex) => {
+                              const isActive = dotIndex === activeReelImageIndex;
+                              return (
+                                <Box
+                                  key={`${reelItem.itemKey}-${img}-content-dot`}
+                                  component="button"
+                                  type="button"
+                                  aria-label={`Go to image ${dotIndex + 1}`}
+                                  onClick={() => setActiveImageIndex(reelItem.itemKey, dotIndex, reelImageUrls.length)}
+                                  sx={{
+                                    width: isActive ? 22 : 10,
+                                    height: 10,
+                                    borderRadius: 999,
+                                    p: 0,
+                                    border: isActive ? '1px solid rgba(255,255,255,0.7)' : '1px solid rgba(255,255,255,0.18)',
+                                    cursor: 'pointer',
+                                    background: isActive
+                                      ? 'linear-gradient(90deg, #f8fafc 0%, #38bdf8 100%)'
+                                      : 'rgba(148,163,184,0.5)',
+                                    boxShadow: isActive ? '0 0 18px rgba(56,189,248,0.45)' : 'none',
+                                    transition: 'all 220ms ease',
+                                  }}
+                                />
+                              );
+                            })}
+                          </Box>
+                        </Box>
+                      ) : null}
+                      {reelItem.videoSrc ? (
+                        <Box
+                          sx={{
+                            mt: 1.05,
+                            pointerEvents: areReelControlsVisible ? 'auto' : 'none',
+                            opacity: areReelControlsVisible ? 1 : 0,
+                            transform: areReelControlsVisible ? 'translateY(0)' : 'translateY(8px)',
+                            transition: 'opacity 220ms ease, transform 220ms ease',
+                          }}
+                        >
+                          <Box
+                            component="input"
+                            type="range"
+                            min={0}
+                            max={reelDuration || 0}
+                            step="0.1"
+                            value={reelDuration > 0 ? reelCurrentTime : 0}
+                            onChange={(event) => handleReelSeek(idx, reelItem.itemKey, event.target.value)}
+                            aria-label="Video progress"
+                            sx={{
+                              width: '100%',
+                              m: 0,
+                              appearance: 'none',
+                              height: 4,
+                              borderRadius: 999,
+                              outline: 'none',
+                              cursor: 'pointer',
+                              background: `linear-gradient(90deg, #ff0033 0%, #ff0033 ${reelProgress}%, rgba(255,255,255,0.22) ${reelProgress}%, rgba(255,255,255,0.22) 100%)`,
+                              '&::-webkit-slider-thumb': {
+                                WebkitAppearance: 'none',
+                                appearance: 'none',
+                                width: 12,
+                                height: 12,
+                                borderRadius: '50%',
+                                background: '#ffffff',
+                                border: '2px solid #ff0033',
+                                boxShadow: '0 0 0 2px rgba(2,6,23,0.45)',
+                              },
+                              '&::-moz-range-thumb': {
+                                width: 12,
+                                height: 12,
+                                borderRadius: '50%',
+                                background: '#ffffff',
+                                border: '2px solid #ff0033',
+                                boxShadow: '0 0 0 2px rgba(2,6,23,0.45)',
+                              },
+                              '&::-moz-range-track': {
+                                height: 4,
+                                borderRadius: 999,
+                                background: 'transparent',
+                              },
+                            }}
+                          />
+                          <Box sx={{ mt: 0.45, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                            <Typography sx={{ color: '#cbd5e1', fontSize: '0.76rem', fontWeight: 700 }}>
+                              {formatMediaTime(reelCurrentTime)}
+                            </Typography>
+                            <Typography
+                              sx={{ color: '#f8fafc', fontSize: '0.76rem', fontWeight: 800, cursor: 'pointer' }}
+                              onClick={() => toggleReelPlayback(idx, reelItem.itemKey)}
+                            >
+                              {reelPlayback.paused ? 'Play' : 'Pause'}
+                            </Typography>
+                            <Typography sx={{ color: '#cbd5e1', fontSize: '0.76rem', fontWeight: 700 }}>
+                              {formatMediaTime(reelDuration)}
+                            </Typography>
+                          </Box>
+                        </Box>
                       ) : null}
                     </Box>
 
@@ -1009,7 +1415,6 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
               const videoSrc = playableSources[0] || null;
               const canUseNativeVideo = Boolean(videoSrc);
               const activeImageIndex = getActiveImageIndex(itemKey, imageUrls.length);
-              const activeImageUrl = imageUrls[activeImageIndex] || imageUrls[0] || null;
               const hasImageCarousel = imageUrls.length > 1;
               const rawHandle = String(item?.author_handle || item?.source_handle || '').trim();
               const inferredHandle = extractHandleFromUrl(tweetUrl || sourceUrl || '');
@@ -1251,94 +1656,120 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                       ) : null}
 
                       {!canUseNativeVideo && imageUrls.length > 0 ? (
-                        <Box
-                          sx={{
-                            mt: 1.1,
-                            borderRadius: 2,
-                            overflow: 'hidden',
-                            border: '1px solid rgba(255,255,255,0.12)',
-                            backgroundColor: '#020617',
-                            width: '100%',
-                            maxHeight: '70vh',
-                            position: 'relative',
-                            display: 'grid',
-                            placeItems: 'center',
-                          }}
-                          onTouchStart={(event) => handleImageTouchStart(itemKey, event)}
-                          onTouchEnd={(event) => handleImageTouchEnd(itemKey, imageUrls.length, event)}
-                        >
-                          {activeImageUrl ? (
+                        <Box sx={{ mt: 1.1, width: '100%' }}>
+                          <Box
+                            sx={{
+                              borderRadius: 2,
+                              overflow: 'hidden',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              backgroundColor: '#020617',
+                              width: '100%',
+                              maxHeight: '70vh',
+                              position: 'relative',
+                              display: 'grid',
+                              placeItems: 'center',
+                            }}
+                            onTouchStart={(event) => handleImageTouchStart(itemKey, event)}
+                            onTouchEnd={(event) => handleImageTouchEnd(itemKey, imageUrls.length, event)}
+                          >
                             <Box
-                              key={`${item?.id || item?.timestamp}-${activeImageUrl}`}
-                              component="img"
-                              src={activeImageUrl}
-                              alt={item?.title || 'Post media'}
-                              loading="lazy"
                               sx={{
+                                display: 'flex',
                                 width: '100%',
-                                height: 'auto',
-                                maxHeight: '70vh',
-                                objectFit: 'contain',
-                                display: 'block',
-                                backgroundColor: '#020617',
+                                transform: `translateX(-${activeImageIndex * 100}%)`,
+                                transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)',
+                                willChange: 'transform',
                               }}
-                            />
-                          ) : null}
+                            >
+                              {imageUrls.map((img, imageIndex) => (
+                                <Box
+                                  key={`${itemKey}-${img}-${imageIndex}`}
+                                  sx={{
+                                    minWidth: '100%',
+                                    width: '100%',
+                                    flexShrink: 0,
+                                    display: 'grid',
+                                    placeItems: 'center',
+                                    backgroundColor: '#020617',
+                                  }}
+                                >
+                                  <Box
+                                    component="img"
+                                    src={img}
+                                    alt={item?.title || 'Post media'}
+                                    loading="lazy"
+                                    sx={{
+                                      width: '100%',
+                                      height: 'auto',
+                                      maxHeight: '70vh',
+                                      objectFit: 'contain',
+                                      objectPosition: 'center',
+                                      display: 'block',
+                                      backgroundColor: '#020617',
+                                      userSelect: 'none',
+                                    }}
+                                  />
+                                </Box>
+                              ))}
+                            </Box>
+
+                            {hasImageCarousel ? (
+                              <>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => goToPreviousImage(itemKey, imageUrls.length)}
+                                  aria-label="Previous image"
+                                  sx={{
+                                    position: 'absolute',
+                                    left: 8,
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    color: '#f8fafc',
+                                    backgroundColor: 'rgba(15,23,42,0.58)',
+                                    border: '1px solid rgba(148,163,184,0.35)',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(30,41,59,0.78)',
+                                    },
+                                  }}
+                                >
+                                  <ChevronLeftIcon fontSize="small" />
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => goToNextImage(itemKey, imageUrls.length)}
+                                  aria-label="Next image"
+                                  sx={{
+                                    position: 'absolute',
+                                    right: 8,
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    color: '#f8fafc',
+                                    backgroundColor: 'rgba(15,23,42,0.58)',
+                                    border: '1px solid rgba(148,163,184,0.35)',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(30,41,59,0.78)',
+                                    },
+                                  }}
+                                >
+                                  <ChevronRightIcon fontSize="small" />
+                                </IconButton>
+                              </>
+                            ) : null}
+                          </Box>
 
                           {hasImageCarousel ? (
-                            <>
-                              <IconButton
-                                size="small"
-                                onClick={() => goToPreviousImage(itemKey, imageUrls.length)}
-                                aria-label="Previous image"
-                                sx={{
-                                  position: 'absolute',
-                                  left: 8,
-                                  top: '50%',
-                                  transform: 'translateY(-50%)',
-                                  color: '#f8fafc',
-                                  backgroundColor: 'rgba(15,23,42,0.58)',
-                                  border: '1px solid rgba(148,163,184,0.35)',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(30,41,59,0.78)',
-                                  },
-                                }}
-                              >
-                                <ChevronLeftIcon fontSize="small" />
-                              </IconButton>
-                              <IconButton
-                                size="small"
-                                onClick={() => goToNextImage(itemKey, imageUrls.length)}
-                                aria-label="Next image"
-                                sx={{
-                                  position: 'absolute',
-                                  right: 8,
-                                  top: '50%',
-                                  transform: 'translateY(-50%)',
-                                  color: '#f8fafc',
-                                  backgroundColor: 'rgba(15,23,42,0.58)',
-                                  border: '1px solid rgba(148,163,184,0.35)',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(30,41,59,0.78)',
-                                  },
-                                }}
-                              >
-                                <ChevronRightIcon fontSize="small" />
-                              </IconButton>
+                            <Box sx={{ mt: 1.05, display: 'flex', justifyContent: 'center' }}>
                               <Box
                                 sx={{
-                                  position: 'absolute',
-                                  bottom: 8,
-                                  left: '50%',
-                                  transform: 'translateX(-50%)',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: 0.7,
-                                  px: 1,
-                                  py: 0.45,
+                                  gap: 0.9,
+                                  px: 1.25,
+                                  py: 0.6,
                                   borderRadius: 999,
-                                  backgroundColor: 'rgba(2,6,23,0.65)',
-                                  border: '1px solid rgba(148,163,184,0.25)',
+                                  background: 'linear-gradient(135deg, rgba(15,23,42,0.92), rgba(30,41,59,0.86))',
+                                  border: '1px solid rgba(255,255,255,0.2)',
+                                  boxShadow: '0 10px 26px rgba(2,6,23,0.2), inset 0 1px 0 rgba(255,255,255,0.08)',
                                 }}
                               >
                                 {imageUrls.map((img, dotIndex) => {
@@ -1351,23 +1782,26 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                                       aria-label={`Go to image ${dotIndex + 1}`}
                                       onClick={() => setActiveImageIndex(itemKey, dotIndex, imageUrls.length)}
                                       sx={{
-                                        width: 8,
-                                        height: 8,
-                                        borderRadius: '50%',
+                                        width: isActive ? 22 : 10,
+                                        height: 10,
+                                        borderRadius: 999,
                                         p: 0,
-                                        border: 0,
+                                        border: isActive ? '1px solid rgba(255,255,255,0.72)' : '1px solid rgba(255,255,255,0.18)',
                                         cursor: 'pointer',
-                                        backgroundColor: isActive ? '#f8fafc' : 'rgba(148,163,184,0.65)',
+                                        background: isActive
+                                          ? 'linear-gradient(90deg, #f8fafc 0%, #38bdf8 100%)'
+                                          : 'rgba(148,163,184,0.5)',
+                                        boxShadow: isActive ? '0 0 18px rgba(56,189,248,0.4)' : 'none',
+                                        transition: 'all 220ms ease',
                                       }}
                                     />
                                   );
                                 })}
                               </Box>
-                            </>
+                            </Box>
                           ) : null}
                         </Box>
                       ) : null}
-
                     </Box>
                   </Box>
                   </Paper>

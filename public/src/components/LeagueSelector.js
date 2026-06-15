@@ -124,9 +124,9 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
           PaperProps: {
             sx: {
               maxHeight: 'none', // Show all leagues without scrolling
-              width: 'auto',
-              minWidth: '200px',
-              maxWidth: '280px', // Never exceed control panel width (280px)
+              width: '232px',
+              minWidth: 0,
+              maxWidth: '232px',
               boxSizing: 'border-box',
               zIndex: 2301, // Above fixed header/drawer overlays
               mt: 0.5,
@@ -136,7 +136,8 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
               borderRadius: '12px',
               boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(16, 185, 129, 0.1)',
               position: 'absolute', // Ensure absolute positioning
-              overflow: 'visible', // Allow all items to show
+              overflowX: 'hidden',
+              overflowY: 'auto',
               '& .MuiMenuItem-root': {
                 px: 2.5,
                 py: 1.25,
@@ -146,6 +147,9 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
                 borderRadius: '8px',
                 margin: '2px 8px',
                 transition: 'all 0.2s ease',
+                maxWidth: 'calc(100% - 16px)',
+                minWidth: 0,
+                overflow: 'hidden',
                 '&:hover': {
                   backgroundColor: 'rgba(16, 185, 129, 0.15)',
                   transform: 'translateX(4px)',
@@ -298,12 +302,33 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
                 justifyContent: 'space-between',
                 width: '100%',
                 gap: 1,
+                minWidth: 0,
               }}>
-                <Box component="span" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <Box
+                  component="span"
+                  sx={{
+                    flex: '1 1 auto',
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {league.name}
                 </Box>
                 {hasNews && (
-                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      gap: 0.5,
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      flexShrink: 1,
+                      minWidth: 0,
+                      maxWidth: '48%',
+                      overflow: 'hidden',
+                    }}
+                  >
                     {upcoming > 0 && (
                       <Chip
                         label={`${upcoming} upcoming`}
@@ -315,8 +340,13 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
                           backgroundColor: 'rgba(16, 185, 129, 0.2)',
                           color: '#10b981',
                           border: '1px solid rgba(16, 185, 129, 0.3)',
+                          maxWidth: '100%',
+                          flexShrink: 1,
                           '& .MuiChip-label': {
                             padding: '0 6px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
                           },
                         }}
                       />
@@ -332,8 +362,13 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
                           backgroundColor: 'rgba(59, 130, 246, 0.2)',
                           color: '#3b82f6',
                           border: '1px solid rgba(59, 130, 246, 0.3)',
+                          maxWidth: '100%',
+                          flexShrink: 1,
                           '& .MuiChip-label': {
                             padding: '0 6px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
                           },
                         }}
                       />

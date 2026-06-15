@@ -273,45 +273,133 @@ export const parseSocialEmbed = (data) => {
   return callable(data);
 };
 
-export const getHistoricalPredictions = async (data) => {
-  // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
-  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_predictions_http';
+const createHistoryRequestId = (prefix) => {
+  const suffix = Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Date.now()}-${suffix}`;
+};
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data || {}),
+const previewResponseBody = (text, limit = 1200) => {
+  if (!text) return '';
+  return text.length > limit ? `${text.slice(0, limit)}...[truncated]` : text;
+};
+
+const headersToObject = (headers) => {
+  try {
+    return Object.fromEntries(headers.entries());
+  } catch (error) {
+    return { error: `Could not serialize headers: ${error?.message || error}` };
+  }
+};
+
+const parseJsonSafely = (text) => {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    return null;
+  }
+};
+
+const postHistoryEndpoint = async ({ url, data, label, requestPrefix }) => {
+  const requestId = data?.client_request_id || createHistoryRequestId(requestPrefix);
+  const payload = { ...(data || {}), client_request_id: requestId };
+  const startedAt = performance.now();
+
+  console.log(`[${label}] HTTP request start`, {
+    requestId,
+    url,
+    payload,
+  });
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Client-Request-Id': requestId,
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.error(`[${label}] Network failure`, {
+      requestId,
+      url,
+      durationMs: Number((performance.now() - startedAt).toFixed(1)),
+      message: error?.message || String(error),
+      stack: error?.stack || null,
+      payload,
+    });
+    throw error;
+  }
+
+  const durationMs = Number((performance.now() - startedAt).toFixed(1));
+  const responseHeaders = headersToObject(response.headers);
+  const rawText = await response.text().catch(() => '');
+  const parsedJson = parseJsonSafely(rawText);
+  const bodyPreview = previewResponseBody(rawText);
+
+  console.log(`[${label}] HTTP response received`, {
+    requestId,
+    url,
+    status: response.status,
+    statusText: response.statusText,
+    ok: response.ok,
+    redirected: response.redirected,
+    type: response.type,
+    durationMs,
+    headers: responseHeaders,
+    bodyLength: rawText.length,
+    bodyPreview,
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
+    const error = new Error(`HTTP error ${response.status} ${response.statusText} [requestId=${requestId}]`);
+    error.status = response.status;
+    error.statusText = response.statusText;
+    error.requestId = requestId;
+    error.responseBody = rawText;
+    error.responseJson = parsedJson;
+    error.responseHeaders = responseHeaders;
+    console.error(`[${label}] HTTP failure`, {
+      requestId,
+      status: response.status,
+      statusText: response.statusText,
+      durationMs,
+      responseHeaders,
+      bodyPreview,
+    });
+    throw error;
   }
 
-  // Normalize shape to match httpsCallable: { data: ... }
-  const json = await response.json().catch(() => ({}));
-  return { data: json };
+  return {
+    data: parsedJson ?? {},
+    requestId,
+    responseHeaders,
+    status: response.status,
+  };
+};
+
+export const getHistoricalPredictions = async (data) => {
+  // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_predictions_http';
+  return postHistoryEndpoint({
+    url,
+    data,
+    label: 'HistoryReplay',
+    requestPrefix: 'hist-replay',
+  });
 };
 
 export const getHistoricalBacktest = async (data) => {
   // True walk-forward backtest (unseen) - server trains only on past games per week
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_backtest_http';
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data || {}),
+  return postHistoryEndpoint({
+    url,
+    data,
+    label: 'HistoryBacktest',
+    requestPrefix: 'hist-backtest',
   });
-
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-
-  const json = await response.json().catch(() => ({}));
-  return { data: json };
 };
 
 export default app;

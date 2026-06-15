@@ -206,18 +206,21 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
 
     setLoading(true);
     setError(null);
+    const payload = { league_id: leagueId };
+    if (yearOverride) payload.year = yearOverride;
+    if (options?.refresh) payload.refresh = true;
+    const mode = modeOverride || evaluationMode;
+    const startedAt = performance.now();
+    const fetchContext = {
+      leagueId,
+      mode,
+      year: payload.year || 'auto',
+      refresh: Boolean(payload.refresh),
+    };
 
     try {
-      const payload = { league_id: leagueId };
-      if (yearOverride) payload.year = yearOverride;
-      if (options?.refresh) payload.refresh = true;
-      const mode = modeOverride || evaluationMode;
-      const startedAt = performance.now();
       console.log('[History] Fetch start', {
-        leagueId,
-        mode,
-        year: payload.year || 'auto',
-        refresh: Boolean(payload.refresh),
+        ...fetchContext,
       });
 
       let result = null;
@@ -225,6 +228,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
         const backtestStart = performance.now();
         result = await getHistoricalBacktest(payload);
         console.log('[History] Backtest response', {
+          requestId: result?.requestId || null,
           durationMs: Number((performance.now() - backtestStart).toFixed(1)),
           selectedYear: result?.data?.selected_year || null,
           totalMatches: result?.data?.statistics?.total_matches ?? null,
@@ -239,6 +243,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           const page = await getHistoricalPredictions(pagePayload);
           const pageData = page?.data || {};
           console.log('[History] Replay page', {
+            requestId: page?.requestId || null,
             page: pagesFetched + 1,
             offset,
             limit: HISTORY_BATCH_SIZE,
@@ -337,7 +342,18 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
         setError('No data returned from server');
       }
     } catch (err) {
-      console.error('Error fetching historical predictions:', err);
+      console.error('[History] Fetch failed', {
+        ...fetchContext,
+        durationMs: Number((performance.now() - startedAt).toFixed(1)),
+        message: err?.message || String(err),
+        status: err?.status ?? null,
+        statusText: err?.statusText ?? null,
+        requestId: err?.requestId ?? null,
+        responseHeaders: err?.responseHeaders ?? null,
+        responseJson: err?.responseJson ?? null,
+        responseBodyPreview: typeof err?.responseBody === 'string' ? err.responseBody.slice(0, 1200) : null,
+        stack: err?.stack || null,
+      });
       setError(err.message || 'Failed to load historical predictions');
     } finally {
       setLoading(false);

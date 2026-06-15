@@ -73,18 +73,42 @@ jobs:
             exit 1
           }
 
-          profile="${REQUESTED_PROFILE:-fast}"
-          case "$profile" in
+          requested_profile="${REQUESTED_PROFILE:-fast}"
+          case "$requested_profile" in
             fast|full) ;;
             *)
-              echo "::error::Unsupported training profile: $profile"
+              echo "::error::Unsupported training profile: $requested_profile"
               exit 1
               ;;
           esac
 
+          # Fast retraining reuses the latest evaluation metrics when they already
+          # exist. On a new installation (or after those files were removed), there
+          # is nothing from which to select league champions. Automatically bootstrap
+          # a full evaluation run rather than training successfully and failing later
+          # in the publish job.
+          profile="$requested_profile"
+          if [[ "$requested_profile" == "fast" ]]; then
+            missing_metrics=()
+            for report in \
+              artifacts/maz_maxed_v4_metrics_latest.json \
+              artifacts/maz_maxed_v5_metrics_latest.json
+            do
+              [[ -s "$report" ]] || missing_metrics+=("$report")
+            done
+
+            if (( ${#missing_metrics[@]} > 0 )); then
+              profile=full
+              echo "::notice::Fast retraining was automatically upgraded to full because baseline evaluation metrics are missing."
+              printf 'Missing baseline report: %s\n' "${missing_metrics[@]}"
+            fi
+          fi
+
           database_sha256="$(sha256sum data.sqlite | awk '{print $1}')"
           echo "database_sha256=$database_sha256" >> "$GITHUB_OUTPUT"
           echo "training_profile=$profile" >> "$GITHUB_OUTPUT"
+          echo "Requested training profile: $requested_profile"
+          echo "Effective training profile: $profile"
 
           if [[ "${FORCE_RETRAIN:-false}" == "true" || -f retrain_needed.flag ]]; then
             echo "should_retrain=true" >> "$GITHUB_OUTPUT"
