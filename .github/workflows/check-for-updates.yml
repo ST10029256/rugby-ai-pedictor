@@ -2,210 +2,475 @@ name: Check for Game Updates
 
 on:
   schedule:
-    - cron: '0 22 * * *'  # Run daily at 22:00 UTC (00:00 SAST)
-  workflow_dispatch:  # Allow manual triggering
+    # 22:00 UTC = 00:00 SAST. Sunday uses the full authoritative refresh.
+    - cron: '0 22 * * 1-6'
+    - cron: '0 22 * * 0'
+  workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: Rebuild all target leagues instead of using the daily incremental sync
+        required: true
+        default: false
+        type: boolean
+      force_retrain:
+        description: Queue model retraining even if the detector does not create a flag
+        required: true
+        default: false
+        type: boolean
+      retrain_profile:
+        description: Fast trains production models only; full also rebuilds evaluation reports
+        required: true
+        default: fast
+        type: choice
+        options:
+          - fast
+          - full
   push:
     branches:
       - main
     paths:
-      - 'scripts/**'  # Trigger when update scripts change
-      - 'data.sqlite'  # Trigger when database changes
+      - 'scripts/detect_completed_matches.py'
+      - 'scripts/enhanced_auto_update.py'
+      - 'override_all_target_leagues_from_apisports.py'
+      - 'cleanup_duplicates_post_update.py'
+      - 'scripts/sync_to_firestore.py'
+      - '.github/workflows/check-for-updates.yml'
 
 concurrency:
-  group: check-for-updates-main
+  group: check-for-game-updates-main
   cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.11'
+  PYTHONUNBUFFERED: '1'
+  PYTHONIOENCODING: utf-8
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PIP_NO_PYTHON_VERSION_WARNING: '1'
 
 jobs:
   check-for-updates:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     permissions:
-      contents: write  # Allow pushing changes back to repository
-    
+      actions: write
+      contents: write
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Check for completed matches
-      env:
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
-        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-        PYTHONIOENCODING: utf-8
-      run: |
-        echo "🔍 Checking for completed matches..."
-        echo "📊 This will detect completed matches from the API-Sports-backed SQLite DB"
-        for i in 1 2 3; do
-          python scripts/detect_completed_matches.py --db data.sqlite --verbose && break
-          [ "$i" -eq 3 ] && exit 1
-          echo "Retry $i/3 failed. Waiting before retry..."
-          sleep 10
-        done
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-    - name: Full historical refresh from API-Sports
-      env:
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
-        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-        PYTHONIOENCODING: utf-8
-      run: |
-        echo "📚 Pulling full historical + upcoming fixtures from API-Sports..."
-        echo "🏉 This overwrites target leagues in SQLite from API-Sports authoritative data"
-        API_KEY="${APISPORTS_RUGBY_KEY:-${APISPORTS_API_KEY:-}}"
-        if [ -z "$API_KEY" ]; then
-          echo "Missing GitHub secret: set APISPORTS_RUGBY_KEY or APISPORTS_API_KEY in repository secrets."
-          exit 1
-        fi
-        for i in 1 2 3; do
-          python override_all_target_leagues_from_apisports.py --api-key "$API_KEY" --db data.sqlite --max-requests 7500 && break
-          [ "$i" -eq 3 ] && exit 1
-          echo "Retry $i/3 failed. Waiting before retry..."
-          sleep 15
-        done
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            rugby-ai-predictor/requirements.discovery.txt
 
-    - name: Incremental upcoming + recent sync from API-Sports
-      env:
-        APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-        APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
-        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-        PYTHONIOENCODING: utf-8
-      run: |
-        echo "📥 Running incremental sync for near-term upcoming/recent fixtures..."
-        for i in 1 2 3; do
-          python scripts/enhanced_auto_update.py --db data.sqlite --verbose --days-ahead 365 --days-back 120 && break
-          [ "$i" -eq 3 ] && exit 1
-          echo "Retry $i/3 failed. Waiting before retry..."
-          sleep 15
-        done
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-    - name: Data freshness check
-      run: |
-        python - <<'PY'
-        import sqlite3
-        conn = sqlite3.connect("data.sqlite")
-        cur = conn.cursor()
-        row = cur.execute("""
-          SELECT MAX(date_event)
-          FROM event
-          WHERE home_score IS NOT NULL AND away_score IS NOT NULL
-        """).fetchone()
-        conn.close()
-        if not row or not row[0]:
-          raise SystemExit("No completed matches found in data.sqlite after update.")
-        print(f"Latest completed match date in DB: {row[0]}")
-        PY
-        
-    - name: Post-update duplicate cleanup
-      run: |
-        echo "🧹 Running post-update cleanup..."
-        python cleanup_duplicates_post_update.py
+      - name: Install update dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --prefer-binary -r requirements.txt
 
-    - name: Copy updated DB into Functions source
-      run: |
-        echo "📦 Copying updated data.sqlite into rugby-ai-predictor/ for Cloud Functions..."
-        cp data.sqlite rugby-ai-predictor/data.sqlite
+      - name: Decide refresh and retraining mode
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_FULL_REFRESH: ${{ inputs.full_refresh }}
+          MANUAL_FORCE_RETRAIN: ${{ inputs.force_retrain }}
+          MANUAL_RETRAIN_PROFILE: ${{ inputs.retrain_profile }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
-    - name: Write Functions runtime environment
-      run: |
-        cat > rugby-ai-predictor/.env <<'EOF'
-        LIVE_MODEL_FAMILY=champion
-        LIVE_MODEL_CHANNEL=prod_100
-        EOF
-        echo "✅ Wrote rugby-ai-predictor/.env for champion runtime"
-    
-    - name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
-    
-    - name: Sync to Firestore (PWA Updates)
-      env:
-        GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
-        PYTHONIOENCODING: utf-8
-      run: |
-        echo "☁️ Syncing database to Firestore for PWA..."
-        echo "📱 This ensures your PWA app is always up to date with latest games"
-        for i in 1 2 3; do
-          python scripts/sync_to_firestore.py --db data.sqlite --project-id rugby-ai-61fd0 && break
-          [ "$i" -eq 3 ] && exit 1
-          echo "Retry $i/3 failed. Waiting before retry..."
-          sleep 10
-        done
-        echo "✅ Firestore sync complete - PWA will show latest data"
+          full_refresh=false
+          force_retrain=false
+          retrain_profile="${MANUAL_RETRAIN_PROFILE:-fast}"
 
-    - name: Deploy Firebase Functions (with updated DB)
-      env:
-        FIREBASE_CLI_EXPERIMENTS: webframeworks
-      run: |
-        echo "🚀 Deploying Firebase Functions so History endpoints use the updated DB..."
-        python -m venv rugby-ai-predictor/venv
-        rugby-ai-predictor/venv/bin/python -m pip install --upgrade pip
-        rugby-ai-predictor/venv/bin/python -m pip install -r rugby-ai-predictor/requirements.txt
-        npm i -g firebase-tools
-        firebase --version
-        for i in 1 2 3; do
-          firebase deploy --project rugby-ai-61fd0 --only functions:rugby-ai-predictor --non-interactive && break
-          [ "$i" -eq 3 ] && exit 1
-          echo "Retry $i/3 failed. Waiting before retry..."
-          sleep 20
-        done
-        
-    - name: Commit changes and trigger retraining if needed
-      if: always()
-      run: |
-        # Configure git
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-        # Check if there are any changes
-        if [ -n "$(git status --porcelain)" ]; then
-          echo "📝 Changes detected - committing updates..."
-          
-          # Remove any credential files that might have been created (CRITICAL SECURITY FIX)
-          git rm -f --cached gha-creds-*.json 2>/dev/null || true
-          git rm -f --cached *-creds-*.json 2>/dev/null || true
-          
-          # Add only specific safe files
-          git add last_checkpoint.json match_detection.log auto_update.log firestore_sync.log retrain_needed.flag 2>/dev/null || true
-          
-          # Only add data.sqlite if it exists
-          [ -f "data.sqlite" ] && git add data.sqlite 2>/dev/null || true
-          
-          # Add other tracked files that changed (but skip any new .json files)
-          git add -u
-          
-          # Explicitly unstage any .json files that aren't in our safe list
-          git reset HEAD -- *.json 2>/dev/null || true
-          git add last_checkpoint.json 2>/dev/null || true
-          
-          # Check if retrain flag exists
-          if [ -f "retrain_needed.flag" ]; then
-            echo "🔄 Retraining flag found - triggering AI model retraining"
-            echo "📊 This ensures AI captures all new upcoming games and completed results"
-            git commit -m "Trigger retraining: New games or completed matches detected [skip ci]"
-          else
-            echo "📊 Checkpoint/log updates only - no retraining needed"
-            git commit -m "Update checkpoints and logs [skip ci]"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "${MANUAL_FULL_REFRESH:-false}" == "true" ]] && full_refresh=true
+            [[ "${MANUAL_FORCE_RETRAIN:-false}" == "true" ]] && force_retrain=true
+          elif [[ "$EVENT_NAME" == "schedule" && "${{ github.event.schedule }}" == "0 22 * * 0" ]]; then
+            # Sunday scheduled run performs the expensive authoritative refresh.
+            full_refresh=true
+            retrain_profile=full
           fi
-          
-          # Pull before push to handle concurrent updates
-          echo "🔄 Pulling latest changes..."
-          git pull --rebase origin main || git pull origin main
-          
-          # Push changes
-          git push
-        else
-          echo "✅ No updates needed - database is up to date"
-        fi
+
+          case "$retrain_profile" in
+            fast|full) ;;
+            *)
+              echo "::error::Unsupported retraining profile: $retrain_profile"
+              exit 1
+              ;;
+          esac
+
+          echo "full_refresh=$full_refresh" >> "$GITHUB_OUTPUT"
+          echo "force_retrain=$force_retrain" >> "$GITHUB_OUTPUT"
+          echo "retrain_profile=$retrain_profile" >> "$GITHUB_OUTPUT"
+          echo "Full refresh: $full_refresh"
+          echo "Force retrain: $force_retrain"
+          echo "Retrain profile: $retrain_profile"
+
+      - name: Validate update inputs and snapshot the database
+        id: before
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          required_files=(
+            data.sqlite
+            requirements.txt
+            override_all_target_leagues_from_apisports.py
+            cleanup_duplicates_post_update.py
+            scripts/enhanced_auto_update.py
+            scripts/detect_completed_matches.py
+            scripts/sync_to_firestore.py
+          )
+
+          for file in "${required_files[@]}"; do
+            test -f "$file" || {
+              echo "::error::Required file is missing: $file"
+              exit 1
+            }
+          done
+
+          python - <<'PY'
+          import sqlite3
+
+          with sqlite3.connect("data.sqlite") as connection:
+              result = connection.execute("PRAGMA quick_check").fetchone()
+              if not result or result[0] != "ok":
+                  raise SystemExit(f"SQLite quick_check failed before update: {result}")
+          print("SQLite quick_check passed before update.")
+          PY
+
+          echo "database_sha256=$(sha256sum data.sqlite | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Full historical refresh from API-Sports
+        if: steps.mode.outputs.full_refresh == 'true'
+        env:
+          APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+          APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
+          HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          api_key="${APISPORTS_RUGBY_KEY:-${APISPORTS_API_KEY:-}}"
+          if [[ -z "$api_key" ]]; then
+            echo "::error::Set APISPORTS_RUGBY_KEY or APISPORTS_API_KEY in repository secrets."
+            exit 1
+          fi
+
+          for attempt in 1 2 3; do
+            if python override_all_target_leagues_from_apisports.py \
+              --api-key "$api_key" \
+              --db data.sqlite \
+              --max-requests 7500; then
+              break
+            fi
+
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Full historical refresh failed after 3 attempts."
+              exit 1
+            fi
+            sleep $((attempt * 20))
+          done
+
+      - name: Daily incremental upcoming and recent sync
+        if: steps.mode.outputs.full_refresh != 'true'
+        env:
+          APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+          APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
+          HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for attempt in 1 2 3; do
+            if python scripts/enhanced_auto_update.py \
+              --db data.sqlite \
+              --verbose \
+              --days-ahead 365 \
+              --days-back 30; then
+              break
+            fi
+
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Incremental update failed after 3 attempts."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+
+      - name: Remove post-update duplicates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python cleanup_duplicates_post_update.py
+
+      - name: Detect newly completed matches after synchronization
+        env:
+          APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
+          APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
+          HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for attempt in 1 2 3; do
+            if python scripts/detect_completed_matches.py \
+              --db data.sqlite \
+              --verbose; then
+              break
+            fi
+
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Completed-match detection failed after 3 attempts."
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
+      - name: Force the retraining flag when requested
+        if: steps.mode.outputs.force_retrain == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat > retrain_needed.flag <<EOF
+          Manual retraining requested by ${GITHUB_ACTOR} in update workflow run ${GITHUB_RUN_ID}.
+          Database SHA-256: $(sha256sum data.sqlite | awk '{print $1}')
+          EOF
+
+      - name: Validate updated data and detect meaningful changes
+        id: after
+        env:
+          BEFORE_DATABASE_SHA256: ${{ steps.before.outputs.database_sha256 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          python - <<'PY'
+          import sqlite3
+
+          with sqlite3.connect("data.sqlite") as connection:
+              check = connection.execute("PRAGMA quick_check").fetchone()
+              if not check or check[0] != "ok":
+                  raise SystemExit(f"SQLite quick_check failed after update: {check}")
+
+              row = connection.execute(
+                  """
+                  SELECT MAX(date_event)
+                  FROM event
+                  WHERE home_score IS NOT NULL
+                    AND away_score IS NOT NULL
+                  """
+              ).fetchone()
+
+              if not row or not row[0]:
+                  raise SystemExit("No completed matches were found after the update.")
+
+              print(f"Latest completed match date in DB: {row[0]}")
+          PY
+
+          after_sha256="$(sha256sum data.sqlite | awk '{print $1}')"
+          data_changed=false
+          [[ "$after_sha256" != "$BEFORE_DATABASE_SHA256" ]] && data_changed=true
+
+          retrain_needed=false
+          [[ -f retrain_needed.flag ]] && retrain_needed=true
+
+          echo "database_sha256=$after_sha256" >> "$GITHUB_OUTPUT"
+          echo "data_changed=$data_changed" >> "$GITHUB_OUTPUT"
+          echo "retrain_needed=$retrain_needed" >> "$GITHUB_OUTPUT"
+          echo "Database changed: $data_changed"
+          echo "Retraining required: $retrain_needed"
+
+      - name: Copy changed database into Functions source
+        if: steps.after.outputs.data_changed == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cp data.sqlite rugby-ai-predictor/data.sqlite
+          cat > rugby-ai-predictor/.env <<'EOF'
+          LIVE_MODEL_FAMILY=champion
+          LIVE_MODEL_CHANNEL=prod_100
+          EOF
+
+      - name: Authenticate to Google Cloud
+        if: steps.after.outputs.data_changed == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+          cleanup_credentials: true
+
+      - name: Sync changed game data to Firestore
+        if: steps.after.outputs.data_changed == 'true'
+        env:
+          GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for attempt in 1 2 3; do
+            if python scripts/sync_to_firestore.py \
+              --db data.sqlite \
+              --project-id rugby-ai-61fd0; then
+              break
+            fi
+
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Firestore synchronization failed after 3 attempts."
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
+      - name: Deploy history Functions only when the DB changed
+        if: steps.after.outputs.data_changed == 'true'
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          rm -rf rugby-ai-predictor/venv rugby-ai-predictor/.venv
+          python -m venv rugby-ai-predictor/.venv
+          rugby-ai-predictor/.venv/bin/python -m pip install --upgrade pip
+          rugby-ai-predictor/.venv/bin/python -m pip install \
+            --prefer-binary \
+            -r rugby-ai-predictor/requirements.discovery.txt
+
+          npm install --global firebase-tools
+          firebase --version
+
+          for attempt in 1 2 3; do
+            if firebase deploy \
+              --project rugby-ai-61fd0 \
+              --only functions:rugby-ai-predictor:get_historical_predictions_http,functions:rugby-ai-predictor:get_historical_backtest_http \
+              --non-interactive; then
+              break
+            fi
+
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Firebase deployment failed after 3 attempts."
+              exit 1
+            fi
+            sleep $((attempt * 20))
+          done
+
+          rm -rf rugby-ai-predictor/.venv rugby-ai-predictor/.env
+
+      - name: Commit only safe persistent update files
+        id: commit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          snapshot_dir="$(mktemp -d)"
+          trap 'rm -rf "$snapshot_dir"' EXIT
+
+          # Snapshot only files this workflow is allowed to persist.
+          for file in data.sqlite last_checkpoint.json retrain_needed.flag; do
+            if [[ -f "$file" ]]; then
+              mkdir -p "$snapshot_dir/$(dirname "$file")"
+              cp "$file" "$snapshot_dir/$file"
+            fi
+          done
+
+          rm -f gha-creds-*.json *-creds-*.json *credentials*.json *service-account*.json
+          rm -f rugby-ai-predictor/.env
+          rm -rf rugby-ai-predictor/.venv rugby-ai-predictor/venv
+
+          pushed=false
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Reapply the validated update on top of the newest main branch.
+            for file in data.sqlite last_checkpoint.json retrain_needed.flag; do
+              if [[ -f "$snapshot_dir/$file" ]]; then
+                mkdir -p "$(dirname "$file")"
+                cp "$snapshot_dir/$file" "$file"
+                git add -- "$file"
+              fi
+            done
+
+            # The update workflow never deletes retrain_needed.flag. Only a successful
+            # retraining run may clear it. Preserve any flag already present on main.
+            git restore --worktree -- .
+
+            retrain_needed=false
+            [[ -f retrain_needed.flag ]] && retrain_needed=true
+            echo "retrain_needed=$retrain_needed" >> "$GITHUB_OUTPUT"
+
+            if git diff --cached --quiet; then
+              echo "No persistent changes to commit."
+              echo "created_commit=false" >> "$GITHUB_OUTPUT"
+              pushed=true
+              break
+            fi
+
+            if [[ "$retrain_needed" == "true" ]]; then
+              commit_message="Update game data and request model retraining [skip ci]"
+            else
+              commit_message="Update game data and checkpoint [skip ci]"
+            fi
+
+            git commit -m "$commit_message"
+            if git push origin HEAD:main; then
+              echo "created_commit=true" >> "$GITHUB_OUTPUT"
+              pushed=true
+              break
+            fi
+
+            echo "Main changed before push; retrying on top of the latest commit."
+            sleep $((attempt * 5))
+          done
+
+          if [[ "$pushed" != "true" ]]; then
+            echo "::error::Could not push game-data updates after 3 attempts."
+            exit 1
+          fi
+
+      - name: Explicitly queue model retraining
+        if: steps.commit.outputs.retrain_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETRAIN_PROFILE: ${{ steps.mode.outputs.retrain_profile }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run auto-retrain-all-leagues.yml \
+            --ref main \
+            -f force=false \
+            -f training_profile="$RETRAIN_PROFILE"
+          echo "Queued '$RETRAIN_PROFILE' model retraining."
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: update-logs-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 7
+          compression-level: 6
+          path: |
+            match_detection.log
+            auto_update.log
+            firestore_sync.log
+            *.log

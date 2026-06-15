@@ -1,192 +1,584 @@
 name: Retrain AI Models
 
 on:
-  # Only run when there are actual changes - no scheduled runs
-  workflow_dispatch:  # Allow manual triggering
-  workflow_run:
-    workflows: ["Check for Game Updates"]
-    types:
-      - completed
-  push:
-    branches:
-      - main
-    paths:
-      - 'data.sqlite'  # Trigger when database is updated
-      - 'retrain_needed.flag'  # Trigger when retraining flag is created
-      - 'artifacts/**'  # Trigger when models are updated
-      - 'scripts/**'  # Trigger when scripts change
-  pull_request:
-    paths:
-      - 'data.sqlite'
-      - 'retrain_needed.flag'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Retrain even when retrain_needed.flag is absent
+        required: true
+        default: true
+        type: boolean
+      training_profile:
+        description: Fast trains production models only; full also rebuilds evaluation reports
+        required: true
+        default: fast
+        type: choice
+        options:
+          - fast
+          - full
+
+concurrency:
+  group: retrain-ai-models-main
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.11'
+  PYTHONUNBUFFERED: '1'
+  PYTHONIOENCODING: utf-8
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PIP_NO_PYTHON_VERSION_WARNING: '1'
 
 jobs:
-  retrain-models:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+  prepare:
+    name: Decide whether retraining is required
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      should_retrain: ${{ steps.decision.outputs.should_retrain }}
+      database_sha256: ${{ steps.decision.outputs.database_sha256 }}
+      training_profile: ${{ steps.decision.outputs.training_profile }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate request and training inputs
+        id: decision
+        env:
+          FORCE_RETRAIN: ${{ inputs.force }}
+          REQUESTED_PROFILE: ${{ inputs.training_profile }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          test -f data.sqlite || {
+            echo "::error::data.sqlite is missing."
+            exit 1
+          }
+          test -f requirements.txt || {
+            echo "::error::requirements.txt is missing."
+            exit 1
+          }
+          test -f scripts/maz_boss_maxed_v4.py || {
+            echo "::error::scripts/maz_boss_maxed_v4.py is missing."
+            exit 1
+          }
+          test -f scripts/maz_boss_maxed_v5.py || {
+            echo "::error::scripts/maz_boss_maxed_v5.py is missing."
+            exit 1
+          }
+
+          profile="${REQUESTED_PROFILE:-fast}"
+          case "$profile" in
+            fast|full) ;;
+            *)
+              echo "::error::Unsupported training profile: $profile"
+              exit 1
+              ;;
+          esac
+
+          database_sha256="$(sha256sum data.sqlite | awk '{print $1}')"
+          echo "database_sha256=$database_sha256" >> "$GITHUB_OUTPUT"
+          echo "training_profile=$profile" >> "$GITHUB_OUTPUT"
+
+          if [[ "${FORCE_RETRAIN:-false}" == "true" || -f retrain_needed.flag ]]; then
+            echo "should_retrain=true" >> "$GITHUB_OUTPUT"
+            echo "Retraining approved with profile '$profile'."
+            if [[ -f retrain_needed.flag ]]; then
+              echo "Retraining reason:"
+              cat retrain_needed.flag
+            fi
+          else
+            echo "should_retrain=false" >> "$GITHUB_OUTPUT"
+            echo "No retraining flag exists and force=false; nothing to do."
+          fi
+
+  train:
+    name: Train ${{ matrix.family }} models
+    needs: prepare
+    if: needs.prepare.outputs.should_retrain == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
-      contents: write  # Allow pushing changes back to repository
-    
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        family:
+          - v4
+          - v5
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        # V4/V5 training requires PyTorch; use CPU wheels in CI.
-        pip install torch --index-url https://download.pytorch.org/whl/cpu
-        
-    - name: Check if retraining is needed
-      id: check-retrain
-      run: |
-        if [ -f "retrain_needed.flag" ]; then
-          echo "retrain_needed=true" >> $GITHUB_OUTPUT
-          echo "🔄 Retraining flag found - models will be retrained"
-          cat retrain_needed.flag
-        else
-          echo "retrain_needed=false" >> $GITHUB_OUTPUT
-          echo "✅ No retraining needed - no flag file found"
-          exit 0
-        fi
-        
-    - name: Retrain V4 eval (80/20)
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      env:
-        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-      run: |
-        echo "🤖 Retraining V4 evaluation metrics (walk-forward 80/20) for all leagues..."
-        python scripts/maz_boss_maxed_v4.py --all-leagues --walk-forward --wf-start-train 80 --wf-step 20 --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 64 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 20 --finetune-epochs 12 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.25 --ranking-loss-weight 0.10 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --confidence-variance-threshold 40 --save-v4-models --save-global-pretrained --save-report --log-level INFO
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
-    - name: Retrain V4 production brain (100% completed)
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      env:
-        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-      run: |
-        echo "🧠 Retraining V4 production brain (train-all-completed)..."
-        python scripts/maz_boss_maxed_v4.py --all-leagues --train-all-completed --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 64 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 20 --finetune-epochs 12 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.25 --ranking-loss-weight 0.10 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --save-v4-models --save-global-pretrained --save-report --log-level INFO
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            rugby-ai-predictor/requirements.discovery.txt
 
-    - name: Retrain V5 eval (walk-forward)
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      env:
-        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-      run: |
-        echo "🤖 Retraining V5 evaluation metrics (walk-forward) for all leagues..."
-        python scripts/maz_boss_maxed_v5.py --all-leagues --walk-forward --wf-start-train 80 --wf-step 20 --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 80 --n-experts 4 --adapter-dim 24 --cross-heads 4 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 24 --finetune-epochs 14 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.30 --ranking-loss-weight 0.12 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --expert-balance-weight 0.01 --confidence-variance-threshold 40 --save-v5-models --save-global-pretrained --save-report --log-level INFO
+      - name: Install CPU training dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --upgrade pip setuptools wheel
 
-    - name: Retrain V5 production brain (100% completed)
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      env:
-        HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
-      run: |
-        echo "🧠 Retraining V5 production brain (train-all-completed)..."
-        python scripts/maz_boss_maxed_v5.py --all-leagues --train-all-completed --min-games 100 --seq-len 10 --emb-dim 32 --hidden-dim 80 --n-experts 4 --adapter-dim 24 --cross-heads 4 --rating-k 0.06 --rating-home-adv 2.0 --rating-scale 7.0 --ensemble-seeds "42,1337,9001" --global-pretrain --global-pretrain-epochs 24 --finetune-epochs 14 --lr 0.001 --finetune-lr 0.0003 --batch-size 128 --winner-loss-weight 1.0 --score-loss-weight 0.30 --ranking-loss-weight 0.12 --embedding-l2-weight 0.0005 --var-reg-weight 0.002 --expert-balance-weight 0.01 --save-v5-models --save-global-pretrained --save-report --log-level INFO
-    
-    - name: Authenticate to Google Cloud
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
-    
-    - name: Upload models to Cloud Storage
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      run: |
-        echo "☁️ Uploading retrained V4 artifacts to Cloud Storage..."
-        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts --family-filter v4
-        echo "✅ V4 artifacts uploaded"
-        echo "☁️ Uploading retrained V5 artifacts to Cloud Storage..."
-        python scripts/upload_models_to_storage.py --bucket rugby-ai-61fd0.firebasestorage.app --models-dir artifacts --family-filter v5
-        echo "✅ V5 artifacts uploaded"
-    
-    - name: Publish V4 metrics to Firestore
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      env:
-        GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
-      run: |
-        echo "📊 Publishing V4 metrics to Firestore..."
-        python scripts/publish_v4_metrics_to_firestore.py --report artifacts/maz_maxed_v4_metrics_latest.json --prod-report artifacts/maz_maxed_v4_prod_latest.json --project-id rugby-ai-61fd0
-        echo "✅ V4 league metrics updated in Firestore"
+          # Install the CPU build first so requirements.txt does not pull large CUDA wheels.
+          python -m pip install --prefer-binary \
+            --index-url https://download.pytorch.org/whl/cpu \
+            torch
+          python -m pip install --prefer-binary -r requirements.txt
 
-    - name: Build champion policy and publish champion metrics
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      env:
-        GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
-      run: |
-        echo "🏆 Building league champion policy from V4 and V5..."
-        python scripts/select_league_champions.py --v4-report artifacts/maz_maxed_v4_metrics_latest.json --v5-report artifacts/maz_maxed_v5_metrics_latest.json --output rugby-ai-predictor/league_model_champions.json --artifacts-copy artifacts/league_model_champions.json
-        echo "📊 Publishing champion league metrics to Firestore..."
-        python scripts/publish_champion_metrics_to_firestore.py --champion-file rugby-ai-predictor/league_model_champions.json --v4-report artifacts/maz_maxed_v4_metrics_latest.json --v5-report artifacts/maz_maxed_v5_metrics_latest.json --v4-prod-report artifacts/maz_maxed_v4_prod_latest.json --v5-prod-report artifacts/maz_maxed_v5_prod_latest.json --project-id rugby-ai-61fd0 --model-channel prod_100
-        echo "✅ Champion league metrics updated in Firestore"
+          python - <<'PY'
+          import torch
+          print(f"PyTorch {torch.__version__}; CUDA available: {torch.cuda.is_available()}")
+          PY
 
-    - name: Write Functions runtime environment
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      run: |
-        cat > rugby-ai-predictor/.env <<'EOF'
-        LIVE_MODEL_FAMILY=champion
-        LIVE_MODEL_CHANNEL=prod_100
-        EOF
-        echo "✅ Wrote rugby-ai-predictor/.env for champion runtime"
+      - name: Run ${{ matrix.family }} evaluation training
+        if: needs.prepare.outputs.training_profile == 'full'
+        env:
+          HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+          MODEL_FAMILY: ${{ matrix.family }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
-    - name: Deploy Firebase Functions champion runtime
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      env:
-        FIREBASE_CLI_EXPERIMENTS: webframeworks
-      run: |
-        echo "🚀 Deploying Firebase Functions champion runtime..."
-        python -m venv rugby-ai-predictor/venv
-        rugby-ai-predictor/venv/bin/python -m pip install --upgrade pip
-        rugby-ai-predictor/venv/bin/python -m pip install -r rugby-ai-predictor/requirements.txt
-        npm i -g firebase-tools
-        firebase --version
-        for i in 1 2 3; do
-          firebase deploy --project rugby-ai-61fd0 --only functions:rugby-ai-predictor --non-interactive && break
-          [ "$i" -eq 3 ] && exit 1
-          echo "Retry $i/3 failed. Waiting before retry..."
-          sleep 20
-        done
-        
-    - name: Clean up retraining flag
-      if: always()
-      run: |
-        if [ -f "retrain_needed.flag" ]; then
-          rm retrain_needed.flag
-          echo "🧹 Cleaned up retraining flag file"
-        fi
-        
-    - name: Commit and push all changes
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-        # Remove any credential files that might have been created
-        git rm -f --cached gha-creds-*.json *-creds-*.json *credentials*.json *service-account*.json 2>/dev/null || true
-        
-        # Add specific files only (exclude credentials)
-        git add data.sqlite artifacts/ artifacts_optimized/ last_checkpoint.json rugby-ai-predictor/league_model_champions.json
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "Auto-retrain: update champion rugby models [skip ci]"
-          git push
-        fi
-        
-    - name: Upload training logs
-      if: steps.check-retrain.outputs.retrain_needed == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: model-training-logs
-        path: |
-          model_training.log
-          match_detection.log
-          auto_update.log
-          *.log
+          if [[ "$MODEL_FAMILY" == "v4" ]]; then
+            python scripts/maz_boss_maxed_v4.py \
+              --all-leagues \
+              --walk-forward \
+              --wf-start-train 80 \
+              --wf-step 20 \
+              --min-games 100 \
+              --seq-len 10 \
+              --emb-dim 32 \
+              --hidden-dim 64 \
+              --rating-k 0.06 \
+              --rating-home-adv 2.0 \
+              --rating-scale 7.0 \
+              --ensemble-seeds "42,1337,9001" \
+              --global-pretrain \
+              --global-pretrain-epochs 20 \
+              --finetune-epochs 12 \
+              --lr 0.001 \
+              --finetune-lr 0.0003 \
+              --batch-size 128 \
+              --winner-loss-weight 1.0 \
+              --score-loss-weight 0.25 \
+              --ranking-loss-weight 0.10 \
+              --embedding-l2-weight 0.0005 \
+              --var-reg-weight 0.002 \
+              --confidence-variance-threshold 40 \
+              --save-v4-models \
+              --save-global-pretrained \
+              --save-report \
+              --log-level INFO
+          else
+            python scripts/maz_boss_maxed_v5.py \
+              --all-leagues \
+              --walk-forward \
+              --wf-start-train 80 \
+              --wf-step 20 \
+              --min-games 100 \
+              --seq-len 10 \
+              --emb-dim 32 \
+              --hidden-dim 80 \
+              --n-experts 4 \
+              --adapter-dim 24 \
+              --cross-heads 4 \
+              --rating-k 0.06 \
+              --rating-home-adv 2.0 \
+              --rating-scale 7.0 \
+              --ensemble-seeds "42,1337,9001" \
+              --global-pretrain \
+              --global-pretrain-epochs 24 \
+              --finetune-epochs 14 \
+              --lr 0.001 \
+              --finetune-lr 0.0003 \
+              --batch-size 128 \
+              --winner-loss-weight 1.0 \
+              --score-loss-weight 0.30 \
+              --ranking-loss-weight 0.12 \
+              --embedding-l2-weight 0.0005 \
+              --var-reg-weight 0.002 \
+              --expert-balance-weight 0.01 \
+              --confidence-variance-threshold 40 \
+              --save-v5-models \
+              --save-global-pretrained \
+              --save-report \
+              --log-level INFO
+          fi
+
+      - name: Run ${{ matrix.family }} production training
+        env:
+          HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+          MODEL_FAMILY: ${{ matrix.family }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$MODEL_FAMILY" == "v4" ]]; then
+            python scripts/maz_boss_maxed_v4.py \
+              --all-leagues \
+              --train-all-completed \
+              --min-games 100 \
+              --seq-len 10 \
+              --emb-dim 32 \
+              --hidden-dim 64 \
+              --rating-k 0.06 \
+              --rating-home-adv 2.0 \
+              --rating-scale 7.0 \
+              --ensemble-seeds "42,1337,9001" \
+              --global-pretrain \
+              --global-pretrain-epochs 20 \
+              --finetune-epochs 12 \
+              --lr 0.001 \
+              --finetune-lr 0.0003 \
+              --batch-size 128 \
+              --winner-loss-weight 1.0 \
+              --score-loss-weight 0.25 \
+              --ranking-loss-weight 0.10 \
+              --embedding-l2-weight 0.0005 \
+              --var-reg-weight 0.002 \
+              --save-v4-models \
+              --save-global-pretrained \
+              --save-report \
+              --log-level INFO
+          else
+            python scripts/maz_boss_maxed_v5.py \
+              --all-leagues \
+              --train-all-completed \
+              --min-games 100 \
+              --seq-len 10 \
+              --emb-dim 32 \
+              --hidden-dim 80 \
+              --n-experts 4 \
+              --adapter-dim 24 \
+              --cross-heads 4 \
+              --rating-k 0.06 \
+              --rating-home-adv 2.0 \
+              --rating-scale 7.0 \
+              --ensemble-seeds "42,1337,9001" \
+              --global-pretrain \
+              --global-pretrain-epochs 24 \
+              --finetune-epochs 14 \
+              --lr 0.001 \
+              --finetune-lr 0.0003 \
+              --batch-size 128 \
+              --winner-loss-weight 1.0 \
+              --score-loss-weight 0.30 \
+              --ranking-loss-weight 0.12 \
+              --embedding-l2-weight 0.0005 \
+              --var-reg-weight 0.002 \
+              --expert-balance-weight 0.01 \
+              --save-v5-models \
+              --save-global-pretrained \
+              --save-report \
+              --log-level INFO
+          fi
+
+      - name: Verify expected reports
+        env:
+          MODEL_FAMILY: ${{ matrix.family }}
+          TRAINING_PROFILE: ${{ needs.prepare.outputs.training_profile }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          prod_report="artifacts/maz_maxed_${MODEL_FAMILY}_prod_latest.json"
+          test -s "$prod_report" || {
+            echo "::error::Expected production report is missing or empty: $prod_report"
+            exit 1
+          }
+
+          if [[ "$TRAINING_PROFILE" == "full" ]]; then
+            metrics_report="artifacts/maz_maxed_${MODEL_FAMILY}_metrics_latest.json"
+            test -s "$metrics_report" || {
+              echo "::error::Expected evaluation report is missing or empty: $metrics_report"
+              exit 1
+            }
+          fi
+
+      - name: Upload ${{ matrix.family }} training output
+        uses: actions/upload-artifact@v7
+        with:
+          name: trained-${{ matrix.family }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 1
+          path: |
+            artifacts/**/*${{ matrix.family }}*
+            artifacts_optimized/**/*${{ matrix.family }}*
+            *.log
+
+  publish:
+    name: Publish, deploy, and finalize retraining
+    needs:
+      - prepare
+      - train
+    if: needs.prepare.outputs.should_retrain == 'true' && needs.train.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            rugby-ai-predictor/requirements.discovery.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install publishing dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --prefer-binary -r requirements.txt
+          npm install --global firebase-tools
+          firebase --version
+
+      - name: Download trained models and reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: trained-*-${{ github.run_id }}
+          merge-multiple: true
+          path: .
+
+      - name: Verify all required reports
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for report in \
+            artifacts/maz_maxed_v4_metrics_latest.json \
+            artifacts/maz_maxed_v4_prod_latest.json \
+            artifacts/maz_maxed_v5_metrics_latest.json \
+            artifacts/maz_maxed_v5_prod_latest.json
+          do
+            test -s "$report" || {
+              echo "::error::Required report is missing or empty: $report"
+              echo "Run the workflow once with training_profile=full if an evaluation report does not yet exist."
+              exit 1
+            }
+          done
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+          cleanup_credentials: true
+
+      - name: Upload V4 and V5 models to Cloud Storage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/upload_models_to_storage.py \
+            --bucket rugby-ai-61fd0.firebasestorage.app \
+            --models-dir artifacts \
+            --family-filter v4
+          python scripts/upload_models_to_storage.py \
+            --bucket rugby-ai-61fd0.firebasestorage.app \
+            --models-dir artifacts \
+            --family-filter v5
+
+      - name: Publish metrics and champion policy
+        env:
+          GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          python scripts/publish_v4_metrics_to_firestore.py \
+            --report artifacts/maz_maxed_v4_metrics_latest.json \
+            --prod-report artifacts/maz_maxed_v4_prod_latest.json \
+            --project-id rugby-ai-61fd0
+
+          python scripts/select_league_champions.py \
+            --v4-report artifacts/maz_maxed_v4_metrics_latest.json \
+            --v5-report artifacts/maz_maxed_v5_metrics_latest.json \
+            --output rugby-ai-predictor/league_model_champions.json \
+            --artifacts-copy artifacts/league_model_champions.json
+
+          python scripts/publish_champion_metrics_to_firestore.py \
+            --champion-file rugby-ai-predictor/league_model_champions.json \
+            --v4-report artifacts/maz_maxed_v4_metrics_latest.json \
+            --v5-report artifacts/maz_maxed_v5_metrics_latest.json \
+            --v4-prod-report artifacts/maz_maxed_v4_prod_latest.json \
+            --v5-prod-report artifacts/maz_maxed_v5_prod_latest.json \
+            --project-id rugby-ai-61fd0 \
+            --model-channel prod_100
+
+      - name: Configure and deploy champion runtime
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cat > rugby-ai-predictor/.env <<'EOF'
+          LIVE_MODEL_FAMILY=champion
+          LIVE_MODEL_CHANNEL=prod_100
+          EOF
+
+          rm -rf rugby-ai-predictor/venv rugby-ai-predictor/.venv
+          python -m venv rugby-ai-predictor/.venv
+          rugby-ai-predictor/.venv/bin/python -m pip install --upgrade pip
+          rugby-ai-predictor/.venv/bin/python -m pip install \
+            --prefer-binary \
+            -r rugby-ai-predictor/requirements.discovery.txt
+
+          for attempt in 1 2 3; do
+            if firebase deploy \
+              --project rugby-ai-61fd0 \
+              --only functions:rugby-ai-predictor \
+              --non-interactive; then
+              break
+            fi
+
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Firebase deployment failed after 3 attempts."
+              exit 1
+            fi
+
+            sleep $((attempt * 20))
+          done
+
+          rm -rf rugby-ai-predictor/.venv rugby-ai-predictor/.env
+
+      - name: Safely finalize repository metadata
+        id: finalize
+        env:
+          TRAINED_DATABASE_SHA256: ${{ needs.prepare.outputs.database_sha256 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          metadata_dir="$(mktemp -d)"
+          trap 'rm -rf "$metadata_dir"' EXIT
+
+          safe_files=(
+            artifacts/maz_maxed_v4_metrics_latest.json
+            artifacts/maz_maxed_v4_prod_latest.json
+            artifacts/maz_maxed_v5_metrics_latest.json
+            artifacts/maz_maxed_v5_prod_latest.json
+            artifacts/league_model_champions.json
+            rugby-ai-predictor/league_model_champions.json
+          )
+
+          # Preserve only lightweight metadata while rebasing onto the newest main branch.
+          for file in "${safe_files[@]}"; do
+            if [[ -f "$file" ]]; then
+              mkdir -p "$metadata_dir/$(dirname "$file")"
+              cp "$file" "$metadata_dir/$file"
+            fi
+          done
+
+          rm -f gha-creds-*.json *-creds-*.json *credentials*.json *service-account*.json
+          rm -rf rugby-ai-predictor/.venv rugby-ai-predictor/venv
+          rm -f rugby-ai-predictor/.env
+
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fd -- artifacts artifacts_optimized >/dev/null 2>&1 || true
+
+          for file in "${safe_files[@]}"; do
+            if [[ -f "$metadata_dir/$file" ]]; then
+              mkdir -p "$(dirname "$file")"
+              cp "$metadata_dir/$file" "$file"
+              git add -- "$file"
+            fi
+          done
+
+          current_database_sha256="$(sha256sum data.sqlite | awk '{print $1}')"
+          database_is_current=false
+          if [[ "$current_database_sha256" == "$TRAINED_DATABASE_SHA256" ]]; then
+            database_is_current=true
+            if git ls-files --error-unmatch retrain_needed.flag >/dev/null 2>&1; then
+              git rm -f -- retrain_needed.flag
+            else
+              rm -f retrain_needed.flag
+            fi
+          else
+            echo "Newer data arrived while training; retrain_needed.flag is being preserved."
+          fi
+
+          # Revert every non-staged tracked change, especially generated model binaries.
+          git restore --worktree -- .
+
+          echo "database_is_current=$database_is_current" >> "$GITHUB_OUTPUT"
+          echo "push_race=false" >> "$GITHUB_OUTPUT"
+
+          if git diff --cached --quiet; then
+            echo "No metadata changes to commit."
+            echo "created_commit=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "Auto-retrain: publish champion model metadata [skip ci]"
+
+          # One atomic push attempt is deliberate. If main moved again, do not risk
+          # deleting a newer retraining flag; queue another run instead.
+          if git push origin HEAD:main; then
+            echo "created_commit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Main changed during finalization; metadata was not pushed to avoid clearing a newer flag."
+            echo "created_commit=false" >> "$GITHUB_OUTPUT"
+            echo "push_race=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Queue another retrain for newer data or a push race
+        if: steps.finalize.outputs.database_is_current != 'true' || steps.finalize.outputs.push_race == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROFILE: ${{ needs.prepare.outputs.training_profile }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh workflow run auto-retrain-all-leagues.yml \
+            --ref main \
+            -f force=true \
+            -f training_profile="$PROFILE"
+          echo "Queued another retraining run against the newest main branch."
+
+      - name: Upload final logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: retraining-logs-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 7
+          compression-level: 6
+          path: |
+            *.log
+            artifacts/*metrics_latest.json
+            artifacts/*prod_latest.json
