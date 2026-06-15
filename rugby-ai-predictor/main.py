@@ -6813,3 +6813,80 @@ def parse_social_embed(req: https_fn.CallableRequest) -> Dict[str, Any]:
             'error': str(e),
             'success': False
         }
+
+
+@https_fn.on_request(timeout_sec=540, memory=1024)
+def scan_firestore_matches_http(req: https_fn.Request) -> https_fn.Response:
+    """
+    Scan the Firestore matches collection for duplicate fixtures and data issues.
+
+    Request body:
+    {
+        "remove_duplicates": false,
+        "confirm_remove": false,
+        "sample_limit": 25
+    }
+    """
+    import logging
+    import json
+    import traceback
+
+    logger = logging.getLogger(__name__)
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        if req.method == "OPTIONS":
+            return https_fn.Response("", status=204, headers=headers)
+
+        data = req.get_json(silent=True) or {}
+        remove_duplicates = bool(data.get("remove_duplicates", False))
+        confirm_remove = bool(data.get("confirm_remove", False))
+        sample_limit = data.get("sample_limit", 25)
+
+        try:
+            sample_limit = int(sample_limit)
+        except Exception:
+            sample_limit = 25
+        sample_limit = max(1, min(sample_limit, 100))
+
+        if remove_duplicates and not confirm_remove:
+            return https_fn.Response(
+                json.dumps(
+                    {
+                        "success": False,
+                        "error": "Set confirm_remove=true to delete duplicate match documents.",
+                    }
+                ),
+                status=400,
+                headers=headers,
+            )
+
+        from prediction.match_data_health import scan_firestore_matches
+
+        db = get_firestore_client()
+        result = scan_firestore_matches(
+            db,
+            remove_duplicates=remove_duplicates,
+            sample_limit=sample_limit,
+        )
+        logger.info(
+            "Firestore match scan complete: total=%s duplicate_docs=%s removed=%s dry_run=%s",
+            result.get("total_docs"),
+            result.get("duplicate_docs"),
+            result.get("removed_docs"),
+            result.get("dry_run"),
+        )
+        return https_fn.Response(json.dumps(result), status=200, headers=headers)
+    except Exception as e:
+        logger.error("Error in scan_firestore_matches_http: %s", e)
+        logger.error(traceback.format_exc())
+        return https_fn.Response(
+            json.dumps({"success": False, "error": str(e)}),
+            status=500,
+            headers=headers,
+        )

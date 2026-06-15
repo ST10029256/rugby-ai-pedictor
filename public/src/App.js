@@ -14,6 +14,7 @@ import NewsFeed from './components/NewsFeed';
 import LeagueStandings from './components/LeagueStandings';
 import RugbyBallLoader from './components/RugbyBallLoader';
 import HistoricalPredictions from './components/HistoricalPredictions';
+import MatchDataHealth from './components/MatchDataHealth';
 import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
 import { MEDIA_URLS } from './utils/storageUrls';
 import './App.css';
@@ -1415,6 +1416,7 @@ function App() {
           selectedLeague={selectedLeague}
           onLeagueChange={handleLeagueChange}
         />
+        <MatchDataHealth />
       </Box>
     </Box>
   );

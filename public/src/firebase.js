@@ -402,5 +402,24 @@ export const getHistoricalBacktest = async (data) => {
   });
 };
 
+export const scanFirestoreMatches = async (data) => {
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/scan_firestore_matches_http';
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data || {}),
+  });
+
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(json?.error || `HTTP error! status: ${response.status}`);
+  }
+
+  return { data: json };
+};
+
 export default app;
 
