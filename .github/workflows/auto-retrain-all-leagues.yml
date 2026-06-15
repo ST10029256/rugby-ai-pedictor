@@ -16,6 +16,11 @@ on:
         options:
           - fast
           - full
+      reuse_artifacts_run_id:
+        description: Optional failed retraining run ID to publish its completed artifacts without retraining
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: retrain-ai-models-main
@@ -27,6 +32,7 @@ env:
   PYTHONIOENCODING: utf-8
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
   PIP_NO_PYTHON_VERSION_WARNING: '1'
+  WORKFLOW_REVISION: 'v4-firebase-venv'
 
 jobs:
   prepare:
@@ -34,17 +40,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
     outputs:
       should_retrain: ${{ steps.decision.outputs.should_retrain }}
       database_sha256: ${{ steps.decision.outputs.database_sha256 }}
       training_profile: ${{ steps.decision.outputs.training_profile }}
+      artifact_run_id: ${{ steps.decision.outputs.artifact_run_id }}
+      reuse_artifacts_run_id: ${{ steps.decision.outputs.reuse_artifacts_run_id }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate request and training inputs
@@ -52,6 +61,8 @@ jobs:
         env:
           FORCE_RETRAIN: ${{ inputs.force }}
           REQUESTED_PROFILE: ${{ inputs.training_profile }}
+          REUSE_ARTIFACTS_RUN_ID: ${{ inputs.reuse_artifacts_run_id }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -82,13 +93,19 @@ jobs:
               ;;
           esac
 
+          reuse_run_id="${REUSE_ARTIFACTS_RUN_ID:-}"
+          if [[ -n "$reuse_run_id" && ! "$reuse_run_id" =~ ^[0-9]+$ ]]; then
+            echo "::error::reuse_artifacts_run_id must be a numeric GitHub Actions run ID."
+            exit 1
+          fi
+
           # Fast retraining reuses the latest evaluation metrics when they already
           # exist. On a new installation (or after those files were removed), there
           # is nothing from which to select league champions. Automatically bootstrap
-          # a full evaluation run rather than training successfully and failing later
-          # in the publish job.
+          # a full evaluation run rather than training successfully and failing later.
+          # A recovery run obtains those reports from the selected source run instead.
           profile="$requested_profile"
-          if [[ "$requested_profile" == "fast" ]]; then
+          if [[ -z "$reuse_run_id" && "$requested_profile" == "fast" ]]; then
             missing_metrics=()
             for report in \
               artifacts/maz_maxed_v4_metrics_latest.json \
@@ -104,15 +121,49 @@ jobs:
             fi
           fi
 
+          artifact_run_id="$GITHUB_RUN_ID"
           database_sha256="$(sha256sum data.sqlite | awk '{print $1}')"
+
+          if [[ -n "$reuse_run_id" ]]; then
+            source_sha="$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${reuse_run_id}" \
+              --jq '.head_sha')"
+
+            [[ -n "$source_sha" && "$source_sha" != "null" ]] || {
+              echo "::error::Could not resolve the source commit for run $reuse_run_id."
+              exit 1
+            }
+
+            if ! git cat-file -e "${source_sha}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$source_sha"
+            fi
+
+            git show "${source_sha}:data.sqlite" > "$RUNNER_TEMP/source-data.sqlite" || {
+              echo "::error::Run $reuse_run_id's source commit does not contain data.sqlite."
+              exit 1
+            }
+
+            database_sha256="$(sha256sum "$RUNNER_TEMP/source-data.sqlite" | awk '{print $1}')"
+            artifact_run_id="$reuse_run_id"
+            echo "::notice::Recovery mode enabled. Training will be skipped and artifacts from run $reuse_run_id will be published."
+          fi
+
           echo "database_sha256=$database_sha256" >> "$GITHUB_OUTPUT"
           echo "training_profile=$profile" >> "$GITHUB_OUTPUT"
+          echo "artifact_run_id=$artifact_run_id" >> "$GITHUB_OUTPUT"
+          echo "reuse_artifacts_run_id=$reuse_run_id" >> "$GITHUB_OUTPUT"
           echo "Requested training profile: $requested_profile"
           echo "Effective training profile: $profile"
+          echo "Artifact source run: $artifact_run_id"
 
-          if [[ "${FORCE_RETRAIN:-false}" == "true" || -f retrain_needed.flag ]]; then
+          if [[ -n "$reuse_run_id" || "${FORCE_RETRAIN:-false}" == "true" || -f retrain_needed.flag ]]; then
             echo "should_retrain=true" >> "$GITHUB_OUTPUT"
-            echo "Retraining approved with profile '$profile'."
+            if [[ -n "$reuse_run_id" ]]; then
+              echo "Artifact publishing recovery approved."
+            else
+              echo "Retraining approved with profile '$profile'."
+            fi
             if [[ -f retrain_needed.flag ]]; then
               echo "Retraining reason:"
               cat retrain_needed.flag
@@ -125,7 +176,7 @@ jobs:
   train:
     name: Train ${{ matrix.family }} models
     needs: prepare
-    if: needs.prepare.outputs.should_retrain == 'true'
+    if: needs.prepare.outputs.should_retrain == 'true' && needs.prepare.outputs.reuse_artifacts_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
@@ -352,7 +403,10 @@ jobs:
     needs:
       - prepare
       - train
-    if: needs.prepare.outputs.should_retrain == 'true' && needs.train.result == 'success'
+    if: >-
+      needs.prepare.outputs.should_retrain == 'true' &&
+      (needs.train.result == 'success' ||
+       (needs.train.result == 'skipped' && needs.prepare.outputs.reuse_artifacts_run_id != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -388,12 +442,24 @@ jobs:
           npm install --global firebase-tools
           firebase --version
 
-      - name: Download trained models and reports
+      - name: Download models and reports from this run
+        if: needs.prepare.outputs.reuse_artifacts_run_id == ''
         uses: actions/download-artifact@v8
         with:
           pattern: trained-*-${{ github.run_id }}
           merge-multiple: true
           path: .
+
+      - name: Download models and reports from recovery run
+        if: needs.prepare.outputs.reuse_artifacts_run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: trained-*-${{ needs.prepare.outputs.artifact_run_id }}
+          merge-multiple: true
+          path: .
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.prepare.outputs.artifact_run_id }}
 
       - name: Verify all required reports
         shell: bash
@@ -432,7 +498,129 @@ jobs:
             --models-dir artifacts \
             --family-filter v5
 
-      - name: Publish metrics and champion policy
+      - name: Generate champion policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/select_league_champions.py \
+            --v4-report artifacts/maz_maxed_v4_metrics_latest.json \
+            --v5-report artifacts/maz_maxed_v5_metrics_latest.json \
+            --output rugby-ai-predictor/league_model_champions.json \
+            --artifacts-copy artifacts/league_model_champions.json
+
+      - name: Configure and deploy champion runtime
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "Workflow revision: ${WORKFLOW_REVISION}"
+
+          functions_source="$(python - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path("firebase.json").read_text(encoding="utf-8"))
+          functions = config.get("functions")
+          entries = functions if isinstance(functions, list) else [functions]
+          for entry in entries:
+              if isinstance(entry, dict) and entry.get("codebase") == "rugby-ai-predictor":
+                  print(entry.get("source", ""))
+                  break
+          PY
+          )"
+
+          [[ "$functions_source" == "rugby-ai-predictor" ]] || {
+            echo "::error::firebase.json codebase rugby-ai-predictor resolves to unexpected source: '$functions_source'"
+            exit 1
+          }
+
+          cleanup_runtime_environment() {
+            rm -rf "$functions_source/venv" "$functions_source/.venv"
+            rm -f "$functions_source/.env"
+          }
+          trap cleanup_runtime_environment EXIT
+
+          cat > "$functions_source/.env" <<'EOF'
+          LIVE_MODEL_FAMILY=champion
+          LIVE_MODEL_CHANNEL=prod_100
+          EOF
+
+          test -f "$functions_source/main.py" || {
+            echo "::error::$functions_source/main.py is missing."
+            exit 1
+          }
+          test -f "$functions_source/requirements.discovery.txt" || {
+            echo "::error::$functions_source/requirements.discovery.txt is missing."
+            exit 1
+          }
+
+          # Create the environment while physically inside the Firebase source
+          # directory. Firebase Python discovery looks for <source>/venv and does
+          # not accept <source>/.venv.
+          rm -rf "$functions_source/venv" "$functions_source/.venv"
+          pushd "$functions_source" >/dev/null
+          python3.11 -m venv venv
+          test -f venv/pyvenv.cfg || {
+            echo "::error::venv/pyvenv.cfg was not created."
+            exit 1
+          }
+          test -x venv/bin/python || {
+            echo "::error::venv/bin/python was not created."
+            exit 1
+          }
+          venv/bin/python -m pip install --upgrade pip setuptools wheel
+          venv/bin/python -m pip install --prefer-binary -r requirements.discovery.txt
+          venv/bin/python - <<'PY'
+          import firebase_admin
+          import firebase_functions
+          print("Firebase Python SDK discovery check passed.")
+          PY
+          venv/bin/python -m compileall -q .
+          echo "Firebase source: $(pwd)"
+          echo "Firebase venv: $(pwd)/venv"
+          ls -ld venv venv/bin venv/bin/python
+          popd >/dev/null
+
+          # Fail before calling Firebase if the exact directory it requires is absent.
+          test -f "$functions_source/venv/pyvenv.cfg" || {
+            echo "::error::$functions_source/venv is missing immediately before deployment."
+            exit 1
+          }
+
+          deployed=false
+          for attempt in 1 2 3; do
+            echo "Firebase deployment attempt $attempt using $functions_source/venv"
+            if firebase deploy \
+              --config firebase.json \
+              --project rugby-ai-61fd0 \
+              --only functions:rugby-ai-predictor \
+              --non-interactive; then
+              deployed=true
+              break
+            fi
+
+            if [[ "$attempt" -lt 3 ]]; then
+              echo "::warning::Firebase deployment attempt $attempt failed; retrying."
+              test -f "$functions_source/venv/pyvenv.cfg" || {
+                echo "::error::$functions_source/venv disappeared during deployment."
+                exit 1
+              }
+              sleep $((attempt * 20))
+            fi
+          done
+
+          if [[ "$deployed" != "true" ]]; then
+            echo "::error::Firebase deployment failed after 3 attempts."
+            exit 1
+          fi
+
+          cleanup_runtime_environment
+          trap - EXIT
+
+
+      - name: Publish metrics and champion policy after successful deployment
         env:
           GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
         shell: bash
@@ -444,12 +632,6 @@ jobs:
             --prod-report artifacts/maz_maxed_v4_prod_latest.json \
             --project-id rugby-ai-61fd0
 
-          python scripts/select_league_champions.py \
-            --v4-report artifacts/maz_maxed_v4_metrics_latest.json \
-            --v5-report artifacts/maz_maxed_v5_metrics_latest.json \
-            --output rugby-ai-predictor/league_model_champions.json \
-            --artifacts-copy artifacts/league_model_champions.json
-
           python scripts/publish_champion_metrics_to_firestore.py \
             --champion-file rugby-ai-predictor/league_model_champions.json \
             --v4-report artifacts/maz_maxed_v4_metrics_latest.json \
@@ -458,43 +640,6 @@ jobs:
             --v5-prod-report artifacts/maz_maxed_v5_prod_latest.json \
             --project-id rugby-ai-61fd0 \
             --model-channel prod_100
-
-      - name: Configure and deploy champion runtime
-        env:
-          FIREBASE_CLI_EXPERIMENTS: webframeworks
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cat > rugby-ai-predictor/.env <<'EOF'
-          LIVE_MODEL_FAMILY=champion
-          LIVE_MODEL_CHANNEL=prod_100
-          EOF
-
-          rm -rf rugby-ai-predictor/venv rugby-ai-predictor/.venv
-          python -m venv rugby-ai-predictor/.venv
-          rugby-ai-predictor/.venv/bin/python -m pip install --upgrade pip
-          rugby-ai-predictor/.venv/bin/python -m pip install \
-            --prefer-binary \
-            -r rugby-ai-predictor/requirements.discovery.txt
-
-          for attempt in 1 2 3; do
-            if firebase deploy \
-              --project rugby-ai-61fd0 \
-              --only functions:rugby-ai-predictor \
-              --non-interactive; then
-              break
-            fi
-
-            if [[ "$attempt" -eq 3 ]]; then
-              echo "::error::Firebase deployment failed after 3 attempts."
-              exit 1
-            fi
-
-            sleep $((attempt * 20))
-          done
-
-          rm -rf rugby-ai-predictor/.venv rugby-ai-predictor/.env
 
       - name: Safely finalize repository metadata
         id: finalize
@@ -606,3 +751,5 @@ jobs:
             *.log
             artifacts/*metrics_latest.json
             artifacts/*prod_latest.json
+            firebase-debug.log
+            rugby-ai-predictor/firebase-debug.log

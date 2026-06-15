@@ -345,10 +345,11 @@ jobs:
         run: |
           set -Eeuo pipefail
 
+          # Firebase's Python functions discovery expects `venv`, not `.venv`.
           rm -rf rugby-ai-predictor/venv rugby-ai-predictor/.venv
-          python -m venv rugby-ai-predictor/.venv
-          rugby-ai-predictor/.venv/bin/python -m pip install --upgrade pip
-          rugby-ai-predictor/.venv/bin/python -m pip install \
+          python -m venv rugby-ai-predictor/venv
+          rugby-ai-predictor/venv/bin/python -m pip install --upgrade pip setuptools wheel
+          rugby-ai-predictor/venv/bin/python -m pip install \
             --prefer-binary \
             -r rugby-ai-predictor/requirements.discovery.txt
 
@@ -370,7 +371,7 @@ jobs:
             sleep $((attempt * 20))
           done
 
-          rm -rf rugby-ai-predictor/.venv rugby-ai-predictor/.env
+          rm -rf rugby-ai-predictor/venv rugby-ai-predictor/.venv rugby-ai-predictor/.env
 
       - name: Commit only safe persistent update files
         id: commit
