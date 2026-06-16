@@ -407,7 +407,7 @@ jobs:
               if [[ -f "$snapshot_dir/$file" ]]; then
                 mkdir -p "$(dirname "$file")"
                 cp "$snapshot_dir/$file" "$file"
-                git add -- "$file"
+                git add -f -- "$file"
               fi
             done
 

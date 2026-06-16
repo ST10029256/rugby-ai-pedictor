@@ -37,6 +37,13 @@ ui-debug.log
 !firestore.indexes.json
 !firestore.rules
 !storage.rules
+!last_checkpoint.json
+!artifacts/maz_maxed_v4_metrics_latest.json
+!artifacts/maz_maxed_v4_prod_latest.json
+!artifacts/maz_maxed_v5_metrics_latest.json
+!artifacts/maz_maxed_v5_prod_latest.json
+!artifacts/league_model_champions.json
+!rugby-ai-predictor/league_model_champions.json
 gha-creds-*.json
 *-creds-*.json
 *credentials*.json
