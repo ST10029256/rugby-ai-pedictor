@@ -143,18 +143,33 @@ class EnhancedRugbyPredictor:
         return None
     
     def _process_odds(self, odds_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process odds data for easier consumption"""
-        processed_odds = {}
-        
-        for odds_entry in odds_data.get('data', []):
-            bookmaker = odds_entry.get('bookmaker', {}).get('name', 'Unknown')
-            markets = odds_entry.get('markets', [])
-            
+        """Process odds data for easier consumption."""
+        from .highlightly_odds import normalize_highlightly_odds
+
+        normalized = normalize_highlightly_odds(odds_data)
+        if normalized and normalized.get("periods"):
+            processed: Dict[str, Any] = {}
+            for row in normalized["periods"][0].get("odds") or []:
+                bk = str(row.get("bookmaker") or "Unknown")
+                outcomes = []
+                if row.get("home") is not None:
+                    outcomes.append({"name": "Home", "odd": row["home"]})
+                if row.get("draw") is not None:
+                    outcomes.append({"name": "Draw", "odd": row["draw"]})
+                if row.get("away") is not None:
+                    outcomes.append({"name": "Away", "odd": row["away"]})
+                processed[bk] = {"Full Time Result": outcomes}
+            return processed
+
+        processed_odds: Dict[str, Any] = {}
+        for odds_entry in odds_data.get("data", []):
+            bookmaker = odds_entry.get("bookmaker", {}).get("name", "Unknown")
+            markets = odds_entry.get("markets", [])
             processed_odds[bookmaker] = {}
             for market in markets:
-                market_name = market.get('name', 'Unknown')
-                processed_odds[bookmaker][market_name] = market.get('outcomes', [])
-        
+                market_name = market.get("name", "Unknown")
+                processed_odds[bookmaker][market_name] = market.get("outcomes", [])
+
         return processed_odds
     
     def _process_team_form(self, form_data: List[Dict]) -> Dict[str, Any]:

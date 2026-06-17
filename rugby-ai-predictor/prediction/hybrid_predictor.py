@@ -25,7 +25,7 @@ class HybridPredictor:
     def __init__(self, model_path: str, sportdevs_api_key: str, db_path: str = 'data.sqlite'):
         """Initialize hybrid predictor"""
         self.db_path = db_path
-        self.sportdevs_client = SportDevsClient(sportdevs_api_key)
+        self.sportdevs_client = SportDevsClient(sportdevs_api_key, db_path=db_path)
         
         # Load trained model with compatibility handling
         self.model_data = self._load_model_with_compatibility(model_path)

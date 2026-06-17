@@ -20,7 +20,8 @@ LEAGUE_MAPPINGS = {
     4551: "Super Rugby",
     4430: "French Top 14",
     4414: "English Premiership Rugby",
-    5479: "Rugby Union International Friendlies"
+    4714: "Six Nations Championship",
+    5479: "Rugby Union International Friendlies",
 }
 
 

@@ -84,18 +84,54 @@ class HighlightlyRugbyAPI:
             logger.error(f"Error fetching match details for {match_id}: {e}")
             return {}
     
-    def get_odds(self, 
-                 match_id: Optional[int] = None,
-                 league_id: Optional[int] = None,
-                 bookmaker_id: Optional[int] = None,
-                 odds_type: str = "prematch",
-                 limit: int = 5) -> Dict[str, Any]:
-        """Get match odds (disabled; manual odds entry used instead)."""
+    def get_odds(
+        self,
+        match_id: Optional[int] = None,
+        league_id: Optional[int] = None,
+        bookmaker_id: Optional[int] = None,
+        odds_type: str = "prematch",
+        limit: int = 5,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Get prematch/live odds for a match or league."""
         try:
-            # Odds API disabled: return empty structure so callers don't fetch from network
-            logger.info("Odds API disabled: using manual odds input")
+            params: Dict[str, Any] = {
+                "limit": max(1, min(int(limit), 5)),
+                "offset": max(0, int(offset)),
+            }
+            if match_id is not None:
+                params["matchId"] = int(match_id)
+            if league_id is not None:
+                params["leagueId"] = int(league_id)
+            if bookmaker_id is not None:
+                params["bookmakerId"] = int(bookmaker_id)
+            # Note: Highlightly rejects a `type` query param on /odds.
+
+            response = requests.get(
+                f"{self.base_url}/odds",
+                headers=self.headers,
+                params=params,
+                timeout=20,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching odds: {e}")
             return {"data": [], "pagination": {}}
-        except Exception:
+
+    def get_bookmakers(self, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+        """List available bookmakers."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/bookmakers",
+                headers=self.headers,
+                params={"limit": limit, "offset": offset},
+                timeout=20,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching bookmakers: {e}")
             return {"data": [], "pagination": {}}
     
     def get_team_stats(self, team_id: int, from_date: str) -> Dict[str, Any]:

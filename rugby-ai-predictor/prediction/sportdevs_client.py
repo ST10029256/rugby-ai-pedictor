@@ -26,9 +26,13 @@ def _load_local_env_files() -> None:
     here = Path(__file__).resolve()
     functions_root = here.parents[1]  # rugby-ai-predictor/
     repo_root = functions_root.parent
-    for p in (repo_root / ".env", functions_root / ".env"):
+    for p in (
+        repo_root / ".env",
+        functions_root / ".env",
+        functions_root / ".env.local",
+    ):
         if p.exists():
-            load_dotenv(dotenv_path=p, override=False)
+            load_dotenv(dotenv_path=p, override=p.name == ".env.local")
 
 
 _load_local_env_files()
@@ -64,9 +68,10 @@ TEAM_NAME_ALIAS_BY_NORMALIZED: Dict[str, str] = {
 class SportDevsClient:
     """Client for SportDevs Rugby API"""
     
-    def __init__(self, api_key: str, base_url: str = "https://rugby.sportdevs.com"):
+    def __init__(self, api_key: str, base_url: str = "https://rugby.sportdevs.com", db_path: Optional[str] = None):
         self.base_url = base_url
         self.api_key = api_key
+        self.db_path = db_path
         self.headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {api_key}",
@@ -82,6 +87,7 @@ class SportDevsClient:
         ).strip()
         self.apisports_session = requests.Session()
         self._apisports_game_cache: Dict[int, Dict[str, Any]] = {}
+        self._highlightly_client: Optional[Any] = None
         if self.apisports_api_key:
             self.apisports_session.headers.update({
                 "x-apisports-key": self.apisports_api_key,
@@ -232,6 +238,21 @@ class SportDevsClient:
         self._apisports_game_cache[gid] = row
         return row
 
+    def _get_highlightly_client(self) -> Optional[Any]:
+        if self._highlightly_client is not None:
+            return self._highlightly_client
+        api_key = (os.getenv("HIGHLIGHTLY_API_KEY") or os.getenv("RAPIDAPI_KEY") or "").strip()
+        if not api_key:
+            return None
+        try:
+            from .highlightly_client import HighlightlyRugbyAPI
+
+            self._highlightly_client = HighlightlyRugbyAPI(api_key, use_rapidapi=False)
+            return self._highlightly_client
+        except Exception as exc:
+            logger.debug("Highlightly client unavailable: %s", exc)
+            return None
+
     def get_match_odds(
         self,
         match_id: Optional[int] = None,
@@ -240,61 +261,27 @@ class SportDevsClient:
         home_team: Optional[str] = None,
         away_team: Optional[str] = None,
     ) -> Optional[Dict]:
-        """Get betting odds for a specific match"""
-        resolved_match_id = self._safe_int(match_id)
+        """Get betting odds via Highlightly (bookmakers + prematch markets)."""
+        hl_client = self._get_highlightly_client()
+        if hl_client is not None:
+            try:
+                from .highlightly_odds import fetch_highlightly_match_odds
 
-        # 1) Prefer API-Sports Rugby odds (real bookmakers).
-        # Docs: odds endpoint supports `game`, `league`, `season`, `bookmaker`, `bet`.
-        if resolved_match_id is not None:
-            payload = self._make_apisports_request("odds", params={"game": int(resolved_match_id)})
-            parsed = self._extract_apisports_match_odds(
-                payload,
-                game_id=resolved_match_id,
-                home_team=home_team,
-                away_team=away_team,
-                match_date=match_date,
-            )
-            if parsed:
-                return parsed
-
-        # 1b) Resolve API-Sports game id by league/date/teams when local id doesn't match provider id.
-        season = self._season_from_match_date(match_date, league_id=league_id)
-        if league_id is not None and season is not None:
-            api_league_id = APISPORTS_LEAGUE_BY_LOCAL_ID.get(int(league_id), int(league_id))
-            resolved_game_id = self._resolve_apisports_game_id(
-                league_id=int(api_league_id),
-                season=int(season),
-                match_date=match_date,
-                home_team=home_team,
-                away_team=away_team,
-            )
-            if resolved_game_id is not None:
-                payload = self._make_apisports_request("odds", params={"game": int(resolved_game_id)})
-                parsed = self._extract_apisports_match_odds(
-                    payload,
-                    game_id=resolved_game_id,
+                parsed = fetch_highlightly_match_odds(
+                    hl_client,
+                    match_id=match_id,
+                    league_id=league_id,
+                    match_date=match_date,
                     home_team=home_team,
                     away_team=away_team,
-                    match_date=match_date,
+                    db_path=self.db_path,
                 )
                 if parsed:
                     return parsed
+            except Exception as exc:
+                logger.debug("Highlightly odds fetch failed: %s", exc)
 
-            # 1c) Fallback to league+season odds and match by team names (best-effort).
-            payload = self._make_apisports_request(
-                "odds",
-                params={"league": int(api_league_id), "season": int(season)},
-            )
-            parsed = self._extract_apisports_match_odds(
-                payload,
-                home_team=home_team,
-                away_team=away_team,
-                match_date=match_date,
-            )
-            if parsed:
-                return parsed
-
-        # 2) Fallback to legacy SportDevs if available (best-effort).
+        resolved_match_id = self._safe_int(match_id)
         odds_data = self._make_request("odds/full-time-results")
         if isinstance(odds_data, list):
             for row in odds_data:

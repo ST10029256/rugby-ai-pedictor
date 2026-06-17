@@ -249,7 +249,7 @@ class V5RuntimePredictor(V4RuntimePredictor):
             )
         self.db_path = db_path
         self.v5_assets = v5_assets
-        self.sportdevs_client = SportDevsClient(sportdevs_api_key or "")
+        self.sportdevs_client = SportDevsClient(sportdevs_api_key or "", db_path=db_path)
 
         with open(v5_assets["meta_path"], "rb") as f:
             self.meta: Dict[str, Any] = pickle.load(f)

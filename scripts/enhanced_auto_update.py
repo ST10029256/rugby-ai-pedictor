@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
 Enhanced Auto-Update Script
-Automatically pulls ALL results and upcoming games from API-Sports Rugby.
+Pulls results and upcoming games from Highlightly for all configured leagues.
 """
 
 import argparse
 import sqlite3
 import os
+import sys
 import logging
-import requests
 import json
-import time
-import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "rugby-ai-predictor"))
 
 try:
     from dotenv import load_dotenv
@@ -35,18 +36,19 @@ def _load_local_env_files() -> None:
     candidates = [
         root / ".env",
         root / "rugby-ai-predictor" / ".env",
+        root / "rugby-ai-predictor" / ".env.local",
     ]
     for p in candidates:
         if p.exists():
-            load_dotenv(dotenv_path=p, override=False)
+            load_dotenv(dotenv_path=p, override=True)
 
-# Try to import Highlightly API
-try:
-    from prediction.highlightly_client import HighlightlyRugbyAPI
-    HIGHLIGHTLY_AVAILABLE = True
-except ImportError:
-    HighlightlyRugbyAPI = None  # type: ignore
-    HIGHLIGHTLY_AVAILABLE = False
+from prediction.highlightly_client import HighlightlyRugbyAPI
+from prediction.highlightly_leagues import (
+    HIGHLIGHTLY_LEAGUE_MAPPINGS,
+    ensure_highlightly_match_id_column,
+    fetch_games_from_highlightly,
+    parse_api_key,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -59,17 +61,10 @@ LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4")
 LIVE_MODEL_CHANNEL = os.getenv("LIVE_MODEL_CHANNEL", "prod_100")
 LIVE_MODEL_VERSION = os.getenv("LIVE_MODEL_VERSION", f"{LIVE_MODEL_FAMILY}:{LIVE_MODEL_CHANNEL}")
 
-# League mappings for local league IDs + API-Sports Rugby IDs
+# Local league IDs + Highlightly league IDs (all 9 leagues)
 LEAGUE_MAPPINGS = {
-    4986: {"name": "Rugby Championship", "apisports_id": 85},
-    4446: {"name": "United Rugby Championship", "apisports_id": 76},
-    5069: {"name": "Currie Cup", "apisports_id": 37},
-    4574: {"name": "Rugby World Cup", "apisports_id": 69},
-    4551: {"name": "Super Rugby", "apisports_id": 71},
-    4430: {"name": "French Top 14", "apisports_id": 16},
-    4414: {"name": "English Premiership Rugby", "apisports_id": 13},
-    4714: {"name": "Six Nations Championship", "apisports_id": 51},
-    5479: {"name": "Rugby Union International Friendlies", "apisports_id": 84},
+    our_id: {"name": name, "highlightly_id": hl_id}
+    for our_id, (name, hl_id) in HIGHLIGHTLY_LEAGUE_MAPPINGS.items()
 }
 
 YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}  # e.g. Premiership, Top 14, URC
@@ -161,120 +156,6 @@ def get_team_id(conn: sqlite3.Connection, team_name: str, league_id: int) -> Opt
     
     logger.info(f"Created new team: {team_name} (ID: {team_id})")
     return team_id
-
-def fetch_games_from_apisports(
-    league_id: int,
-    apisports_id: Optional[int],
-    league_name: str,
-    api_key: str,
-    include_history: bool = False,
-    days_ahead: int = 180,
-    days_back: int = 14,
-) -> List[Dict[str, Any]]:
-    """Fetch games from API-Sports Rugby for a specific league."""
-    if not apisports_id:
-        logger.warning(f"No API-Sports ID configured for {league_name}; skipping.")
-        return []
-    if not api_key:
-        logger.warning("APISPORTS_RUGBY_KEY not set; cannot fetch games.")
-        return []
-
-    logger.info(f"Fetching games for {league_name} (API-Sports ID: {apisports_id})")
-    session = requests.Session()
-    headers = {"x-apisports-key": api_key}
-    games: List[Dict[str, Any]] = []
-
-    now = datetime.utcnow()
-    current_year = now.year
-    season_years = [current_year, current_year - 1]
-    if include_history:
-        season_years = list(range(2008, current_year + 1))
-
-    for season in season_years:
-        try:
-            resp = session.get(
-                "https://v1.rugby.api-sports.io/games",
-                headers=headers,
-                params={"league": apisports_id, "season": season},
-                timeout=30,
-            )
-            if resp.status_code != 200:
-                logger.warning(f"{league_name} season={season}: HTTP {resp.status_code}")
-                continue
-            payload = resp.json() if resp.content else {}
-            errors = payload.get("errors")
-            if errors:
-                logger.warning(f"{league_name} season={season}: API errors={errors}")
-            rows = payload.get("response") or []
-            logger.info(f"{league_name} season={season}: fetched {len(rows)} rows")
-            for row in rows:
-                try:
-                    dt_raw = row.get("date")
-                    dt = datetime.fromisoformat(str(dt_raw).replace("Z", "+00:00")) if dt_raw else None
-                    if dt is None:
-                        continue
-                    teams = row.get("teams") or {}
-                    home_name = str((teams.get("home") or {}).get("name") or "").strip()
-                    away_name = str((teams.get("away") or {}).get("name") or "").strip()
-                    if not home_name or not away_name:
-                        continue
-                    scores = row.get("scores") or {}
-                    home_score = scores.get("home")
-                    away_score = scores.get("away")
-                    games.append(
-                        {
-                            "event_id": safe_to_int(row.get("id"), 0),
-                            "date_event": dt.date(),
-                            "home_team": home_name,
-                            "away_team": away_name,
-                            "home_score": safe_to_int(home_score) if home_score is not None else None,
-                            "away_score": safe_to_int(away_score) if away_score is not None else None,
-                            "league_id": league_id,
-                            "league_name": league_name,
-                            "season": f"{season}-{season + 1}",
-                            "timestamp": dt.isoformat(),
-                            "status": ((row.get("status") or {}).get("short") or (row.get("status") or {}).get("long")),
-                        }
-                    )
-                except Exception as ex_row:
-                    logger.debug(f"Row parse failed for {league_name} season={season}: {ex_row}")
-        except Exception as ex:
-            logger.warning(f"{league_name} season={season}: request failed ({ex})")
-
-    unique_games: List[Dict[str, Any]] = []
-    seen_games = set()
-    for game in games:
-        game_key = (game["date_event"], game["home_team"], game["away_team"])
-        if game_key not in seen_games:
-            seen_games.add(game_key)
-            unique_games.append(game)
-
-    logger.info(f"Found {len(games)} total rows, {len(unique_games)} unique rows for {league_name}")
-
-    today = datetime.utcnow().date()
-    min_date = today - timedelta(days=days_back)
-    max_date = today + timedelta(days=days_ahead)
-    in_window: List[Dict[str, Any]] = []
-    past = 0
-    future = 0
-    for g in unique_games:
-        d = g.get("date_event")
-        if not d:
-            continue
-        if d < min_date or d > max_date:
-            continue
-        in_window.append(g)
-        if d < today:
-            past += 1
-        elif d > today:
-            future += 1
-
-    logger.info(
-        f"Date window for {league_name}: {min_date} .. {max_date} | "
-        f"in-window={len(in_window)} (past={past}, today={len(in_window) - past - future}, future={future})"
-    )
-    return in_window
-
 
 def _ensure_prediction_snapshot_table(conn: sqlite3.Connection) -> None:
     cur = conn.cursor()
@@ -595,98 +476,23 @@ def get_manual_urc_fixtures() -> List[Dict[str, Any]]:
     logger.info(f"Generated {len(games)} manual URC fixtures")
     return games
 
-def fetch_highlightly_friendlies(conn: sqlite3.Connection, league_id: int, league_name: str, sportsdb_id: int) -> int:
-    """Fetch international friendlies from Highlightly API for upcoming months"""
-    
-    if not HIGHLIGHTLY_AVAILABLE or HighlightlyRugbyAPI is None:
-        logger.info("Highlightly API not available, skipping Highlightly fetch")
-        return 0
-    
-    if sportsdb_id != 5479:  # Only for International Friendlies
-        return 0
-    
-    logger.info(f"Fetching international friendlies from Highlightly API for {league_name}...")
-    
-    api_key = os.getenv('HIGHLIGHTLY_API_KEY', '9c27c5f8-9437-4d42-8cc9-5179d3290a5b')
-    api = HighlightlyRugbyAPI(api_key)
-    
-    # Target upcoming months for friendlies
-    current_date = datetime.now().date()
-    upcoming_dates = []
-    
-    # Get friendlies for next ~2 months
-    for i in range(60):
-        target_date = current_date + timedelta(days=i)
-        upcoming_dates.append(target_date.strftime('%Y-%m-%d'))
-    
-    added_count = 0
-    cursor = conn.cursor()
-    
-    for date in upcoming_dates[:20]:  # Limit to 20 API calls
-        try:
-            matches = api.get_matches(date=date, limit=100)
-            
-            if matches and 'data' in matches:
-                for match in matches['data']:
-                    # Only process international friendlies
-                    league_name_match = match.get('league', {}).get('name', '')
-                    if 'friendly' not in league_name_match.lower() or 'international' not in league_name_match.lower():
-                        continue
-                    
-                    home_team = match.get('homeTeam', {}).get('name', '')
-                    away_team = match.get('awayTeam', {}).get('name', '')
-                    
-                    if not home_team or not away_team:
-                        continue
-                    
-                    # EXCLUDE women's matches - check for women's indicators
-                    home_lower = home_team.lower()
-                    away_lower = away_team.lower()
-                    women_indicators = [' w rugby', ' women', ' womens', ' w ', ' women\'s', ' w\'s']
-                    is_women_home = any(indicator in home_lower for indicator in women_indicators)
-                    is_women_away = any(indicator in away_lower for indicator in women_indicators)
-                    
-                    if is_women_home or is_women_away:
-                        continue  # Skip women's matches
-                    
-                    # Normalize team names
-                    if not home_team.endswith(' Rugby'):
-                        home_team = f"{home_team} Rugby"
-                    if not away_team.endswith(' Rugby'):
-                        away_team = f"{away_team} Rugby"
-                    
-                    # Get or create teams
-                    home_id = get_team_id(conn, home_team, league_id)
-                    away_id = get_team_id(conn, away_team, league_id)
-                    
-                    # Check if event exists
-                    cursor.execute("""
-                        SELECT id FROM event 
-                        WHERE league_id = ? AND home_team_id = ? AND away_team_id = ? AND date_event = ?
-                    """, (league_id, home_id, away_id, date))
-                    
-                    if not cursor.fetchone():
-                        cursor.execute("""
-                            INSERT INTO event (league_id, home_team_id, away_team_id, date_event)
-                            VALUES (?, ?, ?, ?)
-                        """, (league_id, home_id, away_id, date))
-                        added_count += 1
-                        logger.info(f"Added from Highlightly: {date} | {home_team} vs {away_team}")
-        
-        except Exception as e:
-            logger.warning(f"Error fetching Highlightly data for {date}: {e}")
-            continue
-    
-    conn.commit()
-    return added_count
-
 def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, Any]], snapshot_runtime: Optional[SnapshotRuntime] = None) -> int:
     """Update database with fetched games."""
+    ensure_highlightly_match_id_column(conn)
     cursor = conn.cursor()
     updated_count = 0
     
     for game in games:
         try:
+            hl_match_id = game.get("highlightly_match_id") or (
+                game.get("event_id") if int(game.get("event_id") or 0) >= 1_000_000 else None
+            )
+            if hl_match_id is not None:
+                try:
+                    hl_match_id = int(hl_match_id)
+                except (TypeError, ValueError):
+                    hl_match_id = None
+
             # Get team IDs
             home_team_id = get_team_id(conn, game['home_team'], game['league_id'])
             away_team_id = get_team_id(conn, game['away_team'], game['league_id'])
@@ -696,7 +502,7 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
             
             # BULLETPROOF: Check by league, DATE (no time), and teams
             cursor.execute("""
-                SELECT id, home_score, away_score, date_event
+                SELECT id, home_score, away_score, date_event, highlightly_match_id
                 FROM event 
                 WHERE league_id = ?
                 AND home_team_id = ? 
@@ -707,7 +513,7 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
             existing = cursor.fetchone()
             
             if existing:
-                event_id, existing_home_score, existing_away_score, existing_date = existing
+                event_id, existing_home_score, existing_away_score, existing_date, existing_hl_id = existing
                 
                 # Only update if we have NEW score data (game completed)
                 if (game['home_score'] is not None and game['away_score'] is not None and
@@ -715,12 +521,28 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                     
                     cursor.execute("""
                         UPDATE event 
-                        SET home_score = ?, away_score = ?, season = COALESCE(?, season), timestamp = COALESCE(?, timestamp), status = COALESCE(?, status)
+                        SET home_score = ?, away_score = ?, season = COALESCE(?, season),
+                            timestamp = COALESCE(?, timestamp), status = COALESCE(?, status),
+                            highlightly_match_id = COALESCE(?, highlightly_match_id)
                         WHERE id = ?
-                    """, (game['home_score'], game['away_score'], game.get('season'), game.get('timestamp'), game.get('status'), event_id))
+                    """, (
+                        game['home_score'], game['away_score'], game.get('season'),
+                        game.get('timestamp'), game.get('status'), hl_match_id, event_id,
+                    ))
                     
                     updated_count += 1
                     logger.info(f"Score added: {game['home_team']} {game['home_score']}-{game['away_score']} {game['away_team']}")
+                elif hl_match_id and not existing_hl_id:
+                    cursor.execute(
+                        "UPDATE event SET highlightly_match_id = ? WHERE id = ?",
+                        (hl_match_id, event_id),
+                    )
+                    updated_count += 1
+                    logger.debug(
+                        "Linked Highlightly match id %s -> event %s",
+                        hl_match_id,
+                        event_id,
+                    )
                 else:
                     # Game already exists - skip silently (prevent duplicates)
                     logger.debug(f"Skipped existing: {game['home_team']} vs {game['away_team']} on {game['date_event']}")
@@ -742,8 +564,11 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                 
                 # Safe to insert
                 cursor.execute("""
-                    INSERT INTO event (home_team_id, away_team_id, date_event, home_score, away_score, league_id, season, timestamp, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO event (
+                        home_team_id, away_team_id, date_event, home_score, away_score,
+                        league_id, season, timestamp, status, highlightly_match_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     home_team_id,
                     away_team_id,
@@ -754,6 +579,7 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                     game.get('season'),
                     game.get('timestamp'),
                     game.get('status'),
+                    hl_match_id,
                 ))
                 event_id = cursor.lastrowid
                 
@@ -769,14 +595,15 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
     return updated_count
 
 def main():
-    """Main function to update all leagues."""
-    parser = argparse.ArgumentParser(description='Auto-update rugby games from API-Sports Rugby')
+    """Main function to update all leagues from Highlightly."""
+    parser = argparse.ArgumentParser(description='Auto-update rugby games from Highlightly')
     parser.add_argument('--db', default='data.sqlite', help='Database file path')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
-    parser.add_argument('--include-history', action='store_true', help='Also fetch history seasons (slower, more API calls)')
-    parser.add_argument('--api-key', default=None, help='API-Sports rugby key (or APISPORTS_RUGBY_KEY env var)')
+    parser.add_argument('--include-history', action='store_true', help='Fetch all available Highlightly seasons (slower)')
+    parser.add_argument('--api-key', default=None, help='Highlightly API key (or HIGHLIGHTLY_API_KEY env var)')
     parser.add_argument('--days-ahead', type=int, default=180, help='Only keep fixtures up to N days ahead (default: 180)')
     parser.add_argument('--days-back', type=int, default=14, help='Also keep fixtures up to N days back (default: 14)')
+    parser.add_argument('--sleep', type=float, default=0.35, help='Delay between Highlightly API calls in seconds')
     parser.add_argument('--disable-event-snapshots', action='store_true', help='Disable event-driven pre-kickoff snapshots/finalization')
     parser.add_argument('--snapshot-before-minutes', type=int, default=20, help='Snapshot when kickoff is within this many minutes (default: 20)')
     parser.add_argument('--snapshot-after-minutes', type=int, default=5, help='Allow late snapshot this many minutes after kickoff (default: 5)')
@@ -786,14 +613,22 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    logger.info("🚀 Starting automated game update from API-Sports Rugby")
-    api_key = args.api_key or os.getenv("APISPORTS_RUGBY_KEY", "") or os.getenv("APISPORTS_API_KEY", "")
-    if not api_key:
-        logger.error("Missing API key. Pass --api-key or set APISPORTS_RUGBY_KEY")
+    logger.info("🚀 Starting automated game update from Highlightly")
+    try:
+        api_key = parse_api_key(args.api_key)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return
+
+    api = HighlightlyRugbyAPI(api_key=api_key, use_rapidapi=False)
+    probe = api.get_leagues(limit=1)
+    if not probe.get("data"):
+        logger.error("Highlightly auth failed. Check HIGHLIGHTLY_API_KEY in rugby-ai-predictor/.env")
         return
     
     # Connect to database
     conn = sqlite3.connect(args.db)
+    ensure_highlightly_match_id_column(conn)
     snapshot_runtime = SnapshotRuntime(
         db_path=args.db,
         enabled=not args.disable_event_snapshots,
@@ -802,71 +637,55 @@ def main():
     )
     
     total_updated = 0
-    
-    # Process ALL leagues for upcoming games - some leagues may have upcoming fixtures even if not in main season
-    # (e.g., Six Nations in Feb-Mar, Rugby Championship in Aug-Oct, etc.)
+    request_counter = [0]
     all_leagues = list(LEAGUE_MAPPINGS.keys())
     
-    logger.info(f"🔄 Fetching upcoming games for ALL {len(all_leagues)} leagues")
-    logger.info("📚 This ensures we capture upcoming fixtures for all leagues, regardless of season")
+    logger.info(f"🔄 Fetching games for ALL {len(all_leagues)} leagues from Highlightly")
     
-    # Process ALL leagues to check for upcoming games
     for league_id in all_leagues:
-        if league_id in LEAGUE_MAPPINGS:
-            league_info = LEAGUE_MAPPINGS[league_id]
-            league_name = league_info['name']
-            apisports_id = league_info['apisports_id']
+        league_info = LEAGUE_MAPPINGS[league_id]
+        league_name = league_info['name']
+        highlightly_id = league_info['highlightly_id']
+        
+        logger.info(f"🔄 Fetching games for {league_name} (Highlightly ID: {highlightly_id})")
+        
+        try:
+            games = fetch_games_from_highlightly(
+                api,
+                league_id,
+                league_name,
+                highlightly_id,
+                include_history=args.include_history,
+                days_ahead=args.days_ahead,
+                days_back=args.days_back,
+                sleep_s=max(0.0, args.sleep),
+                request_counter=request_counter,
+            )
             
-            logger.info(f"🔄 Fetching UPCOMING games for {league_name} (API-Sports ID: {apisports_id})")
-            
-            try:
-                games = fetch_games_from_apisports(
-                    league_id,
-                    apisports_id,
-                    league_name,
-                    api_key=api_key,
-                    include_history=args.include_history,
-                    days_ahead=args.days_ahead,
-                    days_back=args.days_back,
-                )
+            if games:
+                updated = update_database_with_games(conn, games, snapshot_runtime=snapshot_runtime)
+                total_updated += updated
+                logger.info(f"✅ {league_name}: Updated {updated} games")
                 
-                if games:
-                    # Update database
-                    updated = update_database_with_games(conn, games, snapshot_runtime=snapshot_runtime)
-                    total_updated += updated
-                    logger.info(f"✅ {league_name}: Updated {updated} upcoming games")
-                    
-                    # For URC, also check manual fixtures to fill any gaps
-                    if league_id == 4446:
-                        logger.info(f"🔍 {league_name}: Checking for additional manual fixtures...")
-                        missing_added = detect_and_add_missing_games(conn, league_id, league_name, snapshot_runtime=snapshot_runtime)
-                        if missing_added > 0:
-                            total_updated += missing_added
-                            logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games from manual fixtures")
-                else:
-                    logger.warning(f"⚠️ {league_name}: No upcoming games found from API")
-                    # Try manual fixtures as fallback (especially for URC)
+                if league_id == 4446:
+                    logger.info(f"🔍 {league_name}: Checking for additional manual fixtures...")
                     missing_added = detect_and_add_missing_games(conn, league_id, league_name, snapshot_runtime=snapshot_runtime)
                     if missing_added > 0:
                         total_updated += missing_added
                         logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games from manual fixtures")
-                
-                # For International Friendlies, also fetch from Highlightly API
-                if league_id == 5479:
-                    highlightly_added = fetch_highlightly_friendlies(conn, league_id, league_name, 5479)
-                    if highlightly_added > 0:
-                        total_updated += highlightly_added
-                        logger.info(f"🎯 {league_name}: Added {highlightly_added} friendlies from Highlightly API")
+            else:
+                logger.warning(f"⚠️ {league_name}: No games found from Highlightly")
+                missing_added = detect_and_add_missing_games(conn, league_id, league_name, snapshot_runtime=snapshot_runtime)
+                if missing_added > 0:
+                    total_updated += missing_added
+                    logger.info(f"🔧 {league_name}: Auto-added {missing_added} missing upcoming games from manual fixtures")
                     
-            except Exception as e:
-                logger.error(f"❌ Error updating {league_name}: {e}")
-    
-    # All leagues have been processed above - no need to skip any
-    logger.info("✅ All leagues processed for upcoming games")
+        except Exception as e:
+            logger.error(f"❌ Error updating {league_name}: {e}")
     
     conn.close()
     
-    logger.info(f"🎉 Update complete! Total games updated: {total_updated}")
+    logger.info(f"🎉 Update complete! Total games updated: {total_updated} (Highlightly API calls: {request_counter[0]})")
     if snapshot_runtime and snapshot_runtime.enabled:
         s = snapshot_runtime.stats
         logger.info(
@@ -875,7 +694,6 @@ def main():
         )
     
     if total_updated > 0:
-        # Create retraining flag file for new games - ALWAYS retrain when new data is found
         retrain_flag_file = "retrain_needed.flag"
         try:
             with open(retrain_flag_file, 'w') as f:
@@ -885,11 +703,10 @@ def main():
                     "timestamp": datetime.now().isoformat(),
                     "reason": "new_games_fetched",
                     "trigger": "comprehensive_data_update",
-                    "description": f"Found {total_updated} new/updated games from API-Sports Rugby - retraining all models to capture latest data"
+                    "description": f"Found {total_updated} new/updated games from Highlightly - retraining all models to capture latest data"
                 }, f, indent=2)
             logger.info(f"🔄 Created retraining flag file: {retrain_flag_file}")
             logger.info("🤖 Models will be retrained with new game data")
-            logger.info("📊 This ensures AI captures all new upcoming games and completed results")
         except Exception as e:
             logger.error(f"Failed to create retraining flag file: {e}")
     else:

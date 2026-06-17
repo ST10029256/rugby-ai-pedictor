@@ -9,6 +9,7 @@
         "venv/**",
         ".venv/",
         ".venv/**",
+        ".env.local",
         "__pycache__/",
         "__pycache__/**",
         "*.pyc",

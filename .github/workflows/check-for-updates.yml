@@ -31,7 +31,7 @@ on:
     paths:
       - 'scripts/detect_completed_matches.py'
       - 'scripts/enhanced_auto_update.py'
-      - 'override_all_target_leagues_from_apisports.py'
+      - 'rugby-ai-predictor/prediction/highlightly_leagues.py'
       - 'cleanup_duplicates_post_update.py'
       - 'scripts/sync_to_firestore.py'
       - '.github/workflows/check-for-updates.yml'
@@ -130,11 +130,11 @@ jobs:
           required_files=(
             data.sqlite
             requirements.txt
-            override_all_target_leagues_from_apisports.py
             cleanup_duplicates_post_update.py
             scripts/enhanced_auto_update.py
             scripts/detect_completed_matches.py
             scripts/sync_to_firestore.py
+            rugby-ai-predictor/prediction/highlightly_leagues.py
           )
 
           for file in "${required_files[@]}"; do
@@ -156,27 +156,26 @@ jobs:
 
           echo "database_sha256=$(sha256sum data.sqlite | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
-      - name: Full historical refresh from API-Sports
+      - name: Full historical refresh from Highlightly
         if: steps.mode.outputs.full_refresh == 'true'
         env:
-          APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-          APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
           HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          api_key="${APISPORTS_RUGBY_KEY:-${APISPORTS_API_KEY:-}}"
-          if [[ -z "$api_key" ]]; then
-            echo "::error::Set APISPORTS_RUGBY_KEY or APISPORTS_API_KEY in repository secrets."
+          if [[ -z "${HIGHLIGHTLY_API_KEY:-}" ]]; then
+            echo "::error::Set HIGHLIGHTLY_API_KEY in repository secrets."
             exit 1
           fi
 
           for attempt in 1 2 3; do
-            if python override_all_target_leagues_from_apisports.py \
-              --api-key "$api_key" \
+            if python scripts/enhanced_auto_update.py \
               --db data.sqlite \
-              --max-requests 7500; then
+              --verbose \
+              --include-history \
+              --days-ahead 365 \
+              --days-back 4000; then
               break
             fi
 
@@ -190,8 +189,6 @@ jobs:
       - name: Daily incremental upcoming and recent sync
         if: steps.mode.outputs.full_refresh != 'true'
         env:
-          APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-          APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
           HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         shell: bash
         run: |
@@ -221,8 +218,6 @@ jobs:
 
       - name: Detect newly completed matches after synchronization
         env:
-          APISPORTS_API_KEY: ${{ secrets.APISPORTS_API_KEY }}
-          APISPORTS_RUGBY_KEY: ${{ secrets.APISPORTS_RUGBY_KEY }}
           HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
         shell: bash
         run: |

@@ -118,6 +118,53 @@ function Get-FailedFunctionNames {
     return @($names)
 }
 
+$EnvFile = Join-Path $PSScriptRoot "..\rugby-ai-predictor\.env"
+$EnvBackup = $null
+$SecretKeysToStrip = @("HIGHLIGHTLY_API_KEY")
+
+function Protect-FunctionsEnvFile {
+    if (-not (Test-Path $EnvFile)) {
+        return
+    }
+
+    $lines = Get-Content $EnvFile
+    $kept = @()
+    $stripped = @()
+    foreach ($line in $lines) {
+        $isSecret = $false
+        foreach ($key in $SecretKeysToStrip) {
+            if ($line -match "^\s*$key\s*=") {
+                $isSecret = $true
+                break
+            }
+        }
+        if ($isSecret) {
+            $stripped += $line
+        } else {
+            $kept += $line
+        }
+    }
+
+    if ($stripped.Count -eq 0) {
+        return
+    }
+
+    $script:EnvBackup = ($lines | Out-String)
+    Set-Content -Path $EnvFile -Value $kept -Encoding UTF8
+    Write-Host "Temporarily removed secret env vars from rugby-ai-predictor/.env for deploy: $($SecretKeysToStrip -join ', ')" -ForegroundColor Yellow
+}
+
+function Restore-FunctionsEnvFile {
+    if ($null -eq $script:EnvBackup) {
+        return
+    }
+    Set-Content -Path $EnvFile -Value $script:EnvBackup -Encoding UTF8
+    Write-Host "Restored rugby-ai-predictor/.env after deploy." -ForegroundColor Yellow
+    $script:EnvBackup = $null
+}
+
+Protect-FunctionsEnvFile
+try {
 Write-Host "Running full deploy: firebase.cmd deploy --project $ProjectId" -ForegroundColor Cyan
 $fullOutput = Invoke-FirebaseDeploy -Args @("deploy", "--project", $ProjectId)
 $fullExitCode = $LASTEXITCODE
@@ -152,3 +199,7 @@ foreach ($fn in $failedFunctions) {
 
 Write-Host ""
 Write-Host "Full deploy had partial failures, but failed functions were retried successfully." -ForegroundColor Green
+}
+finally {
+    Restore-FunctionsEnvFile
+}

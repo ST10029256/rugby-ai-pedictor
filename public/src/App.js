@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Box, Drawer, Typography, CssBaseline, ThemeProvider, createTheme, CircularProgress, IconButton, useMediaQuery, Button } from '@mui/material';
+import { Box, Drawer, Typography, CssBaseline, ThemeProvider, createTheme, IconButton, useMediaQuery, Button } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -14,7 +14,6 @@ import NewsFeed from './components/NewsFeed';
 import LeagueStandings from './components/LeagueStandings';
 import RugbyBallLoader from './components/RugbyBallLoader';
 import HistoricalPredictions from './components/HistoricalPredictions';
-import MatchDataHealth from './components/MatchDataHealth';
 import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
 import { MEDIA_URLS } from './utils/storageUrls';
 import './App.css';
@@ -66,18 +65,6 @@ function toUTCDateFromIso(isoDate) {
   const [y, m, d] = String(isoDate).split('-').map((v) => parseInt(v, 10));
   if (!y || !m || !d) return null;
   return new Date(Date.UTC(y, m - 1, d));
-}
-
-function toIsoFromUTCDate(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function getWeekStartMondayUTC(date) {
-  const d = new Date(date.getTime());
-  const day = d.getUTCDay(); // 0=Sun, 1=Mon, ... 6=Sat
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  d.setUTCDate(d.getUTCDate() + diffToMonday);
-  return d;
 }
 
 function getNextMatchWeek(matches) {
@@ -387,6 +374,8 @@ function App() {
   const [generating, setGenerating] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', 'standings', or 'history'
+  const [allLeaguesScanLoading, setAllLeaguesScanLoading] = useState(false);
+  const [allLeaguesScanReport, setAllLeaguesScanReport] = useState('');
   const [userPreferences] = useState({
     followed_teams: [],
     followed_leagues: [],
@@ -412,14 +401,6 @@ function App() {
       return String(a?.away_team || '').localeCompare(String(b?.away_team || ''));
     });
   }, [upcomingWindow.matches, selectedLeague]);
-  const upcomingWindowLabel = useMemo(() => {
-    if (!upcomingWindow.startDateIso || !upcomingWindow.endDateIso) return '';
-    const start = toUTCDateFromIso(upcomingWindow.startDateIso);
-    const end = toUTCDateFromIso(upcomingWindow.endDateIso);
-    if (!start || !end) return '';
-    const opts = { month: 'short', day: 'numeric' };
-    return `${start.toLocaleDateString('en-US', opts)} - ${end.toLocaleDateString('en-US', opts)}`;
-  }, [upcomingWindow.startDateIso, upcomingWindow.endDateIso]);
 
   // Check authentication on mount - auto-login if valid key is stored
   useEffect(() => {
@@ -739,6 +720,7 @@ function App() {
         }
         setLoading(false);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load leagues once on auth; avoid re-running when selectedLeague changes
   }, [authenticated]);
 
   useEffect(() => {
@@ -849,10 +831,12 @@ function App() {
 
         const concurrency = Math.min(2, tasks.length || 1);
         let taskIndex = 0;
-        let filledCount = 0;
-        let noBookmakerCount = 0;
-        let invalidOddsCount = 0;
-        let preservedManualCount = 0;
+        const oddsFillStats = {
+          filled: 0,
+          noBookmaker: 0,
+          invalid: 0,
+          preserved: 0,
+        };
 
         const worker = async () => {
           while (!cancelled && taskIndex < tasks.length) {
@@ -874,28 +858,30 @@ function App() {
               const bookmakerCount = Number(pred.bookmaker_count || 0);
               const homeProb = Number(pred.bookmaker_home_win_prob);
               if (bookmakerCount <= 0) {
-                noBookmakerCount += 1;
+                oddsFillStats.noBookmaker += 1;
                 continue;
               }
 
               const homeOdds = toDecimalOdds(homeProb);
               const awayOdds = toDecimalOdds(1 - homeProb);
               if (!homeOdds || !awayOdds) {
-                invalidOddsCount += 1;
+                oddsFillStats.invalid += 1;
                 continue;
               }
 
+              const wasCancelled = cancelled;
+              const activeRunId = runId;
+              const auto = { home: homeOdds, away: awayOdds };
               setManualOdds((prev) => {
-                if (cancelled || runId !== autoOddsRunRef.current) {
+                if (wasCancelled || activeRunId !== autoOddsRunRef.current) {
                   return prev;
                 }
                 const existing = prev[idKey] || prev[nameKey];
                 if (existing && Number(existing.home) > 0 && Number(existing.away) > 0) {
-                  preservedManualCount += 1;
+                  oddsFillStats.preserved += 1;
                   return prev;
                 }
-                const auto = { home: homeOdds, away: awayOdds };
-                filledCount += 1;
+                oddsFillStats.filled += 1;
                 return {
                   ...prev,
                   [idKey]: auto,
@@ -913,10 +899,10 @@ function App() {
           return;
         }
         // Keep variables to make troubleshooting easy if logs are re-enabled.
-        void filledCount;
-        void noBookmakerCount;
-        void invalidOddsCount;
-        void preservedManualCount;
+        void oddsFillStats.filled;
+        void oddsFillStats.noBookmaker;
+        void oddsFillStats.invalid;
+        void oddsFillStats.preserved;
       } catch (_) {
         // Keep manual input usable even if autofill fails.
       }
@@ -1228,6 +1214,79 @@ function App() {
     }
   }, [isMobile]);
 
+  const checkAllLeaguesUpcoming = useCallback(async () => {
+    setAllLeaguesScanLoading(true);
+    setAllLeaguesScanReport('Scanning all leagues...\n');
+
+    const leagueEntries = Object.entries(LEAGUE_CONFIGS).sort((a, b) =>
+      String(a[1].name).localeCompare(String(b[1].name))
+    );
+    const lines = [`Checked at ${new Date().toLocaleString()}`, ''];
+
+    try {
+      const results = await Promise.all(
+        leagueEntries.map(async ([id, config]) => {
+          const leagueId = Number(id);
+          try {
+            const result = await getUpcomingMatches({ league_id: leagueId, limit: 50 });
+            const payload = result?.data || {};
+            const matches = payload.matches || [];
+            const debug = payload.debug || {};
+            return {
+              leagueId,
+              name: config.name,
+              matches,
+              debug,
+              error: payload.error || null,
+            };
+          } catch (err) {
+            return {
+              leagueId,
+              name: config.name,
+              matches: [],
+              debug: {},
+              error: err?.message || String(err),
+            };
+          }
+        })
+      );
+
+      let totalUpcoming = 0;
+      for (const row of results) {
+        const count = row.matches.length;
+        totalUpcoming += count;
+        lines.push(`${row.name} (${row.leagueId}): ${count} upcoming`);
+        if (row.error) {
+          lines.push(`  error: ${row.error}`);
+        }
+        if (row.debug && Object.keys(row.debug).length > 0) {
+          const d = row.debug;
+          lines.push(
+            `  api: checked=${d.total_checked ?? '?'} past=${d.past_dates ?? '?'} mode=${d.query_mode || 'unknown'}`
+          );
+        }
+        if (count === 0) {
+          lines.push('  (no upcoming fixtures returned)');
+        } else {
+          row.matches.slice(0, 5).forEach((m) => {
+            lines.push(`  - ${m.home_team || '?'} vs ${m.away_team || '?'} — ${m.date_event || 'TBD'}`);
+          });
+          if (count > 5) {
+            lines.push(`  ... +${count - 5} more`);
+          }
+        }
+        lines.push('');
+      }
+
+      lines.push(`Total: ${totalUpcoming} upcoming across ${results.filter((r) => r.matches.length > 0).length}/${results.length} leagues`);
+      setAllLeaguesScanReport(lines.join('\n'));
+    } catch (err) {
+      setAllLeaguesScanReport(`Scan failed: ${err?.message || String(err)}`);
+    } finally {
+      setAllLeaguesScanLoading(false);
+    }
+  }, []);
+
   // Show login widget if not authenticated
   if (checkingAuth) {
     return (
@@ -1416,7 +1475,53 @@ function App() {
           selectedLeague={selectedLeague}
           onLeagueChange={handleLeagueChange}
         />
-        <MatchDataHealth />
+        <Box sx={{ mt: 2, width: '100%' }}>
+          <Button
+            fullWidth
+            variant="outlined"
+            disabled={allLeaguesScanLoading}
+            onClick={checkAllLeaguesUpcoming}
+            sx={{
+              textTransform: 'none',
+              color: '#10b981',
+              borderColor: 'rgba(16, 185, 129, 0.4)',
+              mb: 1.5,
+              '&:hover': {
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.08)',
+              },
+            }}
+          >
+            {allLeaguesScanLoading ? 'Checking all leagues...' : 'Check upcoming (all leagues)'}
+          </Button>
+          {allLeaguesScanReport ? (
+            <Box
+              sx={{
+                p: 1.5,
+                borderRadius: '10px',
+                backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                maxHeight: 280,
+                overflow: 'auto',
+              }}
+            >
+              <Typography
+                component="pre"
+                sx={{
+                  m: 0,
+                  fontFamily: 'Consolas, Monaco, monospace',
+                  fontSize: '0.72rem',
+                  lineHeight: 1.45,
+                  color: '#d1d5db',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {allLeaguesScanReport}
+              </Typography>
+            </Box>
+          ) : null}
+        </Box>
       </Box>
     </Box>
   );
@@ -1938,7 +2043,7 @@ function App() {
                   variant="caption"
                   sx={{ display: 'block', mt: 0.45, color: '#cbd5e1', fontSize: '0.77rem' }}
                 >
-                  Odds are grouped by match date below and auto-filled from live bookmakers when available (API-Sports usually provides pre-match odds 1-7 days before kickoff). Edit or clear fields to use your own odds.
+                  Odds are grouped by match date below and auto-filled from Highlightly bookmakers when available (typically 1–7 days before kickoff). Edit or clear fields to use your own odds.
                 </Typography>
               </Box>
 

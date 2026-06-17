@@ -36,6 +36,9 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+rugby_predictor_root = os.path.join(project_root, "rugby-ai-predictor")
+if rugby_predictor_root not in sys.path:
+    sys.path.insert(0, rugby_predictor_root)
 
 # Configure logging
 logging.basicConfig(
@@ -172,6 +175,12 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
     Returns: dict with counts of synced, updated, and skipped matches
     """
     cursor = sqlite_conn.cursor()
+
+    try:
+        from prediction.highlightly_leagues import ensure_highlightly_match_id_column
+        ensure_highlightly_match_id_column(sqlite_conn)
+    except Exception:
+        pass
     
     # Get all matches from SQLite
     cursor.execute("""
@@ -187,6 +196,7 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
             e.round,
             e.venue,
             e.status,
+            e.highlightly_match_id,
             t1.name as home_team_name,
             t2.name as away_team_name
         FROM event e
@@ -236,6 +246,7 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
             'round': match_data.get('round'),
             'venue': match_data.get('venue'),
             'status': match_data.get('status'),
+            'highlightly_match_id': match_data.get('highlightly_match_id'),
             'synced_at': SERVER_TIMESTAMP if SERVER_TIMESTAMP else datetime.now()
         }
         

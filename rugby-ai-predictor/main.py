@@ -836,7 +836,7 @@ def get_enhanced_predictor():
     if _enhanced_predictor is None:
         try:
             from prediction.enhanced_predictor import EnhancedRugbyPredictor as ERP
-            api_key = os.getenv('HIGHLIGHTLY_API_KEY', '9c27c5f8-9437-4d42-8cc9-5179d3290a5b')
+            api_key = os.getenv('HIGHLIGHTLY_API_KEY', '').strip()
             if api_key:
                 # Reuse the same DB path strategy as `get_predictor`
                 db_path = os.getenv("DB_PATH")
@@ -922,7 +922,7 @@ def get_news_service(predictor=None, db_path: Optional[str] = None):
     )
 
 
-@https_fn.on_call(timeout_sec=300, memory=512)  # 5 minute timeout, 512MB memory
+@https_fn.on_call(timeout_sec=300, memory=512, secrets=["HIGHLIGHTLY_API_KEY"])  # 5 minute timeout, 512MB memory
 def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get match prediction
@@ -1168,7 +1168,7 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e), 'traceback': error_trace}
 
 
-@https_fn.on_request(timeout_sec=120, memory=1024)
+@https_fn.on_request(timeout_sec=120, memory=1024, secrets=["HIGHLIGHTLY_API_KEY"])
 def predict_match_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for match prediction with explicit CORS support
@@ -1440,27 +1440,9 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
         try:
             logger.info("Getting Firestore client...")
             db = get_firestore_client()
-            matches_ref = db.collection('matches')
             
             logger.info(f"Querying matches collection for league_id={league_id}")
-            # CRITICAL FIX: Increased limit significantly to capture all upcoming matches
-            # Without ordering by date, upcoming matches may be mixed with completed ones
-            # A limit of 200 was too low - many leagues have 400+ total matches
-            if league_id:
-                matches_ref = matches_ref.where('league_id', '==', int(league_id))
-                logger.info(f"Applied league_id filter: {int(league_id)}")
-            
-            # Increased limit to 1000 to ensure we capture all upcoming matches
-            # Even if a league has 400 completed matches, we'll still get the 66 upcoming ones
-            matches_ref = matches_ref.limit(1000)  # Increased from 200 to capture all upcoming matches
-            logger.info("Using limit=1000 to ensure all upcoming matches are captured")
-            
-            logger.info("Starting to stream matches from Firestore...")
-            
-            matches = []
-            # Use UTC-aware datetime for comparison with Firestore Timestamps,
-            # but evaluate "today" in a local timezone so matches don't disappear during game day.
-            from datetime import timezone
+            from datetime import timezone, time
             import os
             try:
                 from zoneinfo import ZoneInfo  # py3.9+
@@ -1473,6 +1455,41 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             now_utc = datetime.now(timezone.utc)
             now_local = now_utc.astimezone(local_tz)
             today_local = now_local.date()
+            today_start_local = datetime.combine(today_local, time.min).replace(tzinfo=local_tz)
+            today_start_utc = today_start_local.astimezone(timezone.utc)
+
+            fetch_limit = max(int(limit) * 4, 200)
+            base_ref = db.collection('matches')
+            if league_id:
+                base_ref = base_ref.where('league_id', '==', int(league_id))
+                logger.info(f"Applied league_id filter: {int(league_id)}")
+
+            # Query upcoming fixtures directly instead of scanning the first N docs
+            # (leagues with 1000+ historical matches never reached future fixtures).
+            used_fallback_scan = False
+            try:
+                matches_ref = (
+                    base_ref
+                    .where('date_event', '>=', today_start_utc)
+                    .order_by('date_event')
+                    .limit(fetch_limit)
+                )
+                logger.info(
+                    "Using indexed upcoming query: date_event >= %s (limit=%s)",
+                    today_start_utc.isoformat(),
+                    fetch_limit,
+                )
+            except Exception as query_error:
+                used_fallback_scan = True
+                logger.warning(
+                    "Indexed upcoming query failed (%s); falling back to recent scan",
+                    query_error,
+                )
+                matches_ref = base_ref.limit(1000)
+            
+            logger.info("Starting to stream matches from Firestore...")
+            
+            matches = []
             total_checked = 0
             with_scores = 0
             past_dates = 0
@@ -1715,7 +1732,8 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                 'team_lookup_count': len(team_ids_to_lookup),
                 'team_names_found': len(team_names),
                 'women_filtered': women_filtered,
-                'sample_dates': sample_dates[:3]  # First 3 samples
+                'sample_dates': sample_dates[:3],  # First 3 samples
+                'query_mode': 'fallback_scan' if used_fallback_scan else 'indexed_upcoming',
             }
             
             logger.info(f"=== get_upcoming_matches completed ===")
@@ -1735,7 +1753,7 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e), 'matches': []}
 
 
-@https_fn.on_call()
+@https_fn.on_call(secrets=["HIGHLIGHTLY_API_KEY"])
 def get_live_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get live matches
@@ -1760,7 +1778,7 @@ def get_live_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e)}
 
 
-@https_fn.on_request()
+@https_fn.on_request(secrets=["HIGHLIGHTLY_API_KEY"])
 def get_live_matches_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for live matches with explicit CORS support.
@@ -4031,7 +4049,7 @@ def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
 
 
-@https_fn.on_request(timeout_sec=60, memory=512)
+@https_fn.on_request(timeout_sec=60, memory=512, secrets=["HIGHLIGHTLY_API_KEY"])
 def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
     """
     Get league standings from Highlightly API
@@ -4106,21 +4124,18 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
         import os
         
         logger.info("Checking for API keys...")
-        # Prefer RapidAPI key, then try Highlightly key, then fallback
-        # Use RapidAPI by default since it has better rate limits
-        use_rapidapi = True  # Use RapidAPI by default for better reliability
-        api_key = os.getenv('RAPIDAPI_KEY') or os.getenv('HIGHLIGHTLY_API_KEY') or '54433ab41dmsha07945d6bccefe5p1fa4bcjsn14b167626050'
-        
+        use_rapidapi = False
+        api_key = (os.getenv("HIGHLIGHTLY_API_KEY") or os.getenv("RAPIDAPI_KEY") or "").strip()
+
         if api_key:
-            api_type = "RapidAPI" if use_rapidapi else "Highlightly Direct"
-            logger.info(f"✅ API key found ({api_type}): {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else ''} (length: {len(api_key)})")
+            logger.info(
+                f"✅ Highlightly API key found: {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else ''} (length: {len(api_key)})"
+            )
         else:
-            logger.error("❌ No API key found in environment variables")
-            logger.error("   RAPIDAPI_KEY: " + str(os.getenv('RAPIDAPI_KEY')))
-            logger.error("   HIGHLIGHTLY_API_KEY: " + str(os.getenv('HIGHLIGHTLY_API_KEY')))
+            logger.error("❌ HIGHLIGHTLY_API_KEY not configured")
             response_data = {
                 'success': False,
-                'error': 'RAPIDAPI_KEY or HIGHLIGHTLY_API_KEY not configured',
+                'error': 'HIGHLIGHTLY_API_KEY not configured',
                 'standings': None
             }
             return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
@@ -5013,6 +5028,15 @@ def apisports_rugby_webhook_http(req: https_fn.Request) -> https_fn.Response:
         }
         return https_fn.Response("", status=204, headers=preflight_headers)
 
+    return https_fn.Response(
+        json.dumps({
+            "success": False,
+            "error": "API-Sports webhook disabled. Match data is synced via Highlightly pipeline.",
+        }),
+        status=410,
+        headers=response_headers,
+    )
+
     try:
         # Optional shared-secret guard (recommended in production).
         expected_secret = str(os.getenv("APISPORTS_WEBHOOK_SECRET", "")).strip()
@@ -5556,7 +5580,15 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 if selected_year is None:
                     selected_year = available_years[0] if available_years else None
             else:
-                selected_year = current_year if current_year in available_years else (available_years[0] if available_years else None)
+                # Prefer the most recent season with completed results (avoids empty 2026 off-season views).
+                selected_year = None
+                for yr in available_years:
+                    completed = int((year_summary.get(str(yr)) or {}).get("completed", 0) or 0)
+                    if completed > 0:
+                        selected_year = str(yr)
+                        break
+                if selected_year is None:
+                    selected_year = current_year if current_year in available_years else (available_years[0] if available_years else None)
         else:
             selected_year = str(year)
 

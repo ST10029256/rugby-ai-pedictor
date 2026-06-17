@@ -21,7 +21,7 @@ Set-Location $RepoRoot
 Write-Host "1. Detecting completed matches (scores from API)..."
 python scripts/detect_completed_matches.py --db $DbPath --verbose
 
-Write-Host "2. Fetching new games and upcoming fixtures (all leagues)..."
+Write-Host "2. Fetching games from Highlightly (all leagues)..."
 Write-Host "   Days ahead: $DaysAhead | Days back: $DaysBack (captures current year completed games)"
 $updateArgs = @("scripts/enhanced_auto_update.py", "--db", $DbPath, "--days-ahead", "$DaysAhead", "--days-back", "$DaysBack", "--verbose")
 if ($IncludeHistory) { $updateArgs += "--include-history" }
