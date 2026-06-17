@@ -92,6 +92,60 @@ def load_v5_assets_from_storage(league_id: int, bucket_name: str) -> Optional[Di
     return _load_runtime_assets_from_storage(league_id=league_id, bucket_name=bucket_name, family="v5")
 
 
+def model_exists_in_storage(
+    league_id: int,
+    bucket_name: str,
+    preferred_family: Optional[str] = None,
+) -> bool:
+    """Return True when a trained model is published for this league (no download)."""
+    if not bucket_name:
+        return False
+    try:
+        from google.cloud import storage  # type: ignore
+    except Exception:
+        return False
+
+    clean_bucket_name = (
+        bucket_name.replace("gs://", "").replace("https://", "").replace("http://", "").split("/")[0]
+    )
+    client = storage.Client()
+    bucket = client.bucket(clean_bucket_name)
+
+    family = (preferred_family or LIVE_MODEL_FAMILY).strip().lower()
+    families: List[str] = [family]
+    if family == "v5":
+        families.append("v4")
+
+    for fam in families:
+        meta_candidates = [
+            f"models/league_{league_id}_model_maz_maxed_{fam}_meta.pkl",
+            f"models/artifacts/league_{league_id}_model_maz_maxed_{fam}_meta.pkl",
+        ]
+        meta_found = False
+        for path in meta_candidates:
+            if bucket.blob(path).exists():
+                meta_found = True
+                break
+        if not meta_found:
+            continue
+        seed_prefix = f"models/league_{league_id}_model_maz_maxed_{fam}_seed_"
+        if any(b.name.endswith(".pt") for b in bucket.list_blobs(prefix=seed_prefix)):
+            return True
+
+    if not ALLOW_LEGACY_MODEL_FALLBACK:
+        return False
+
+    legacy_blob_paths = [
+        f"models/league_{league_id}_model_maz_maxed_v4_runtime.pkl",
+        f"models/artifacts/league_{league_id}_model_maz_maxed_v4_runtime.pkl",
+        f"models/league_{league_id}_model_xgboost.pkl",
+        f"models/artifacts/league_{league_id}_model_xgboost.pkl",
+        f"models/league_{league_id}_model_optimized.pkl",
+        f"models/artifacts_optimized/league_{league_id}_model_optimized.pkl",
+    ]
+    return any(bucket.blob(path).exists() for path in legacy_blob_paths)
+
+
 def load_model_from_storage(
     league_id: int,
     bucket_name: str

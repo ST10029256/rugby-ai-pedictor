@@ -22,6 +22,7 @@ LEAGUE_MAPPINGS = {
     4414: "English Premiership Rugby",
     4714: "Six Nations Championship",
     5479: "Rugby Union International Friendlies",
+    5480: "Nations Championship",
 }
 
 

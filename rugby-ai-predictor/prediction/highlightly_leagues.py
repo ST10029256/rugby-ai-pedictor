@@ -1,4 +1,4 @@
-"""Highlightly league mappings and fixture fetch helpers (all 9 rugby leagues)."""
+"""Highlightly league mappings and fixture fetch helpers (all 10 rugby leagues)."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ HIGHLIGHTLY_LEAGUE_MAPPINGS: Dict[int, Tuple[str, int]] = {
     4414: ("English Premiership Rugby", 11847),
     4714: ("Six Nations Championship", 44185),
     5479: ("Rugby Union International Friendlies", 72268),
+    5480: ("Nations Championship", 124179),
 }
 
 YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}
@@ -99,6 +100,8 @@ def season_candidates(now: datetime, our_league_id: int, include_history: bool) 
         seasons = [year + 1, year, year - 1, 2023]
     elif our_league_id == 5479:
         seasons = [year, year - 1, year - 2]
+    elif our_league_id == 5480:
+        seasons = [year, year + 1, year - 1]
     else:
         seasons = [year, year - 1, year - 2]
 

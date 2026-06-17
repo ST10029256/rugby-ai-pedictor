@@ -52,6 +52,10 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
   }, [predictions]);
 
   const getDisplayScores = (prediction) => {
+    if (prediction.show_scores === false || prediction.model_available === false) {
+      return null;
+    }
+
     let homeScore = prediction.home_score;
     let awayScore = prediction.away_score;
 
@@ -73,8 +77,11 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
   };
 
   const getDisplayWinner = (prediction) => {
-    const { homeNum, awayNum } = getDisplayScores(prediction);
-    if (homeNum === awayNum) return 'Draw';
+    const scores = getDisplayScores(prediction);
+    if (scores) {
+      const { homeNum, awayNum } = scores;
+      if (homeNum === awayNum) return 'Draw';
+    }
     return prediction.winner || prediction.predicted_winner || prediction.home_team;
   };
 
@@ -99,9 +106,10 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
     return winner === 'Draw';
   }).length;
   const avgScoreDiff = predictions.reduce((sum, p) => {
-    const { homeNum, awayNum } = getDisplayScores(p);
-    return sum + Math.abs(homeNum - awayNum);
-  }, 0) / predictions.length;
+    const scores = getDisplayScores(p);
+    if (!scores) return sum;
+    return sum + Math.abs(scores.homeNum - scores.awayNum);
+  }, 0) / Math.max(1, predictions.filter((p) => getDisplayScores(p)).length);
 
   const hybridCount = predictions.filter(
     (p) => p.prediction_type === 'Hybrid AI + Manual Odds' || p.prediction_type === 'Hybrid AI + Live Odds'
@@ -180,12 +188,14 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
               const winner = getDisplayWinner(prediction);
               const homeTeam = prediction.home_team;
               const awayTeam = prediction.away_team;
+              const scoreDisplay = getDisplayScores(prediction);
               
               let winnerClass = 'winner-home';
               if (winner === awayTeam) winnerClass = 'winner-away';
               else if (winner === 'Draw') winnerClass = 'winner-draw';
 
-              const { homeScore, awayScore } = getDisplayScores(prediction);
+              const homeScore = scoreDisplay ? scoreDisplay.homeScore : null;
+              const awayScore = scoreDisplay ? scoreDisplay.awayScore : null;
               
               // Score extraction complete
 
@@ -270,7 +280,8 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                       </Box>
                     </Box>
                   )}
-                  {/* Score Display - Matching Streamlit exactly */}
+                  {/* Score Display - only when AI model has historical training */}
+                  {scoreDisplay && (
                   <Box sx={{ my: 2 }}>
                     <Box sx={{ borderTop: '1px solid #4b5563', mb: 3 }} />
                     <Grid container spacing={{ xs: 0.5, sm: 2, md: 3 }} alignItems="center" justifyContent="center" sx={{ mb: 2, width: '100%', margin: '0 auto', maxWidth: '100%' }}>
@@ -351,6 +362,19 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                       </Grid>
                     </Grid>
                   </Box>
+                  )}
+
+                  {!scoreDisplay && (
+                    <Box sx={{ my: 2, textAlign: 'center' }}>
+                      <Box sx={{ borderTop: '1px solid #4b5563', mb: 2 }} />
+                      <Typography sx={{ color: '#94a3b8', fontSize: '0.9rem', mb: 1 }}>
+                        {homeTeam} vs {awayTeam}
+                      </Typography>
+                      <Typography sx={{ color: '#cbd5e1', fontSize: '0.82rem' }}>
+                        AI score predictions appear once this league has enough completed games trained.
+                      </Typography>
+                    </Box>
+                  )}
 
                   {/* Manual Odds Display */}
                   {prediction.manual_odds && prediction.manual_odds.home > 0 && prediction.manual_odds.away > 0 && (

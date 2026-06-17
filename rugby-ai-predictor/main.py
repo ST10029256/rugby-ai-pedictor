@@ -922,6 +922,114 @@ def get_news_service(predictor=None, db_path: Optional[str] = None):
     )
 
 
+def _parse_match_id_from_request(data: Dict[str, Any]) -> Optional[int]:
+    raw_match_id = data.get("event_id") or data.get("match_id") or data.get("id")
+    try:
+        if raw_match_id is not None and str(raw_match_id).strip() != "":
+            return int(raw_match_id)
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _resolve_predicted_winner_for_save(
+    prediction: Dict[str, Any],
+    home_team: str,
+    away_team: str,
+) -> str:
+    """Normalize winner for Firestore, using scores only when AI scores are available."""
+    predicted_winner = prediction.get("winner") or prediction.get("predicted_winner")
+    if predicted_winner == "Home":
+        predicted_winner = home_team
+    elif predicted_winner == "Away":
+        predicted_winner = away_team
+
+    home_score = prediction.get("predicted_home_score")
+    away_score = prediction.get("predicted_away_score")
+    show_scores = prediction.get("show_scores", True) and home_score is not None and away_score is not None
+    if not show_scores:
+        if predicted_winner in {home_team, away_team, "Draw"}:
+            return str(predicted_winner)
+        home_win_prob = float(prediction.get("home_win_prob") or prediction.get("bookmaker_home_win_prob") or 0.5)
+        if home_win_prob > 0.5:
+            return home_team
+        if home_win_prob < 0.5:
+            return away_team
+        return "Draw"
+
+    if home_score > away_score:
+        score_based_winner = home_team
+    elif away_score > home_score:
+        score_based_winner = away_team
+    else:
+        score_based_winner = "Draw"
+
+    if predicted_winner:
+        if (predicted_winner == home_team and home_score <= away_score) or (
+            predicted_winner == away_team and away_score <= home_score
+        ) or (predicted_winner == "Draw" and home_score != away_score):
+            return score_based_winner
+        return str(predicted_winner)
+    return score_based_winner
+
+
+def _run_standard_prediction(
+    predictor: Any,
+    data: Dict[str, Any],
+    league_id_int: int,
+    home_team: str,
+    away_team: str,
+    match_date: str,
+) -> Dict[str, Any]:
+    """Use hybrid AI when a model exists; otherwise return bookmaker odds only."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    odds_only = bool(data.get("odds_only", False))
+    match_id = _parse_match_id_from_request(data)
+    has_model = predictor.has_trained_model(league_id_int)
+
+    if odds_only or not has_model:
+        logger.info(
+            "Bookmaker odds only for league %s (odds_only=%s, has_model=%s)",
+            league_id_int,
+            odds_only,
+            has_model,
+        )
+        return predictor.predict_match_odds_only(
+            str(home_team),
+            str(away_team),
+            league_id_int,
+            str(match_date),
+            match_id=match_id,
+        )
+
+    try:
+        prediction = predictor.predict_match(
+            str(home_team),
+            str(away_team),
+            league_id_int,
+            str(match_date),
+            match_id=match_id,
+        )
+        prediction.setdefault("model_available", True)
+        prediction.setdefault("show_scores", True)
+        return prediction
+    except (FileNotFoundError, ValueError, RuntimeError, ImportError) as model_err:
+        logger.warning(
+            "Model prediction unavailable for league %s, falling back to odds only: %s",
+            league_id_int,
+            model_err,
+        )
+        return predictor.predict_match_odds_only(
+            str(home_team),
+            str(away_team),
+            league_id_int,
+            str(match_date),
+            match_id=match_id,
+        )
+
+
 @https_fn.on_call(timeout_sec=300, memory=512, secrets=["HIGHLIGHTLY_API_KEY"])  # 5 minute timeout, 512MB memory
 def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
@@ -1005,15 +1113,13 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                 logger.info("Using standard predictor...")
                 predictor = get_predictor()
                 logger.info("Predictor obtained, calling predict_match...")
-                raw_match_id = data.get('event_id') or data.get('match_id') or data.get('id')
-                match_id = None
-                try:
-                    if raw_match_id is not None and str(raw_match_id).strip() != "":
-                        match_id = int(raw_match_id)
-                except (TypeError, ValueError):
-                    match_id = None
-                prediction = predictor.predict_match(
-                    str(home_team), str(away_team), league_id_int, str(match_date), match_id=match_id
+                prediction = _run_standard_prediction(
+                    predictor,
+                    data,
+                    league_id_int,
+                    str(home_team),
+                    str(away_team),
+                    str(match_date),
                 )
                 logger.info(f"Prediction received: {prediction}")
             except FileNotFoundError as fnf:
@@ -1084,39 +1190,9 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     db = get_firestore_client()
                     prediction_ref = db.collection('predictions').document(str(event_id))
                     
-                    # Extract predicted winner - always verify against scores for consistency
-                    home_score = prediction.get('predicted_home_score', 0)
-                    away_score = prediction.get('predicted_away_score', 0)
-                    
-                    # Determine winner from scores (most reliable source)
-                    if home_score > away_score:
-                        score_based_winner = home_team
-                    elif away_score > home_score:
-                        score_based_winner = away_team
-                    else:
-                        score_based_winner = 'Draw'
-                    
-                    # Get predicted_winner from prediction, but always verify against scores
-                    predicted_winner = prediction.get('winner') or prediction.get('predicted_winner')
-                    
-                    # Convert 'Home'/'Away' to team names if needed
-                    if predicted_winner == 'Home':
-                        predicted_winner = home_team
-                    elif predicted_winner == 'Away':
-                        predicted_winner = away_team
-                    elif predicted_winner == 'Draw':
-                        predicted_winner = 'Draw'
-                    
-                    # Safety check: if predicted_winner doesn't match scores, use score-based winner
-                    if predicted_winner:
-                        if (predicted_winner == home_team and home_score <= away_score) or \
-                           (predicted_winner == away_team and away_score <= home_score) or \
-                           (predicted_winner == 'Draw' and home_score != away_score):
-                            # Mismatch detected - use score-based winner
-                            predicted_winner = score_based_winner
-                    else:
-                        # No predicted_winner provided, use score-based
-                        predicted_winner = score_based_winner
+                    predicted_winner = _resolve_predicted_winner_for_save(
+                        prediction, str(home_team), str(away_team)
+                    )
                     
                     # Prepare prediction data to save
                     prediction_data = {
@@ -1132,6 +1208,9 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                         'home_win_prob': prediction.get('home_win_prob'),
                         'confidence': prediction.get('confidence'),
                         'prediction_type': prediction.get('prediction_type', 'AI Only'),
+                        'model_available': prediction.get('model_available', True),
+                        'show_scores': prediction.get('show_scores', True),
+                        'bookmaker_count': prediction.get('bookmaker_count', 0),
                         'model_type': prediction.get('model_type', LIVE_MODEL_FAMILY),
                         'model_family': prediction.get('model_family', LIVE_MODEL_FAMILY),
                         'model_channel': prediction.get('model_channel', LIVE_MODEL_CHANNEL),
@@ -1256,15 +1335,13 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                 logger.info("Using standard predictor...")
                 predictor = get_predictor()
                 logger.info("Predictor obtained, calling predict_match...")
-                raw_match_id = data.get('event_id') or data.get('match_id') or data.get('id')
-                match_id = None
-                try:
-                    if raw_match_id is not None and str(raw_match_id).strip() != "":
-                        match_id = int(raw_match_id)
-                except (TypeError, ValueError):
-                    match_id = None
-                prediction = predictor.predict_match(
-                    str(home_team), str(away_team), league_id_int, str(match_date), match_id=match_id
+                prediction = _run_standard_prediction(
+                    predictor,
+                    data,
+                    league_id_int,
+                    str(home_team),
+                    str(away_team),
+                    str(match_date),
                 )
                 logger.info(f"Prediction received: {prediction}")
             except Exception as e:
@@ -1325,39 +1402,9 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                     db = get_firestore_client()
                     prediction_ref = db.collection('predictions').document(str(event_id))
                     
-                    # Extract predicted winner - always verify against scores for consistency
-                    home_score = prediction.get('predicted_home_score', 0)
-                    away_score = prediction.get('predicted_away_score', 0)
-                    
-                    # Determine winner from scores (most reliable source)
-                    if home_score > away_score:
-                        score_based_winner = home_team
-                    elif away_score > home_score:
-                        score_based_winner = away_team
-                    else:
-                        score_based_winner = 'Draw'
-                    
-                    # Get predicted_winner from prediction, but always verify against scores
-                    predicted_winner = prediction.get('winner') or prediction.get('predicted_winner')
-                    
-                    # Convert 'Home'/'Away' to team names if needed
-                    if predicted_winner == 'Home':
-                        predicted_winner = home_team
-                    elif predicted_winner == 'Away':
-                        predicted_winner = away_team
-                    elif predicted_winner == 'Draw':
-                        predicted_winner = 'Draw'
-                    
-                    # Safety check: if predicted_winner doesn't match scores, use score-based winner
-                    if predicted_winner:
-                        if (predicted_winner == home_team and home_score <= away_score) or \
-                           (predicted_winner == away_team and away_score <= home_score) or \
-                           (predicted_winner == 'Draw' and home_score != away_score):
-                            # Mismatch detected - use score-based winner
-                            predicted_winner = score_based_winner
-                    else:
-                        # No predicted_winner provided, use score-based
-                        predicted_winner = score_based_winner
+                    predicted_winner = _resolve_predicted_winner_for_save(
+                        prediction, str(home_team), str(away_team)
+                    )
                     
                     # Prepare prediction data to save
                     prediction_data = {
@@ -1373,6 +1420,9 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                         'home_win_prob': prediction.get('home_win_prob'),
                         'confidence': prediction.get('confidence'),
                         'prediction_type': prediction.get('prediction_type', 'AI Only'),
+                        'model_available': prediction.get('model_available', True),
+                        'show_scores': prediction.get('show_scores', True),
+                        'bookmaker_count': prediction.get('bookmaker_count', 0),
                         'model_type': prediction.get('model_type', LIVE_MODEL_FAMILY),
                         'model_family': prediction.get('model_family', LIVE_MODEL_FAMILY),
                         'model_channel': prediction.get('model_channel', LIVE_MODEL_CHANNEL),
@@ -3646,7 +3696,7 @@ def get_news_feed_http(req: https_fn.Request) -> https_fn.Response:
             
             # Official-account social leagues should still use the NewsService even when
             # SQLite has no nearby fixtures, because their feed can come directly from X.
-            official_social_league_ids = {4414, 4430, 4446, 4551, 4574, 4714, 5479}
+            official_social_league_ids = {4414, 4430, 4446, 4551, 4574, 4714, 5479, 5480}
 
             # If SQLite DB is present but has no usable data for this league, fall back to Firestore
             # (this commonly happens when the bundled SQLite doesn't include a league, or date parsing fails).

@@ -45,6 +45,7 @@ const LEAGUE_CONFIGS = {
   4414: { name: "English Premiership Rugby", neutral_mode: false },
   4714: { name: "Six Nations Championship", neutral_mode: true },
   5479: { name: "Rugby Union International Friendlies", neutral_mode: true },
+  5480: { name: "Nations Championship", neutral_mode: true },
 };
 const DEBUG_UPCOMING_LEAGUES = new Set([4714]);
 
@@ -850,6 +851,7 @@ function App() {
                 match_date: matchDate,
                 event_id: match.id || match.event_id || null,
                 enhanced: false,
+                odds_only: true,
               });
               if (cancelled || runId !== autoOddsRunRef.current) {
                 continue;
@@ -862,8 +864,14 @@ function App() {
                 continue;
               }
 
-              const homeOdds = toDecimalOdds(homeProb);
-              const awayOdds = toDecimalOdds(1 - homeProb);
+              const avgHome = Number(pred.avg_home_odds);
+              const avgAway = Number(pred.avg_away_odds);
+              const homeOdds = avgHome > 0
+                ? Number(avgHome.toFixed(2))
+                : toDecimalOdds(homeProb);
+              const awayOdds = avgAway > 0
+                ? Number(avgAway.toFixed(2))
+                : toDecimalOdds(1 - homeProb);
               if (!homeOdds || !awayOdds) {
                 oddsFillStats.invalid += 1;
                 continue;
@@ -1004,12 +1012,90 @@ function App() {
 
           if (result && result.data && !result.data.error) {
             const pred = result.data;
+            const modelAvailable = pred.model_available !== false && pred.show_scores !== false;
+            const bookmakerHomeWinProb = pred.bookmaker_home_win_prob ?? null;
+            const bookmakerCount = pred.bookmaker_count ?? 0;
+
+            if (!modelAvailable) {
+              let homeWinProb = pred.home_win_prob ?? bookmakerHomeWinProb ?? 0.5;
+              let predictionType = pred.prediction_type || 'Bookmaker Odds Only';
+
+              if (odds && odds.home > 0 && odds.away > 0) {
+                const homeDecimal = parseFloat(odds.home);
+                const awayDecimal = parseFloat(odds.away);
+                if (homeDecimal > 0 && awayDecimal > 0) {
+                  const homeProbRaw = 1.0 / homeDecimal;
+                  const awayProbRaw = 1.0 / awayDecimal;
+                  const totalProb = homeProbRaw + awayProbRaw;
+                  homeWinProb = homeProbRaw / totalProb;
+                  predictionType = 'Bookmaker Odds Only';
+                }
+              }
+
+              let winner;
+              let finalConfidence;
+              const apiWinner = pred.predicted_winner || pred.winner;
+              if (apiWinner === 'Draw' || apiWinner === 'draw') {
+                winner = 'Draw';
+                finalConfidence = 0.5;
+              } else if (apiWinner === 'Home' || apiWinner === match.home_team) {
+                winner = match.home_team;
+                finalConfidence = homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb;
+              } else if (apiWinner === 'Away' || apiWinner === match.away_team) {
+                winner = match.away_team;
+                finalConfidence = homeWinProb < 0.5 ? 1 - homeWinProb : homeWinProb;
+              } else if (homeWinProb > 0.5) {
+                winner = match.home_team;
+                finalConfidence = homeWinProb;
+              } else if (homeWinProb < 0.5) {
+                winner = match.away_team;
+                finalConfidence = 1 - homeWinProb;
+              } else {
+                winner = 'Draw';
+                finalConfidence = 0.5;
+              }
+
+              let confidenceLevel = 'Close Match Expected';
+              if (finalConfidence >= 0.8) {
+                confidenceLevel = 'High Confidence';
+              } else if (finalConfidence >= 0.65) {
+                confidenceLevel = 'Moderate Confidence';
+              }
+
+              newPredictions.push({
+                home_team: match.home_team,
+                away_team: match.away_team,
+                date: matchDate,
+                kickoff_at: kickoffAt,
+                winner,
+                predicted_winner: winner,
+                confidence: `${(finalConfidence * 100).toFixed(1)}%`,
+                home_score: null,
+                away_score: null,
+                show_scores: false,
+                model_available: false,
+                home_win_prob: homeWinProb,
+                league_id: selectedLeague,
+                intensity: 'Odds-based pick (no AI score yet)',
+                confidence_level: confidenceLevel,
+                score_diff: null,
+                prediction_type: predictionType,
+                ai_probability: null,
+                hybrid_probability: homeWinProb,
+                bookmaker_probability: bookmakerHomeWinProb ?? homeWinProb,
+                bookmaker_count: bookmakerCount,
+                confidence_boost: 0,
+                home_team_id: match.home_team_id,
+                away_team_id: match.away_team_id,
+                live_odds_available: bookmakerCount > 0 || !!(odds && odds.home > 0 && odds.away > 0),
+                manual_odds: odds,
+              });
+              continue;
+            }
 
             // Extract AI prediction values (matching Streamlit make_expert_prediction)
             const aiHomeWinProb = pred.ai_home_win_prob ?? pred.home_win_prob ?? 0.5;
             const backendHybridProb = pred.hybrid_home_win_prob ?? pred.home_win_prob ?? aiHomeWinProb;
-            const bookmakerHomeWinProb = pred.bookmaker_home_win_prob ?? null;
-            const bookmakerCount = pred.bookmaker_count ?? 0;
             const predictedHomeScore = parseFloat(pred.predicted_home_score || 0);
             const predictedAwayScore = parseFloat(pred.predicted_away_score || 0);
             const displayHomeScore = Math.round(predictedHomeScore);
@@ -1126,6 +1212,8 @@ function App() {
               away_team_id: match.away_team_id,
               live_odds_available: bookmakerCount > 0 || !!(odds && odds.home > 0 && odds.away > 0),
               manual_odds: odds,
+              show_scores: true,
+              model_available: true,
             };
 
             newPredictions.push(finalPrediction);

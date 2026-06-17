@@ -68,7 +68,7 @@ LEAGUE_MAPPINGS = {
 }
 
 YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}  # e.g. Premiership, Top 14, URC
-SINGLE_YEAR_LEAGUE_IDS = {4551, 4714, 4986, 5069, 5479}  # e.g. Super Rugby, Six Nations, etc.
+SINGLE_YEAR_LEAGUE_IDS = {4551, 4714, 4986, 5069, 5479, 5480}  # e.g. Super Rugby, Six Nations, etc.
 
 # Max rounds to scan (used with --scan-rounds). These are conservative caps.
 MAX_ROUNDS_BY_LEAGUE: Dict[int, int] = {
@@ -81,6 +81,7 @@ MAX_ROUNDS_BY_LEAGUE: Dict[int, int] = {
     5069: 14,  # Currie Cup (varies)
     4574: 30,  # World Cup (placeholder cap)
     5479: 30,  # Friendlies (round scanning may not help much)
+    5480: 4,   # Nations Championship (short round-robin window)
 }
 
 def compute_current_seasons(sportsdb_id: int, today: Optional[datetime] = None) -> List[str]:

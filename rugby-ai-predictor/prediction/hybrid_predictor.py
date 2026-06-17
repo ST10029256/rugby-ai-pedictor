@@ -491,6 +491,8 @@ class HybridPredictor:
             'bookmaker_home_win_prob': float(prediction.get('bookmaker_prediction', {}).get('home_win_prob', 0.5)),
             'bookmaker_count': int(prediction.get('bookmaker_prediction', {}).get('bookmaker_count', 0) or 0),
             'bookmaker_confidence': float(prediction.get('bookmaker_prediction', {}).get('confidence', 0.5)),
+            'model_available': True,
+            'show_scores': True,
             'additional_metrics': {
                 'home_advantage': 0.0,  # Could be calculated from features
                 'form_difference': 0.0,  # Could be calculated from features
@@ -683,6 +685,69 @@ class MultiLeaguePredictor:
             logger.error(f"❌ Failed to initialize HybridPredictor: {e}", exc_info=True)
             raise
     
+    def has_trained_model(self, league_id: int) -> bool:
+        """Return True when a deployed model exists for this league."""
+        from .storage_loader import model_exists_in_storage
+
+        requested_family = self._requested_model_family(league_id)
+        return model_exists_in_storage(
+            league_id=int(league_id),
+            bucket_name=self.storage_bucket,
+            preferred_family=requested_family,
+        )
+
+    def predict_match_odds_only(
+        self,
+        home_team: str,
+        away_team: str,
+        league_id: int,
+        match_date: str,
+        match_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Fetch bookmaker consensus odds without requiring a trained model."""
+        from .sportdevs_client import SportDevsClient, extract_odds_features
+
+        client = SportDevsClient(self.sportdevs_api_key or "", db_path=self.db_path)
+        odds_data = client.get_match_odds(
+            match_id=match_id,
+            league_id=league_id,
+            match_date=match_date,
+            home_team=home_team,
+            away_team=away_team,
+        )
+        odds_features = extract_odds_features(odds_data)
+        bookmaker_count = int(odds_features.get("bookmaker_count", 0) or 0)
+        home_win_prob = float(odds_features.get("home_win_probability", 0.5))
+        away_win_prob = float(odds_features.get("away_win_probability", 0.5))
+        draw_prob = float(odds_features.get("draw_probability", 0.0))
+        confidence = float(odds_features.get("odds_confidence", 0.5))
+
+        if draw_prob > 0.15 and abs(home_win_prob - away_win_prob) < 0.05:
+            predicted_winner = "Draw"
+        elif home_win_prob >= away_win_prob:
+            predicted_winner = "Home"
+        else:
+            predicted_winner = "Away"
+
+        return {
+            "model_available": False,
+            "show_scores": False,
+            "predicted_winner": predicted_winner,
+            "predicted_home_score": None,
+            "predicted_away_score": None,
+            "confidence": confidence,
+            "home_win_prob": home_win_prob,
+            "away_win_prob": away_win_prob,
+            "prediction_type": "Bookmaker Odds Only",
+            "ai_home_win_prob": None,
+            "hybrid_home_win_prob": home_win_prob,
+            "bookmaker_home_win_prob": home_win_prob,
+            "bookmaker_count": bookmaker_count,
+            "bookmaker_confidence": confidence,
+            "avg_home_odds": float(odds_features.get("avg_home_odds", 0.0) or 0.0),
+            "avg_away_odds": float(odds_features.get("avg_away_odds", 0.0) or 0.0),
+        }
+
     def predict_match(self, home_team: str, away_team: str, league_id: int, 
                      match_date: str, match_id: Optional[int] = None) -> Dict[str, Any]:
         """

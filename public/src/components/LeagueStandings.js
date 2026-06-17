@@ -33,6 +33,7 @@ const LEAGUE_ID_MAPPING = {
   4414: 11847, // English Premiership Rugby (CORRECTED: was 5039 which was Austrian league)
   4714: 44185, // Six Nations Championship
   5479: 72268, // Rugby Union International Friendlies (Friendly International - no standings as friendlies don't have league tables)
+  5480: 124179, // Nations Championship (round-robin; no standings endpoint on Highlightly)
 };
 
 const LeagueStandings = ({ leagueId, leagueName }) => {
@@ -75,9 +76,14 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
           return;
         }
         
-        // Special handling for International Friendlies - they don't have standings
+        // Special handling for International Friendlies / Nations Championship - no standings tables
         if (leagueId === 5479) {
           setError('Standings are not available for International Friendlies. Friendlies are exhibition matches and do not have league tables.');
+          setLoading(false);
+          return;
+        }
+        if (leagueId === 5480) {
+          setError('Standings are not available for Nations Championship on Highlightly. Use the upcoming fixtures view for July test matches.');
           setLoading(false);
           return;
         }
@@ -153,7 +159,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
   useEffect(() => {
     if (!leagueId) return;
     const highlightlyLeagueId = LEAGUE_ID_MAPPING[leagueId];
-    if (!highlightlyLeagueId || leagueId === 5479) return;
+    if (!highlightlyLeagueId || leagueId === 5479 || leagueId === 5480) return;
 
     const currentYear = new Date().getFullYear();
     const seasons = [currentYear, currentYear - 1];
