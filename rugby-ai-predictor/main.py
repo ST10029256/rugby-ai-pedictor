@@ -4280,8 +4280,45 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
             logger.warning(f"Standings cache init failed (continuing without cache): {cache_init_err}")
             fs_cache = None
             cache_collection = None
-        
-        for year in seasons_to_try:
+
+        # PRIMARY SOURCE: compute standings from our own match results.
+        # The Highlightly /standings feed is unreliable for rugby (stale,
+        # mislabeled by season, missing recent seasons, outdated grouped
+        # format), so we derive the table from completed matches. Highlightly
+        # is only used as a fallback when we have no results for the league.
+        try:
+            from prediction.standings_compute import (
+                compute_standings_from_db,
+                resolve_standings_db_path,
+            )
+
+            our_league_id_for_compute = None
+            if sportsdb_league_id is not None:
+                try:
+                    our_league_id_for_compute = int(sportsdb_league_id)
+                except (TypeError, ValueError):
+                    our_league_id_for_compute = None
+
+            if our_league_id_for_compute is not None:
+                computed_db_path = resolve_standings_db_path()
+                computed = compute_standings_from_db(
+                    computed_db_path,
+                    our_league_id_for_compute,
+                    season=requested_season,
+                )
+                if computed and computed.get("groups"):
+                    standings = computed
+                    successful_season = computed.get("league", {}).get("season")
+                    logger.info(
+                        "✅ Using computed standings from results for league "
+                        f"{our_league_id_for_compute} (season {successful_season}, "
+                        f"teams={sum(len(g.get('standings', [])) for g in computed.get('groups', []))})"
+                    )
+        except Exception as compute_err:
+            logger.warning(f"Computed standings unavailable, falling back to Highlightly: {compute_err}")
+
+        # Fallback to Highlightly only if we couldn't compute a table.
+        for year in (seasons_to_try if standings is None else []):
             logger.info(f"\n--- Trying season {year} ---")
             try:
                 # Cache check BEFORE hitting Highlightly API.

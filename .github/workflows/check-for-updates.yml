@@ -46,6 +46,12 @@ env:
   PYTHONIOENCODING: utf-8
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
   PIP_NO_PYTHON_VERSION_WARNING: '1'
+  # Live model version MUST match what the deployed Functions read
+  # (rugby-ai-predictor/.env written in the deploy step below). This tag is
+  # used by both the pre-kickoff snapshots (enhanced_auto_update.py) and the
+  # historical backfill so the history endpoint's JOIN actually finds rows.
+  LIVE_MODEL_FAMILY: champion
+  LIVE_MODEL_CHANNEL: prod_100
 
 jobs:
   check-for-updates:
@@ -210,19 +216,31 @@ jobs:
             sleep $((attempt * 15))
           done
 
-      - name: Remove post-update duplicates
+      - name: Clean up database integrity (leagues, duplicates, orphans)
         shell: bash
         run: |
           set -Eeuo pipefail
-          python cleanup_duplicates_post_update.py
+          python cleanup_duplicates_post_update.py data.sqlite
 
-      - name: Backfill prediction snapshots for history accuracy
+      - name: Rebuild all prediction snapshots (full refresh)
         if: steps.mode.outputs.full_refresh == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
           python rugby-ai-predictor/backfill_v4_predictions_all_games.py \
             --db data.sqlite \
+            --batch-size 500
+
+      - name: Backfill prediction snapshots for new games (incremental)
+        if: steps.mode.outputs.full_refresh != 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # Only score completed games that are missing a snapshot for the live model
+          # version, so daily runs stay cheap while history keeps AI predictions.
+          python rugby-ai-predictor/backfill_v4_predictions_all_games.py \
+            --db data.sqlite \
+            --only-missing \
             --batch-size 500
 
       - name: Detect newly completed matches after synchronization
@@ -306,9 +324,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           cp data.sqlite rugby-ai-predictor/data.sqlite
-          cat > rugby-ai-predictor/.env <<'EOF'
-          LIVE_MODEL_FAMILY=champion
-          LIVE_MODEL_CHANNEL=prod_100
+          cat > rugby-ai-predictor/.env <<EOF
+          LIVE_MODEL_FAMILY=${LIVE_MODEL_FAMILY}
+          LIVE_MODEL_CHANNEL=${LIVE_MODEL_CHANNEL}
           EOF
 
       - name: Authenticate to Google Cloud
@@ -341,7 +359,7 @@ jobs:
             sleep $((attempt * 10))
           done
 
-      - name: Deploy history Functions only when the DB changed
+      - name: Deploy history and standings Functions when the DB changed
         if: steps.after.outputs.data_changed == 'true'
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
@@ -363,7 +381,7 @@ jobs:
           for attempt in 1 2 3; do
             if firebase deploy \
               --project rugby-ai-61fd0 \
-              --only functions:rugby-ai-predictor:get_historical_predictions_http,functions:rugby-ai-predictor:get_historical_backtest_http \
+              --only functions:rugby-ai-predictor:get_historical_predictions_http,functions:rugby-ai-predictor:get_historical_backtest_http,functions:rugby-ai-predictor:get_league_standings_http \
               --non-interactive; then
               break
             fi

@@ -1183,6 +1183,20 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
 
         <Divider sx={{ borderColor: 'rgba(255,255,255,0.12)', mb: 2 }} />
 
+        {standings?.note && (
+          <Typography
+            variant="caption"
+            sx={{
+              display: 'block',
+              mb: 1.5,
+              color: 'rgba(255,255,255,0.55)',
+              fontStyle: 'italic',
+            }}
+          >
+            {standings.note}
+          </Typography>
+        )}
+
         {/* Multi-group support (some leagues split tables) */}
         {groups.length > 1 ? (
           <Box sx={{ display: 'flex', flexDirection: 'column' }}>

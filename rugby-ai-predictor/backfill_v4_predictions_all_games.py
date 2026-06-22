@@ -160,6 +160,14 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=250, help="Commit interval")
     parser.add_argument("--max-matches", type=int, default=0, help="Optional cap for testing")
     parser.add_argument(
+        "--only-missing",
+        action="store_true",
+        help=(
+            "Only predict completed matches that do not already have a snapshot for "
+            "the target model version. Use for cheap daily incremental runs."
+        ),
+    )
+    parser.add_argument(
         "--with-odds",
         action="store_true",
         help="Enable live bookmaker odds lookups (disabled by default for stable offline backfill).",
@@ -205,6 +213,15 @@ def main() -> None:
     if args.league_id is not None:
         sql += " AND e.league_id = ?"
         params.append(args.league_id)
+    if args.only_missing:
+        # Skip matches that already have a snapshot for this exact model version so
+        # daily runs only score newly completed games (full rebuilds omit this flag).
+        sql += """
+          AND e.id NOT IN (
+              SELECT match_id FROM prediction_snapshot WHERE model_version = ?
+          )
+        """
+        params.append(args.model_version)
     sql += " ORDER BY e.date_event ASC, e.id ASC"
     if args.max_matches and args.max_matches > 0:
         sql += " LIMIT ?"
