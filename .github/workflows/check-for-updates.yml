@@ -222,6 +222,13 @@ jobs:
           set -Eeuo pipefail
           python cleanup_duplicates_post_update.py data.sqlite
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+          cleanup_credentials: true
+
       - name: Rebuild all prediction snapshots (full refresh)
         if: steps.mode.outputs.full_refresh == 'true'
         shell: bash
@@ -328,14 +335,6 @@ jobs:
           LIVE_MODEL_FAMILY=${LIVE_MODEL_FAMILY}
           LIVE_MODEL_CHANNEL=${LIVE_MODEL_CHANNEL}
           EOF
-
-      - name: Authenticate to Google Cloud
-        if: steps.after.outputs.data_changed == 'true'
-        uses: google-github-actions/auth@v3
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-          create_credentials_file: true
-          cleanup_credentials: true
 
       - name: Sync changed game data to Firestore
         if: steps.after.outputs.data_changed == 'true'
