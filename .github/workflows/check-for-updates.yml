@@ -381,7 +381,7 @@ jobs:
           for attempt in 1 2 3; do
             if firebase deploy \
               --project rugby-ai-61fd0 \
-              --only functions:rugby-ai-predictor:get_historical_predictions_http,functions:rugby-ai-predictor:get_historical_backtest_http,functions:rugby-ai-predictor:get_league_standings_http \
+              --only functions:rugby-ai-predictor:get_historical_predictions_http,functions:rugby-ai-predictor:get_historical_backtest_http,functions:rugby-ai-predictor:get_league_standings_http,functions:rugby-ai-predictor:predict_matches_batch_http \
               --non-interactive; then
               break
             fi

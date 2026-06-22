@@ -54,6 +54,29 @@ export const getUpcomingMatches = (data) => {
   return callable(data);
 };
 
+// Predict an entire round of fixtures in a single request. The backend serves
+// cached / snapshot predictions where possible and computes only the misses,
+// replacing N per-match calls with one.
+export const predictMatchesBatch = async (data) => {
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/predict_matches_batch_http';
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data || {}),
+  });
+
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const backendMessage = json?.error || `HTTP error! status: ${response.status}`;
+    throw new Error(backendMessage);
+  }
+
+  return { data: json };
+};
+
 export const getLiveMatches = async (data) => {
   // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_live_matches_http';

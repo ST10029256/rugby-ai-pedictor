@@ -16,8 +16,9 @@ import re
 import requests
 import secrets
 import string
+import time
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
 # Import Firestore Timestamp for type checking
 try:
@@ -1462,6 +1463,292 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
 
 
+# Firestore collection + default TTL for the batched upcoming-predictions cache.
+# Bookmaker odds barely move minute to minute pre-match, and inside the final
+# ~20 minutes the scheduled capture job records the immutable snapshot, so a
+# short TTL keeps the live home view fast without going stale.
+_UPCOMING_PRED_CACHE_COLLECTION = "upcoming_prediction_cache_v1"
+_UPCOMING_PRED_CACHE_TTL_SECONDS = 1800  # 30 minutes
+_UPCOMING_PRED_BATCH_MAX = 40
+
+
+def _batch_cache_key(event_id: Any, home_team: str, away_team: str, match_date: str) -> str:
+    """Stable Firestore doc id for a fixture's cached prediction."""
+    if event_id:
+        return f"evt_{event_id}"
+    raw = f"{home_team}|{away_team}|{match_date}".lower()
+    return "k_" + re.sub(r"[^a-z0-9]+", "_", raw).strip("_")[:200]
+
+
+def _load_pre_kickoff_snapshot(
+    db_path: str, match_id: Any, model_version: str
+) -> Optional[Dict[str, Any]]:
+    """Return an immutable pre-kickoff snapshot for a fixture if one exists.
+
+    Near kickoff the scheduled job records the exact prediction we should show,
+    so the live view stays consistent with the forward-test history.
+    """
+    if not match_id or not os.path.exists(db_path):
+        return None
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT predicted_winner, predicted_home_score, predicted_away_score,
+                       confidence, home_win_prob, away_win_prob
+                FROM prediction_snapshot
+                WHERE match_id = ? AND model_version = ?
+                  AND snapshot_type = 'pre_kickoff_live'
+                LIMIT 1
+                """,
+                (int(match_id), model_version),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        winner, hs, as_, conf, hwp, awp = row
+        return {
+            "predicted_winner": winner,
+            "predicted_home_score": hs,
+            "predicted_away_score": as_,
+            "confidence": conf,
+            "home_win_prob": hwp,
+            "away_win_prob": awp,
+            "show_scores": hs is not None,
+            "model_available": hs is not None,
+            "prediction_type": "AI Snapshot (pre-kickoff)",
+            "bookmaker_count": 0,
+            "_source": "snapshot",
+        }
+    except Exception:
+        return None
+
+
+@https_fn.on_request(timeout_sec=300, memory=1024, secrets=["HIGHLIGHTLY_API_KEY"])
+def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
+    """Predict a whole round of fixtures in a single request.
+
+    The live home view used to fire 2xN per-match Cloud Function calls per
+    league round. This endpoint collapses that into one call: it serves cached
+    predictions from Firestore (TTL) or an immutable pre-kickoff snapshot when
+    available, and only computes the misses live - reusing the warm predictor
+    plus the per-instance odds / team-history caches. Computed results are
+    written back to the Firestore cache so other users and instances reuse them.
+
+    Request JSON:
+        {
+          "league_id": 4446,
+          "matches": [{"event_id": 1, "home_team": "...", "away_team": "...",
+                        "match_date": "2026-06-22"}, ...],
+          "model_version": "<optional>"
+        }
+
+    Response JSON:
+        {"predictions": [<raw prediction dict + event_id/home_team/away_team/match_date>],
+         "model_version": "...", "counts": {...}}
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    cors_headers = {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
+    if req.method == "OPTIONS":
+        return https_fn.Response(
+            "",
+            status=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Access-Control-Max-Age": "3600",
+            },
+        )
+
+    try:
+        data = req.get_json(silent=True) or {}
+        league_id_raw = data.get("league_id")
+        matches = data.get("matches") or []
+        if not isinstance(matches, list) or not matches:
+            return https_fn.Response(
+                json.dumps({"error": "matches must be a non-empty list"}),
+                status=400,
+                headers=cors_headers,
+            )
+        try:
+            league_id_int = int(league_id_raw)
+            if league_id_int == 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return https_fn.Response(
+                json.dumps({"error": "Invalid league_id"}), status=400, headers=cors_headers
+            )
+
+        matches = matches[:_UPCOMING_PRED_BATCH_MAX]
+        model_version = str(data.get("model_version") or _get_live_model_version())
+        try:
+            ttl_seconds = int(data.get("ttl_seconds", _UPCOMING_PRED_CACHE_TTL_SECONDS))
+        except (TypeError, ValueError):
+            ttl_seconds = _UPCOMING_PRED_CACHE_TTL_SECONDS
+        ttl_seconds = max(60, min(ttl_seconds, 6 * 3600))
+        force_refresh = bool(data.get("force_refresh", False))
+
+        db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+        now_ms = int(time.time() * 1000)
+
+        # Normalize the requested fixtures up front.
+        normalized = []
+        for m in matches:
+            if not isinstance(m, dict):
+                continue
+            home = str(m.get("home_team") or "").strip()
+            away = str(m.get("away_team") or "").strip()
+            match_date = str(m.get("match_date") or "").strip()
+            event_id = m.get("event_id") or m.get("id")
+            if not home or not away or not match_date:
+                continue
+            normalized.append(
+                {
+                    "event_id": event_id,
+                    "home_team": home,
+                    "away_team": away,
+                    "match_date": match_date,
+                    "cache_key": _batch_cache_key(event_id, home, away, match_date),
+                }
+            )
+
+        if not normalized:
+            return https_fn.Response(
+                json.dumps({"error": "No valid matches provided"}), status=400, headers=cors_headers
+            )
+
+        # Firestore is optional - if it is unavailable we still compute live.
+        db = None
+        cache_col = None
+        try:
+            db = get_firestore_client()
+            cache_col = db.collection(_UPCOMING_PRED_CACHE_COLLECTION)
+        except Exception as fs_err:
+            logger.warning(f"Batch predict: Firestore cache unavailable: {fs_err}")
+
+        cached_by_key: Dict[str, Dict[str, Any]] = {}
+        if cache_col is not None and not force_refresh:
+            try:
+                refs = [cache_col.document(item["cache_key"]) for item in normalized]
+                for snap in db.get_all(refs):
+                    if not snap.exists:
+                        continue
+                    doc = snap.to_dict() or {}
+                    if doc.get("model_version") != model_version:
+                        continue
+                    cached_ms = doc.get("cached_at_ms") or 0
+                    if now_ms - int(cached_ms) > ttl_seconds * 1000:
+                        continue
+                    pred = doc.get("prediction")
+                    if isinstance(pred, dict):
+                        cached_by_key[snap.id] = pred
+            except Exception as read_err:
+                logger.warning(f"Batch predict: cache read failed: {read_err}")
+
+        predictor = None
+        results: List[Dict[str, Any]] = []
+        counts = {"cache": 0, "snapshot": 0, "computed": 0, "failed": 0}
+
+        for item in normalized:
+            key = item["cache_key"]
+            home, away = item["home_team"], item["away_team"]
+            match_date, event_id = item["match_date"], item["event_id"]
+
+            pred: Optional[Dict[str, Any]] = None
+            source = "computed"
+
+            cached = cached_by_key.get(key)
+            if cached is not None:
+                pred = cached
+                source = "cache"
+                counts["cache"] += 1
+
+            if pred is None:
+                snap_pred = _load_pre_kickoff_snapshot(db_path, event_id, model_version)
+                if snap_pred is not None:
+                    pred = snap_pred
+                    source = "snapshot"
+                    counts["snapshot"] += 1
+
+            if pred is None:
+                try:
+                    if predictor is None:
+                        predictor = get_predictor()
+                    pred = _run_standard_prediction(
+                        predictor,
+                        {"event_id": event_id, "match_id": event_id},
+                        league_id_int,
+                        home,
+                        away,
+                        match_date,
+                    )
+                    pred.setdefault("model_type", LIVE_MODEL_FAMILY)
+                    pred.setdefault("model_family", LIVE_MODEL_FAMILY)
+                    pred.setdefault("model_channel", LIVE_MODEL_CHANNEL)
+                    counts["computed"] += 1
+                    # Write back to the shared cache (best effort).
+                    if cache_col is not None:
+                        try:
+                            cache_col.document(key).set(
+                                {
+                                    "event_id": event_id,
+                                    "league_id": league_id_int,
+                                    "model_version": model_version,
+                                    "home_team": home,
+                                    "away_team": away,
+                                    "match_date": match_date,
+                                    "prediction": pred,
+                                    "cached_at": firestore.SERVER_TIMESTAMP,
+                                    "cached_at_ms": now_ms,
+                                }
+                            )
+                        except Exception as write_err:
+                            logger.debug(f"Batch predict: cache write failed for {key}: {write_err}")
+                except Exception as compute_err:
+                    counts["failed"] += 1
+                    logger.warning(
+                        f"Batch predict failed for {home} vs {away}: {compute_err}"
+                    )
+                    pred = {"error": str(compute_err)}
+
+            enriched = dict(pred)
+            enriched["event_id"] = event_id
+            enriched["home_team"] = home
+            enriched["away_team"] = away
+            enriched["match_date"] = match_date
+            enriched.setdefault("_source", source)
+            results.append(enriched)
+
+        return https_fn.Response(
+            json.dumps(
+                {
+                    "predictions": results,
+                    "model_version": model_version,
+                    "counts": counts,
+                }
+            ),
+            status=200,
+            headers=cors_headers,
+        )
+    except Exception as e:
+        import traceback
+
+        logger.error(f"predict_matches_batch_http error: {e}")
+        return https_fn.Response(
+            json.dumps({"error": str(e), "traceback": traceback.format_exc()}),
+            status=500,
+            headers=cors_headers,
+        )
+
+
 @https_fn.on_call()
 def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
@@ -2117,8 +2404,11 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
         league_id_str = str(league_id)
         logger.info(f"Fetching metrics for league_id: {league_id_str}")
         
-        # Calculate last 10 games accuracy
-        last_10_accuracy = _calculate_last_10_games_accuracy(league_id)
+        # NOTE: a "last 10 games" recompute used to run here, but its result was
+        # never returned to the client while it forced a model load + ~10
+        # Firestore reads on every metrics view (a needless cold-start trigger).
+        # The displayed accuracy comes from the walk-forward backtest stored in
+        # league_metrics below, so that dead computation has been removed.
         
         # PRIMARY: Try to load from Firestore (fastest and most reliable)
         try:
