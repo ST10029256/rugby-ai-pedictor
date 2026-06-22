@@ -4684,6 +4684,12 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                 'success': True,
                 'standings': standings,
                 'season': successful_season,
+                'display_season': (
+                    f"{successful_season}/{str(int(successful_season) + 1)[-2:]}"
+                    if isinstance(successful_season, int)
+                    and league_id_int in CROSS_YEAR_STANDINGS_LEAGUES
+                    else str(successful_season) if successful_season is not None else None
+                ),
                 'league_id': highlightly_league_id,
                 'cache_hit': cache_hit,
             }
@@ -5487,7 +5493,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             offset = int(offset) if offset is not None else 0
         except Exception:
             offset = 0
-        limit = max(1, min(limit, 500))
+        limit = max(1, min(limit, 1000))
         offset = max(0, offset)
         
         logger.info(
@@ -5630,361 +5636,123 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 if selected_year is None:
                     selected_year = available_years[0] if available_years else None
             else:
-                # Prefer the most recent season with completed results (avoids empty 2026 off-season views).
-                selected_year = None
-                for yr in available_years:
-                    completed = int((year_summary.get(str(yr)) or {}).get("completed", 0) or 0)
-                    if completed > 0:
-                        selected_year = str(yr)
-                        break
+                # Prefer current calendar year; UI merges cross-year (Sep-Jun) windows client-side.
+                if current_year in available_years:
+                    selected_year = current_year
+                else:
+                    for yr in available_years:
+                        completed = int((year_summary.get(str(yr)) or {}).get("completed", 0) or 0)
+                        if completed > 0:
+                            selected_year = str(yr)
+                            break
                 if selected_year is None:
-                    selected_year = current_year if current_year in available_years else (available_years[0] if available_years else None)
+                    selected_year = available_years[0] if available_years else None
         else:
             selected_year = str(year)
 
-        # Fast path: serve immutable snapshot predictions if available.
+        # Unified fast path: all completed matches with optional snapshot predictions (no slow replay).
         model_version = _get_live_model_version()
-        snapshot_where = [
+        event_where = [
             "e.home_score IS NOT NULL",
             "e.away_score IS NOT NULL",
             "e.date_event IS NOT NULL",
             "date(e.date_event) <= date('now')",
-            "s.model_version = ?",
         ]
-        snapshot_params: list[Any] = [model_version]
+        event_params: list[Any] = []
         if league_id:
-            snapshot_where.append("e.league_id = ?")
-            snapshot_params.append(league_id)
+            event_where.append("e.league_id = ?")
+            event_params.append(league_id)
         if selected_year:
             try:
                 yr = int(str(selected_year).strip()[:4])
                 prev_yr = str(yr - 1)
-                snapshot_where.append("(substr(e.date_event, 1, 4) = ? OR substr(e.date_event, 1, 4) = ?)")
-                snapshot_params.extend([str(yr), prev_yr])
+                event_where.append("(substr(e.date_event, 1, 4) = ? OR substr(e.date_event, 1, 4) = ?)")
+                event_params.extend([str(yr), prev_yr])
             except (ValueError, TypeError):
-                snapshot_where.append("substr(e.date_event, 1, 4) = ?")
-                snapshot_params.append(str(selected_year))
+                event_where.append("substr(e.date_event, 1, 4) = ?")
+                event_params.append(str(selected_year))
 
-        snapshot_filter_sql = " AND ".join(snapshot_where)
-        snapshot_count_sql = f"""
+        event_filter_sql = " AND ".join(event_where)
+        count_query = f"""
             SELECT COUNT(1)
-            FROM prediction_snapshot s
-            JOIN event e ON e.id = s.match_id
-            WHERE {snapshot_filter_sql}
+            FROM event e
+            WHERE {event_filter_sql}
         """
-        cursor.execute(snapshot_count_sql, snapshot_params)
-        snapshot_total_rows = int((cursor.fetchone() or [0])[0] or 0)
+        t0_count = perf_counter()
+        cursor.execute(count_query, event_params)
+        total_rows = int((cursor.fetchone() or [0])[0] or 0)
         logger.info(
-            f"[hist][{request_id}] snapshot rows available={snapshot_total_rows} "
-            f"(model_version={model_version}, year={selected_year}, league_id={league_id})"
+            f"[hist][{request_id}] count query completed in {(perf_counter() - t0_count) * 1000:.1f} ms "
+            f"(rows={total_rows}, limit={limit}, offset={offset})"
         )
 
-        if snapshot_total_rows > 0:
-            snapshot_data_sql = f"""
-                SELECT
-                    e.id,
-                    e.league_id,
-                    l.name as league_name,
-                    e.date_event,
-                    e.timestamp,
-                    e.home_team_id,
-                    e.away_team_id,
-                    e.home_score,
-                    e.away_score,
-                    t1.name as home_team_name,
-                    t2.name as away_team_name,
-                    e.season,
-                    e.round,
-                    e.venue,
-                    e.status,
-                    s.predicted_winner,
-                    s.predicted_home_score,
-                    s.predicted_away_score,
-                    s.confidence,
-                    s.home_win_prob,
-                    s.away_win_prob,
-                    s.prediction_correct,
-                    s.score_error,
-                    s.predicted_at,
-                    s.snapshot_type
-                FROM prediction_snapshot s
-                JOIN event e ON e.id = s.match_id
-                LEFT JOIN league l ON e.league_id = l.id
-                LEFT JOIN team t1 ON e.home_team_id = t1.id
-                LEFT JOIN team t2 ON e.away_team_id = t2.id
-                WHERE {snapshot_filter_sql}
-                ORDER BY e.date_event ASC, e.league_id
-                LIMIT ? OFFSET ?
-            """
-            cursor.execute(snapshot_data_sql, [*snapshot_params, limit, offset])
-            snapshot_rows = cursor.fetchall()
-
-            matches_by_year_week = defaultdict(lambda: defaultdict(list))
-            all_matches = []
-            correct_predictions = 0
-            total_predictions = 0
-            score_errors: list[float] = []
-
-            for row in snapshot_rows:
-                (
-                    match_id,
-                    league_id_val,
-                    league_name,
-                    date_event,
-                    kickoff_ts,
-                    home_team_id,
-                    away_team_id,
-                    home_score,
-                    away_score,
-                    home_team_name,
-                    away_team_name,
-                    season,
-                    round_num,
-                    venue,
-                    status,
-                    predicted_winner,
-                    predicted_home_score,
-                    predicted_away_score,
-                    prediction_confidence,
-                    home_win_prob,
-                    away_win_prob,
-                    prediction_correct_raw,
-                    prediction_error,
-                    _predicted_at,
-                    _snapshot_type,
-                ) = row
-
-                if not home_team_name or not away_team_name or not date_event:
-                    continue
-
-                if home_score > away_score:
-                    actual_winner = "Home"
-                    actual_winner_team = home_team_name
-                elif away_score > home_score:
-                    actual_winner = "Away"
-                    actual_winner_team = away_team_name
-                else:
-                    actual_winner = "Draw"
-                    actual_winner_team = None
-
-                prediction_correct = None
-                if prediction_correct_raw is not None:
-                    prediction_correct = bool(int(prediction_correct_raw))
-                elif predicted_winner and predicted_winner != "Error":
-                    prediction_correct = (predicted_winner == actual_winner)
-
-                if prediction_correct is not None:
-                    total_predictions += 1
-                    if prediction_correct:
-                        correct_predictions += 1
-                if prediction_error is not None:
-                    try:
-                        score_errors.append(float(prediction_error))
-                    except Exception:
-                        pass
-
-                year = date_event[:4] if date_event else "Unknown"
-                try:
-                    round_key = str(int(round_num)) if round_num is not None else get_year_week_key(date_event)
-                except Exception:
-                    round_key = get_year_week_key(date_event)
-                week = get_week_number(date_event)
-
-                def _has_meaningful_time(v: Any) -> bool:
-                    try:
-                        s = str(v or "")
-                    except Exception:
-                        return False
-                    if "T" not in s:
-                        return False
-                    return ("T00:00" not in s)
-
-                kickoff_at = kickoff_ts if (kickoff_ts and _has_meaningful_time(kickoff_ts)) else None
-                status_norm = str(status or "").upper()
-                went_to_extra_time = ("AET" in status_norm) or ("EXTRA" in status_norm) or ("ET" in status_norm and "SET" not in status_norm)
-
-                match_data = {
-                    "match_id": match_id,
-                    "league_id": league_id_val,
-                    "league_name": league_name or f"League {league_id_val}",
-                    "date": date_event,
-                    "kickoff_at": kickoff_at,
-                    "went_to_extra_time": went_to_extra_time,
-                    "year": year,
-                    "week": week,
-                    "year_week": round_key,
-                    "season": season,
-                    "round": round_num,
-                    "venue": venue,
-                    "status": status,
-                    "home_team": home_team_name,
-                    "away_team": away_team_name,
-                    "home_team_id": home_team_id,
-                    "away_team_id": away_team_id,
-                    "actual_home_score": home_score,
-                    "actual_away_score": away_score,
-                    "actual_winner": actual_winner,
-                    "actual_winner_team": actual_winner_team,
-                    "predicted_home_score": predicted_home_score,
-                    "predicted_away_score": predicted_away_score,
-                    "predicted_winner": predicted_winner,
-                    "prediction_confidence": prediction_confidence,
-                    "prediction_error": prediction_error,
-                    "prediction_correct": prediction_correct,
-                    "score_difference": abs(home_score - away_score) if home_score is not None and away_score is not None else None,
-                    "predicted_score_difference": abs(predicted_home_score - predicted_away_score) if predicted_home_score is not None and predicted_away_score is not None else None,
-                    "home_win_prob": home_win_prob,
-                    "away_win_prob": away_win_prob,
-                }
-
-                matches_by_year_week[year][round_key].append(match_data)
-                all_matches.append(match_data)
-
-            accuracy = (correct_predictions / total_predictions * 100) if total_predictions > 0 else 0
-            avg_score_error = (sum(score_errors) / len(score_errors)) if score_errors else None
-
-            result = {
-                "request_id": request_id,
-                "available_years": available_years,
-                "selected_year": selected_year,
-                "year_summary": year_summary,
-                "matches_by_year_week": {
-                    year_key: {week_key: matches for week_key, matches in weeks.items()}
-                    for year_key, weeks in matches_by_year_week.items()
-                },
-                "all_matches": all_matches,
-                "statistics": {
-                    "total_matches": len(all_matches),
-                    "total_predictions": total_predictions,
-                    "correct_predictions": correct_predictions,
-                    "accuracy_percentage": round(accuracy, 2),
-                    "average_score_error": round(avg_score_error, 2) if avg_score_error is not None else None,
-                },
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "total_rows": snapshot_total_rows,
-                    "returned_rows": len(snapshot_rows),
-                    "has_more": (offset + len(snapshot_rows)) < snapshot_total_rows,
-                    "next_offset": (offset + len(snapshot_rows)) if (offset + len(snapshot_rows)) < snapshot_total_rows else None,
-                },
-                "by_league": {},
-                "debug": {
-                    "data_source": "prediction_snapshot",
-                    "model_version": model_version,
-                },
-            }
-
-            leagues_dict = defaultdict(list)
-            for match in all_matches:
-                leagues_dict[match["league_id"]].append(match)
-            for league_id_val, league_matches in leagues_dict.items():
-                league_correct = sum(1 for m in league_matches if m.get("prediction_correct") is True)
-                league_total = sum(1 for m in league_matches if m.get("prediction_correct") is not None)
-                league_accuracy = (league_correct / league_total * 100) if league_total > 0 else 0
-                league_losses = max(0, league_total - league_correct)
-                league_errors = [float(m.get("prediction_error")) for m in league_matches if m.get("prediction_error") is not None]
-                league_mae = (sum(league_errors) / len(league_errors)) if league_errors else None
-                result["by_league"][league_id_val] = {
-                    "league_name": league_matches[0]["league_name"] if league_matches else f"League {league_id_val}",
-                    "total_matches": len(league_matches),
-                    "total_predictions": league_total,
-                    "correct_predictions": league_correct,
-                    "incorrect_predictions": league_losses,
-                    "accuracy_percentage": round(league_accuracy, 2),
-                    "average_score_error": round(league_mae, 2) if league_mae is not None else None,
-                }
-
-            conn.close()
-            logger.info(
-                f"[hist][{request_id}] served from prediction_snapshot table "
-                f"(returned_rows={len(snapshot_rows)}, total_rows={snapshot_total_rows}, "
-                f"duration_ms={(perf_counter() - request_started_at) * 1000:.1f})"
+        unified_data_sql = f"""
+            SELECT
+                e.id,
+                e.league_id,
+                l.name as league_name,
+                e.date_event,
+                e.timestamp,
+                e.home_team_id,
+                e.away_team_id,
+                e.home_score,
+                e.away_score,
+                t1.name as home_team_name,
+                t2.name as away_team_name,
+                e.season,
+                e.round,
+                e.venue,
+                e.status,
+                s.predicted_winner,
+                s.predicted_home_score,
+                s.predicted_away_score,
+                s.confidence,
+                s.home_win_prob,
+                s.away_win_prob,
+                s.prediction_correct,
+                s.score_error,
+                s.predicted_at,
+                s.snapshot_type
+            FROM event e
+            LEFT JOIN league l ON e.league_id = l.id
+            LEFT JOIN team t1 ON e.home_team_id = t1.id
+            LEFT JOIN team t2 ON e.away_team_id = t2.id
+            LEFT JOIN prediction_snapshot s ON s.rowid = (
+                SELECT s2.rowid
+                FROM prediction_snapshot s2
+                WHERE s2.match_id = e.id AND s2.model_version = ?
+                ORDER BY CASE s2.snapshot_type WHEN 'pre_kickoff_live' THEN 0 ELSE 1 END, s2.id DESC
+                LIMIT 1
             )
-            return https_fn.Response(json.dumps(result), status=200, headers=response_headers)
-
-        # Only initialize the predictor if we actually need the replay fallback.
-        # Snapshot-backed responses should not fail just because model bootstrap fails.
-        try:
-            predictor = get_predictor()
-        except Exception as pred_error:
-            predictor = None
-            logger.warning(f"[hist][{request_id}] predictor unavailable for replay fallback: {pred_error}")
-
-        # Query for completed matches with scores
-        base_query = """
-        SELECT 
-            e.id,
-            e.league_id,
-            l.name as league_name,
-            e.date_event,
-            e.timestamp,
-            e.home_team_id,
-            e.away_team_id,
-            e.home_score,
-            e.away_score,
-            t1.name as home_team_name,
-            t2.name as away_team_name,
-            e.season,
-            e.round,
-            e.venue,
-            e.status
-        FROM event e
-        LEFT JOIN league l ON e.league_id = l.id
-        LEFT JOIN team t1 ON e.home_team_id = t1.id
-        LEFT JOIN team t2 ON e.away_team_id = t2.id
-        WHERE e.home_score IS NOT NULL 
-        AND e.away_score IS NOT NULL
-        AND e.date_event IS NOT NULL
-        AND date(e.date_event) <= date('now')
+            WHERE {event_filter_sql}
+            ORDER BY e.date_event ASC, e.league_id
+            LIMIT ? OFFSET ?
         """
-
-        params = []
-        if league_id:
-            base_query += " AND e.league_id = ?"
-            params.append(league_id)
-
-        if selected_year:
-            try:
-                yr = int(str(selected_year).strip()[:4])
-                prev_yr = str(yr - 1)
-                base_query += " AND (substr(e.date_event, 1, 4) = ? OR substr(e.date_event, 1, 4) = ?)"
-                params.extend([str(yr), prev_yr])
-            except (ValueError, TypeError):
-                base_query += " AND substr(e.date_event, 1, 4) = ?"
-                params.append(str(selected_year))
-
-        count_query = f"SELECT COUNT(1) FROM ({base_query}) q"
-        t0_count = perf_counter()
-        cursor.execute(count_query, params)
-        total_rows = int((cursor.fetchone() or [0])[0] or 0)
-        logger.info(f"[hist][{request_id}] count query completed in {(perf_counter() - t0_count) * 1000:.1f} ms (rows={total_rows}, limit={limit}, offset={offset})")
-
-        query = base_query + " ORDER BY e.date_event ASC, e.league_id LIMIT ? OFFSET ?"
-        query_params = [*params, limit, offset]
         t0_data = perf_counter()
-        cursor.execute(query, query_params)
+        cursor.execute(unified_data_sql, [model_version, *event_params, limit, offset])
         results = cursor.fetchall()
-        logger.info(f"[hist][{request_id}] data query completed in {(perf_counter() - t0_data) * 1000:.1f} ms (returned={len(results)})")
-        
-        # Compute league round for matches missing round (season-based: Week 1 = first week of season)
+        logger.info(
+            f"[hist][{request_id}] unified data query completed in {(perf_counter() - t0_data) * 1000:.1f} ms "
+            f"(returned={len(results)})"
+        )
+
         def _compute_league_rounds(rows):
-            """Group matches into rounds by matchday (within 10 days = same round). Week 1 = first week of season."""
-            from datetime import datetime
+            """Group matches into rounds by matchday (within 4 days = same round)."""
+            from datetime import datetime as _dt
             round_assignments = {}
             prev_date = None
             current_round = 0
             day_threshold = 4
             season_gap_days = 90
             for r in rows:
-                mid, _, _, date_event = r[0], r[1], r[2], r[3]
+                mid, date_event = r[0], r[3]
                 if not date_event:
                     continue
                 try:
-                    dt = datetime.strptime(date_event[:10], '%Y-%m-%d')
+                    dt = _dt.strptime(date_event[:10], '%Y-%m-%d')
                 except Exception:
                     continue
-                key = (mid, date_event[:10] if date_event else '')
+                key = (mid, date_event[:10])
                 if prev_date is None:
                     current_round = 1
                 elif (dt - prev_date).days > season_gap_days:
@@ -5994,77 +5762,85 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 round_assignments[key] = current_round
                 prev_date = dt
             return round_assignments
-        
+
         league_rounds = _compute_league_rounds(results) if results else {}
-        
-        # Organize matches by year and round (not ISO week)
+
+        def _has_meaningful_time(v: Any) -> bool:
+            try:
+                s = str(v or "")
+            except Exception:
+                return False
+            if "T" not in s:
+                return False
+            return ("T00:00" not in s)
+
         matches_by_year_week = defaultdict(lambda: defaultdict(list))
         all_matches = []
-        
         correct_predictions = 0
         total_predictions = 0
-        score_errors = []
-        
+        score_errors: list[float] = []
+
         logger.info(f"[hist][{request_id}] processing {len(results)} completed matches...")
-        
         t0_process = perf_counter()
         for row in results:
-            match_id, league_id_val, league_name, date_event, kickoff_ts, home_team_id, away_team_id, \
-            home_score, away_score, home_team_name, away_team_name, season, round_num, \
-            venue, status = row
-            
-            # Skip if missing critical data
+            (
+                match_id,
+                league_id_val,
+                league_name,
+                date_event,
+                kickoff_ts,
+                home_team_id,
+                away_team_id,
+                home_score,
+                away_score,
+                home_team_name,
+                away_team_name,
+                season,
+                round_num,
+                venue,
+                status,
+                predicted_winner,
+                predicted_home_score,
+                predicted_away_score,
+                prediction_confidence,
+                home_win_prob,
+                away_win_prob,
+                prediction_correct_raw,
+                prediction_error,
+                _predicted_at,
+                _snapshot_type,
+            ) = row
+
             if not home_team_name or not away_team_name or not date_event:
                 continue
-            
-            # Determine actual winner
+
             if home_score > away_score:
-                actual_winner = 'Home'
+                actual_winner = "Home"
                 actual_winner_team = home_team_name
             elif away_score > home_score:
-                actual_winner = 'Away'
+                actual_winner = "Away"
                 actual_winner_team = away_team_name
             else:
-                actual_winner = 'Draw'
+                actual_winner = "Draw"
                 actual_winner_team = None
-            
-            # Generate prediction for this match
-            predicted_winner = None
-            predicted_home_score = None
-            predicted_away_score = None
-            prediction_confidence = None
-            prediction_error = None
-            
-            if predictor:
+
+            prediction_correct = None
+            if prediction_correct_raw is not None:
+                prediction_correct = bool(int(prediction_correct_raw))
+            elif predicted_winner and predicted_winner not in {"Error", "Unknown"}:
+                prediction_correct = (predicted_winner == actual_winner)
+
+            if prediction_correct is not None:
+                total_predictions += 1
+                if prediction_correct:
+                    correct_predictions += 1
+            if prediction_error is not None:
                 try:
-                    pred = predictor.predict_match(
-                        home_team=home_team_name,
-                        away_team=away_team_name,
-                        league_id=league_id_val,
-                        match_date=date_event,
-                        match_id=match_id,
-                    )
-                    
-                    predicted_home_score = pred.get('predicted_home_score', 0)
-                    predicted_away_score = pred.get('predicted_away_score', 0)
-                    prediction_confidence = pred.get('confidence', 0.5)
-                    predicted_winner = pred.get('predicted_winner', 'Unknown')
-                    
-                    home_error = abs(predicted_home_score - home_score)
-                    away_error = abs(predicted_away_score - away_score)
-                    prediction_error = home_error + away_error
-                    if not selected_year or date_event[:4] == selected_year:
-                        if predicted_winner == actual_winner:
-                            correct_predictions += 1
-                        total_predictions += 1
-                        score_errors.append(prediction_error)
-                    
-                except Exception as e:
-                    logger.warning(f"Could not generate prediction for {home_team_name} vs {away_team_name} on {date_event}: {e}")
-                    predicted_winner = 'Error'
-            
-            year = date_event[:4] if date_event else "Unknown"
-            # Prefer API round when valid (1-30); else use computed league round
+                    score_errors.append(float(prediction_error))
+                except Exception:
+                    pass
+
+            year_key = date_event[:4] if date_event else "Unknown"
             key = (match_id, date_event[:10] if date_event else '')
             try:
                 api_r = int(str(round_num or '').strip()) if round_num is not None else None
@@ -6072,65 +5848,54 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             except (ValueError, TypeError):
                 use_api = False
             effective_round = round_num if use_api else league_rounds.get(key)
-            if effective_round is None:
-                effective_round = league_rounds.get(key)
-            # Group key: round-based (e.g. "1", "2") for display
-            round_key = str(effective_round) if effective_round is not None else get_year_week_key(date_event)
-            year_week_key = round_key
+            try:
+                round_key = str(int(effective_round)) if effective_round is not None else get_year_week_key(date_event)
+            except Exception:
+                round_key = get_year_week_key(date_event)
             week = get_week_number(date_event)
-
-            # Prefer full timestamp (kickoff) when available. If we only have midnight UTC,
-            # treat as unknown kickoff time to avoid showing a fixed local time (e.g. 02:00).
-            def _has_meaningful_time(v: Any) -> bool:
-                try:
-                    s = str(v or "")
-                except Exception:
-                    return False
-                if "T" not in s:
-                    return False
-                # matches "...T00:00..." (with optional seconds/ms and timezone)
-                return ("T00:00" not in s)
 
             kickoff_at = kickoff_ts if (kickoff_ts and _has_meaningful_time(kickoff_ts)) else None
             status_norm = str(status or "").upper()
             went_to_extra_time = ("AET" in status_norm) or ("EXTRA" in status_norm) or ("ET" in status_norm and "SET" not in status_norm)
-            
+
             match_data = {
-                'match_id': match_id,
-                'league_id': league_id_val,
-                'league_name': league_name or f"League {league_id_val}",
-                'date': date_event,
-                'kickoff_at': kickoff_at,
-                'went_to_extra_time': went_to_extra_time,
-                'year': year,
-                'week': week,
-                'year_week': year_week_key,
-                'season': season,
-                'round': effective_round,
-                'venue': venue,
-                'status': status,
-                'home_team': home_team_name,
-                'away_team': away_team_name,
-                'home_team_id': home_team_id,
-                'away_team_id': away_team_id,
-                'actual_home_score': home_score,
-                'actual_away_score': away_score,
-                'actual_winner': actual_winner,
-                'actual_winner_team': actual_winner_team,
-                'predicted_home_score': predicted_home_score,
-                'predicted_away_score': predicted_away_score,
-                'predicted_winner': predicted_winner,
-                'prediction_confidence': prediction_confidence,
-                'prediction_error': prediction_error,
-                'prediction_correct': predicted_winner == actual_winner if predicted_winner and predicted_winner != 'Error' else None,
-                'score_difference': abs(home_score - away_score) if home_score and away_score else None,
-                'predicted_score_difference': abs(predicted_home_score - predicted_away_score) if predicted_home_score is not None and predicted_away_score is not None else None,
+                "match_id": match_id,
+                "league_id": league_id_val,
+                "league_name": league_name or f"League {league_id_val}",
+                "date": date_event,
+                "kickoff_at": kickoff_at,
+                "went_to_extra_time": went_to_extra_time,
+                "year": year_key,
+                "week": week,
+                "year_week": round_key,
+                "season": season,
+                "round": effective_round,
+                "venue": venue,
+                "status": status,
+                "home_team": home_team_name,
+                "away_team": away_team_name,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "actual_home_score": home_score,
+                "actual_away_score": away_score,
+                "actual_winner": actual_winner,
+                "actual_winner_team": actual_winner_team,
+                "predicted_home_score": predicted_home_score,
+                "predicted_away_score": predicted_away_score,
+                "predicted_winner": predicted_winner,
+                "prediction_confidence": prediction_confidence,
+                "prediction_error": prediction_error,
+                "prediction_correct": prediction_correct,
+                "score_difference": abs(home_score - away_score) if home_score is not None and away_score is not None else None,
+                "predicted_score_difference": abs(predicted_home_score - predicted_away_score) if predicted_home_score is not None and predicted_away_score is not None else None,
+                "home_win_prob": home_win_prob,
+                "away_win_prob": away_win_prob,
             }
-            
-            matches_by_year_week[year][year_week_key].append(match_data)
-            if not selected_year or year == selected_year:
-                all_matches.append(match_data)
-        logger.info(f"[hist][{request_id}] prediction/mapping loop completed in {(perf_counter() - t0_process) * 1000:.1f} ms")
+
+            matches_by_year_week[year_key][round_key].append(match_data)
+            all_matches.append(match_data)
+
+        logger.info(f"[hist][{request_id}] mapping loop completed in {(perf_counter() - t0_process) * 1000:.1f} ms")
         
         conn.close()
         
@@ -6167,7 +5932,11 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 'has_more': (offset + len(results)) < total_rows,
                 'next_offset': (offset + len(results)) if (offset + len(results)) < total_rows else None,
             },
-            'by_league': {}
+            'by_league': {},
+            'debug': {
+                'data_source': 'event_with_snapshot',
+                'model_version': model_version,
+            },
         }
         
         # Group by league for easier filtering

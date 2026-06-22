@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getLeagueStandings, subscribeToStandingsCache } from '../firebase';
+import { formatStandingsSeasonLabel, getPrimaryStandingsSeasonYear } from '../utils/season';
 import RugbyBallLoader from './RugbyBallLoader';
 
 // League ID mapping: Our league ID -> Highlightly league ID
@@ -106,14 +107,17 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
         const cachedAt = cached?.cachedAt ? Number(cached.cachedAt) : null;
         const cachedStandings = cached?.standings || null;
         const cacheAge = cachedAt ? now - cachedAt : null;
+        const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
+        const cachedSeason = Number(cached?.season ?? cachedStandings?.league?.season);
+        const cacheSeasonStale = Number.isFinite(cachedSeason) && cachedSeason < primarySeason;
 
-        if (cachedStandings && cacheAge !== null && cacheAge >= 0 && cacheAge < TTL_MS) {
+        if (cachedStandings && cacheAge !== null && cacheAge >= 0 && cacheAge < TTL_MS && !cacheSeasonStale) {
           setStandings(cachedStandings);
           setLoading(false);
           return;
         }
 
-        if (cachedStandings && cacheAge !== null && cacheAge >= 0 && cacheAge < STALE_MAX_MS) {
+        if (cachedStandings && cacheAge !== null && cacheAge >= 0 && cacheAge < STALE_MAX_MS && !cacheSeasonStale) {
           // Stale-while-revalidate: render instantly, refresh in background.
           setStandings(cachedStandings);
           setLoading(false);
@@ -161,10 +165,9 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     const highlightlyLeagueId = LEAGUE_ID_MAPPING[leagueId];
     if (!highlightlyLeagueId || leagueId === 5479 || leagueId === 5480) return;
 
-    const currentYear = new Date().getFullYear();
-    const seasons = [currentYear, currentYear - 1];
+    const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
 
-    const unsub = subscribeToStandingsCache(highlightlyLeagueId, seasons, (newStandings) => {
+    const unsub = subscribeToStandingsCache(highlightlyLeagueId, [primarySeason], (newStandings) => {
       setStandings(newStandings);
       const cacheKey = getLicenseCacheKey(leagueId, highlightlyLeagueId);
       try {
@@ -1156,7 +1159,8 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: { xs: 'center', sm: 'flex-start' }, gap: 1, flexWrap: 'wrap', ml: { xs: 0, sm: 'auto' }, width: { xs: '100%', sm: 'auto' } }}>
             {standings.league?.season && (
               <Chip
-                label={`Season ${standings.league.season}`}
+                label={`Season ${formatStandingsSeasonLabel(standings.league.season, leagueId)}`}
+                title={`API season key: ${standings.league.season}`}
                 size="small"
                 sx={{
                   backgroundColor: 'rgba(255, 255, 255, 0.10)',

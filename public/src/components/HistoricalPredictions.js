@@ -41,6 +41,8 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
   const lastInitialFetchRef = useRef({ leagueId: null, atMs: 0 });
   const theme = useTheme();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
+  const currentYear = useMemo(() => String(new Date().getFullYear()), []);
+  const isRugbyWorldCup = Number(leagueId) === 4574;
 
   useEffect(() => {
     const now = Date.now();
@@ -56,11 +58,10 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
     setSelectedYear(null);
     setExpandedWeeks(new Set());
     autoPreferredYearAppliedRef.current = false;
-    fetchHistoricalData();
+    const initialYear = isRugbyWorldCup ? null : currentYear;
+    fetchHistoricalData(initialYear);
   }, [leagueId]);
 
-  const currentYear = useMemo(() => String(new Date().getFullYear()), []);
-  const isRugbyWorldCup = Number(leagueId) === 4574;
   const isEnglishPremiership = Number(leagueId) === 4414;
   const preferredRwcYears = useMemo(() => ['2023', '2019', '2015', '2011', '2007'], []);
   const LUX = useMemo(
@@ -77,7 +78,8 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
     }),
     []
   );
-  const HISTORY_BATCH_SIZE = 500;
+  const HISTORY_BATCH_SIZE = 1000;
+  const HISTORY_MAX_PAGES = 100;
   const detectedSeasonRanges = useMemo(() => {
     const all = Array.isArray(leagueSeasonWindows?.leagues) ? leagueSeasonWindows.leagues : [];
     const targetLeagueId = Number(leagueId);
@@ -237,7 +239,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
         let offset = 0;
         let pagesFetched = 0;
         let mergedData = null;
-        while (pagesFetched < 20) {
+        while (pagesFetched < HISTORY_MAX_PAGES) {
           const pagePayload = { ...payload, limit: HISTORY_BATCH_SIZE, offset };
           const pageStart = performance.now();
           const page = await getHistoricalPredictions(pagePayload);
@@ -296,42 +298,27 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           if (years.length > 0) setSelectedYear(years[0]);
         }
 
-        // Luxury UX: ensure Year selector always includes the current year.
-        // Also pick a sensible default automatically ONCE:
-        // - World Cup: prefer tournament years (2023/2019/...)
-        // - Other leagues: prefer current year if present, else backend most recent.
-        if (!yearOverride && !autoPreferredYearAppliedRef.current) {
+        // Default year is chosen on initial fetch; avoid a second round-trip.
+        if (!yearOverride && !autoPreferredYearAppliedRef.current && isRugbyWorldCup) {
+          const fromBackendYears = Array.isArray(result.data.available_years) ? result.data.available_years : [];
           const derivedYears = result.data.matches_by_year_week ? Object.keys(result.data.matches_by_year_week) : [];
-          const yearSet = new Set([...fromBackendYears.map(String), ...derivedYears.map(String), currentYear]);
-          const mergedYears = Array.from(yearSet).filter(Boolean);
-
+          const yearSet = new Set([...fromBackendYears.map(String), ...derivedYears.map(String)]);
           const chooseRwc = () => {
             for (const y of preferredRwcYears) {
               if (yearSet.has(y)) return y;
             }
-            return backendSelected || mergedYears.sort().reverse()[0] || null;
+            return result.data.selected_year ? String(result.data.selected_year) : null;
           };
-
-          const chooseDefault = () => {
-            if (isRugbyWorldCup) return chooseRwc();
-            if (yearSet.has(currentYear)) return currentYear;
-            return backendSelected || mergedYears.sort().reverse()[0] || null;
-          };
-
-          const preferred = chooseDefault();
+          const preferred = chooseRwc();
+          const backendSelected = result.data.selected_year ? String(result.data.selected_year) : null;
           if (preferred && preferred !== backendSelected) {
-            console.log('[History] Auto-selecting preferred year and refetching', {
-              preferredYear: preferred,
-              backendSelected,
-              mode,
-            });
             autoPreferredYearAppliedRef.current = true;
             setSelectedYear(preferred);
-            // Refetch just that year (keeps payload small).
             await fetchHistoricalData(preferred, mode);
             return;
           }
         }
+        autoPreferredYearAppliedRef.current = true;
         console.log('[History] Fetch success', {
           durationMs: Number((performance.now() - startedAt).toFixed(1)),
           selectedYear: result?.data?.selected_year || null,

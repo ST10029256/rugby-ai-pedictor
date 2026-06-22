@@ -199,7 +199,7 @@ jobs:
               --db data.sqlite \
               --verbose \
               --days-ahead 365 \
-              --days-back 30; then
+              --days-back 90; then
               break
             fi
 
@@ -215,6 +215,15 @@ jobs:
         run: |
           set -Eeuo pipefail
           python cleanup_duplicates_post_update.py
+
+      - name: Backfill prediction snapshots for history accuracy
+        if: steps.mode.outputs.full_refresh == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python rugby-ai-predictor/backfill_v4_predictions_all_games.py \
+            --db data.sqlite \
+            --batch-size 500
 
       - name: Detect newly completed matches after synchronization
         env:
