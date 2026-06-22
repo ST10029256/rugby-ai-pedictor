@@ -42,7 +42,9 @@ def _load_local_env_files() -> None:
         if p.exists():
             load_dotenv(dotenv_path=p, override=True)
 
+from prediction.db import ensure_configured_leagues
 from prediction.highlightly_client import HighlightlyRugbyAPI
+from prediction.config import LEAGUE_MAPPINGS as CONFIG_LEAGUE_NAMES
 from prediction.highlightly_leagues import (
     HIGHLIGHTLY_LEAGUE_MAPPINGS,
     ensure_highlightly_match_id_column,
@@ -630,6 +632,8 @@ def main():
     # Connect to database
     conn = sqlite3.connect(args.db)
     ensure_highlightly_match_id_column(conn)
+    ensured_leagues = ensure_configured_leagues(conn, CONFIG_LEAGUE_NAMES)
+    logger.info(f"Ensured {ensured_leagues} configured leagues in SQLite")
     snapshot_runtime = SnapshotRuntime(
         db_path=args.db,
         enabled=not args.disable_event_snapshots,

@@ -90,6 +90,29 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def ensure_configured_leagues(conn: sqlite3.Connection, league_names: Dict[int, str]) -> int:
+    """Ensure every configured league id exists in the league table (idempotent)."""
+    if not league_names:
+        return 0
+    ensured = 0
+    for league_id, name in league_names.items():
+        if league_id == 85:
+            continue
+        conn.execute(
+            """
+            INSERT INTO league (id, name, sport)
+            VALUES (?, ?, 'Rugby')
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                sport=COALESCE(league.sport, excluded.sport);
+            """,
+            (int(league_id), str(name)),
+        )
+        ensured += 1
+    conn.commit()
+    return ensured
+
+
 def upsert_league(conn: sqlite3.Connection, league: Dict[str, Any]) -> None:
     id_raw = league.get("idLeague")
     if id_raw is None:

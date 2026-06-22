@@ -319,9 +319,15 @@ def sync_leagues(sqlite_conn: sqlite3.Connection, firestore_db: Any) -> int:
     """Sync leagues from SQLite to Firestore"""
     try:
         from prediction.config import LEAGUE_MAPPINGS
+        from prediction.db import ensure_configured_leagues
     except ImportError:
         LEAGUE_MAPPINGS = {}
-    
+        ensure_configured_leagues = None  # type: ignore
+
+    if LEAGUE_MAPPINGS and ensure_configured_leagues is not None:
+        ensured = ensure_configured_leagues(sqlite_conn, LEAGUE_MAPPINGS)
+        logger.info(f"Ensured {ensured} configured leagues in SQLite before Firestore sync")
+
     cursor = sqlite_conn.cursor()
     cursor.execute("SELECT * FROM league")
     leagues = cursor.fetchall()
