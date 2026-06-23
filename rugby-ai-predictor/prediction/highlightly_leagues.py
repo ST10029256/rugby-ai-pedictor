@@ -202,6 +202,89 @@ def _safe_int(value: Any, default: Optional[int] = None) -> Optional[int]:
         return default
 
 
+def _coerce_score(value: Any) -> Optional[int]:
+    """Coerce a single score value that may be int, numeric string, or None."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if text == "" or not any(ch.isdigit() for ch in text):
+        return None
+    try:
+        return int(float(text))
+    except (ValueError, TypeError):
+        return None
+
+
+def _split_pair_score(value: Any) -> Tuple[Optional[int], Optional[int]]:
+    """Parse combined score strings like '24-17', '24 : 17', '24 - 17'."""
+    if not isinstance(value, str):
+        return None, None
+    import re
+
+    nums = re.findall(r"\d+", value)
+    if len(nums) >= 2:
+        return _safe_int(nums[0]), _safe_int(nums[1])
+    return None, None
+
+
+def extract_scores(row: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
+    """Robustly pull final home/away scores from a Highlightly match row.
+
+    Highlightly's rugby payloads are inconsistent: some matches expose flat
+    ``homeScore``/``awayScore`` ints, others nest them under ``score``,
+    ``state.score`` (often a combined ``"24 - 17"`` string), per-team ``score``
+    fields, or a ``scores`` list. We were only reading the first two shapes,
+    which silently dropped scores for finished matches that used the others -
+    leaving them in the DB as 'Finished' with NULL scores. Try every known
+    shape before giving up.
+    """
+    home = _coerce_score(row.get("homeScore"))
+    away = _coerce_score(row.get("awayScore"))
+    if home is not None and away is not None:
+        return home, away
+
+    score_obj = row.get("score")
+    if isinstance(score_obj, dict):
+        home = home if home is not None else _coerce_score(score_obj.get("home"))
+        away = away if away is not None else _coerce_score(score_obj.get("away"))
+        if home is None or away is None:
+            ph, pa = _split_pair_score(score_obj.get("current") or score_obj.get("display") or score_obj.get("ft"))
+            home = home if home is not None else ph
+            away = away if away is not None else pa
+    if home is not None and away is not None:
+        return home, away
+
+    state = row.get("state")
+    if isinstance(state, dict):
+        s_score = state.get("score")
+        if isinstance(s_score, dict):
+            home = home if home is not None else _coerce_score(s_score.get("home"))
+            away = away if away is not None else _coerce_score(s_score.get("away"))
+            if home is None or away is None:
+                ph, pa = _split_pair_score(s_score.get("current") or s_score.get("display"))
+                home = home if home is not None else ph
+                away = away if away is not None else pa
+        elif isinstance(s_score, str):
+            ph, pa = _split_pair_score(s_score)
+            home = home if home is not None else ph
+            away = away if away is not None else pa
+    if home is not None and away is not None:
+        return home, away
+
+    home_team = row.get("homeTeam")
+    away_team = row.get("awayTeam")
+    if isinstance(home_team, dict) and home is None:
+        home = _coerce_score(home_team.get("score"))
+    if isinstance(away_team, dict) and away is None:
+        away = _coerce_score(away_team.get("score"))
+
+    return home, away
+
+
 def _season_label(season: int, our_league_id: int) -> str:
     if our_league_id in YEAR_SPAN_LEAGUE_IDS:
         return f"{season}-{season + 1}"
@@ -223,16 +306,16 @@ def highlightly_row_to_game(
     if dt is None:
         return None
 
-    home_score = row.get("homeScore")
-    away_score = row.get("awayScore")
-    if home_score is None:
-        home_score = (row.get("score") or {}).get("home")
-    if away_score is None:
-        away_score = (row.get("score") or {}).get("away")
+    home_score, away_score = extract_scores(row)
 
     state = row.get("state") or row.get("status") or ""
     if isinstance(state, dict):
-        state = state.get("description") or state.get("short") or str(state)
+        state = (
+            state.get("description")
+            or state.get("name")
+            or state.get("short")
+            or str(state)
+        )
     status = str(state)
 
     return {
@@ -241,8 +324,8 @@ def highlightly_row_to_game(
         "date_event": dt.date(),
         "home_team": home,
         "away_team": away,
-        "home_score": _safe_int(home_score),
-        "away_score": _safe_int(away_score),
+        "home_score": home_score,
+        "away_score": away_score,
         "league_id": our_league_id,
         "league_name": league_name,
         "season": _season_label(season, our_league_id),
@@ -313,18 +396,27 @@ def fetch_games_from_highlightly(
     if include_history:
         seasons = season_candidates(today, our_league_id, include_history=True)
     else:
-        best, _total = detect_best_season(
-            api,
-            highlightly_league_id,
-            our_league_id,
-            today,
-            request_counter=request_counter,
-            sleep_s=sleep_s,
-        )
-        if best is None:
-            logger.warning("No Highlightly season with fixtures for %s", league_name)
-            return []
-        seasons = [best]
+        # Fetch the recent candidate seasons (current + previous), NOT just the
+        # single "best" one. detect_best_season adds a large future-fixture
+        # bonus, so once a season ends and the next season's schedule is
+        # published it locks onto the upcoming season and stops refreshing the
+        # just-finished one - leaving recently completed matches stuck with no
+        # score. Pulling the recent candidates guarantees those results are
+        # backfilled; the date-window filter still trims anything too old.
+        seasons = season_candidates(today, our_league_id, include_history=False)[:3]
+        if not seasons:
+            best, _total = detect_best_season(
+                api,
+                highlightly_league_id,
+                our_league_id,
+                today,
+                request_counter=request_counter,
+                sleep_s=sleep_s,
+            )
+            if best is None:
+                logger.warning("No Highlightly season with fixtures for %s", league_name)
+                return []
+            seasons = [best]
 
     games: List[Dict[str, Any]] = []
     seen: set[tuple] = set()

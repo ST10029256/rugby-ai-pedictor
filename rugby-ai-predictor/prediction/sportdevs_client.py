@@ -18,6 +18,64 @@ except Exception:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Process-global odds cache.
+#
+# The live predictions view fires 2xN predict calls per league round (an
+# odds-only autofill pass + a full-prediction pass), and every warm instance
+# is reused across users. Bookmaker odds for a fixture barely move minute to
+# minute, so caching them per (league, date, teams) collapses those repeated
+# synchronous Highlightly/SportDevs HTTP calls into a single fetch. Negative
+# results (no odds yet for an upcoming fixture) are cached for a shorter time
+# so we stop hammering the API for matches that simply have no market.
+# ---------------------------------------------------------------------------
+_ODDS_CACHE: Dict[str, Any] = {}
+_ODDS_CACHE_TTL_SECONDS = 900  # 15 min for found odds
+_ODDS_CACHE_NEGATIVE_TTL_SECONDS = 180  # 3 min for "no odds" misses
+_ODDS_CACHE_MAX_ENTRIES = 512
+
+
+def _normalize_odds_key_part(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _build_odds_cache_key(
+    match_id: Optional[int],
+    league_id: Optional[int],
+    match_date: Optional[str],
+    home_team: Optional[str],
+    away_team: Optional[str],
+) -> str:
+    return "|".join(
+        [
+            str(match_id or ""),
+            str(league_id or ""),
+            str(match_date or "")[:10],
+            _normalize_odds_key_part(home_team),
+            _normalize_odds_key_part(away_team),
+        ]
+    )
+
+
+def _odds_cache_get(key: str) -> Any:
+    entry = _ODDS_CACHE.get(key)
+    if not entry:
+        return "MISS"
+    expires_at, value = entry
+    if time.time() >= expires_at:
+        _ODDS_CACHE.pop(key, None)
+        return "MISS"
+    return value
+
+
+def _odds_cache_set(key: str, value: Any) -> None:
+    if len(_ODDS_CACHE) >= _ODDS_CACHE_MAX_ENTRIES:
+        # Drop the oldest-expiring entries to bound memory.
+        for stale_key in sorted(_ODDS_CACHE, key=lambda k: _ODDS_CACHE[k][0])[:64]:
+            _ODDS_CACHE.pop(stale_key, None)
+    ttl = _ODDS_CACHE_TTL_SECONDS if value else _ODDS_CACHE_NEGATIVE_TTL_SECONDS
+    _ODDS_CACHE[key] = (time.time() + ttl, value)
+
 
 def _load_local_env_files() -> None:
     """Allow a single local key source for scripts + functions."""
@@ -262,6 +320,12 @@ class SportDevsClient:
         away_team: Optional[str] = None,
     ) -> Optional[Dict]:
         """Get betting odds via Highlightly (bookmakers + prematch markets)."""
+        cache_key = _build_odds_cache_key(match_id, league_id, match_date, home_team, away_team)
+        cached = _odds_cache_get(cache_key)
+        if cached != "MISS":
+            return cached
+
+        result: Optional[Dict] = None
         hl_client = self._get_highlightly_client()
         if hl_client is not None:
             try:
@@ -277,17 +341,25 @@ class SportDevsClient:
                     db_path=self.db_path,
                 )
                 if parsed:
-                    return parsed
+                    result = parsed
             except Exception as exc:
                 logger.debug("Highlightly odds fetch failed: %s", exc)
 
-        resolved_match_id = self._safe_int(match_id)
-        odds_data = self._make_request("odds/full-time-results")
-        if isinstance(odds_data, list):
-            for row in odds_data:
-                if resolved_match_id is not None and row.get("match_id") == resolved_match_id:
-                    return row
-        return None
+        # SportDevs fallback only helps when we can target a specific match id.
+        # Without one it would download the entire odds list and find nothing,
+        # which is slow and rate-limit prone - so skip it in that case.
+        if result is None:
+            resolved_match_id = self._safe_int(match_id)
+            if resolved_match_id is not None:
+                odds_data = self._make_request("odds/full-time-results")
+                if isinstance(odds_data, list):
+                    for row in odds_data:
+                        if row.get("match_id") == resolved_match_id:
+                            result = row
+                            break
+
+        _odds_cache_set(cache_key, result)
+        return result
 
     def _extract_apisports_match_odds(
         self,

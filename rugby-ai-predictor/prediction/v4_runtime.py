@@ -11,7 +11,7 @@ import logging
 import pickle
 import re
 import sqlite3
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from datetime import datetime
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
@@ -287,6 +287,13 @@ class V4RuntimePredictor:
         self.db_path = db_path
         self.v4_assets = v4_assets
         self.sportdevs_client = SportDevsClient(sportdevs_api_key or "", db_path=db_path)
+        # Per-instance cache of team sequence histories keyed by match_date.
+        # The deployed DB is read-only for an instance's lifetime, so every
+        # match in the same round (same date) can reuse one full league scan
+        # instead of re-querying SQLite per prediction. Bounded to a handful of
+        # dates to keep memory flat.
+        self._histories_cache: "OrderedDict[str, Dict[int, Deque[Tuple[np.ndarray, int]]]]" = OrderedDict()
+        self._histories_cache_max = 8
 
         with open(v4_assets["meta_path"], "rb") as f:
             self.meta: Dict[str, Any] = pickle.load(f)
@@ -581,8 +588,22 @@ class V4RuntimePredictor:
             team_last_date[a] = dt
         return histories
 
-    def _build_single_input(self, conn: sqlite3.Connection, home_team_id: int, away_team_id: int, match_date: str):
+    def _get_team_histories_cached(
+        self, conn: sqlite3.Connection, match_date: str
+    ) -> Dict[int, Deque[Tuple[np.ndarray, int]]]:
+        key = str(match_date or "")[:10]
+        cached = self._histories_cache.get(key)
+        if cached is not None:
+            self._histories_cache.move_to_end(key)
+            return cached
         histories = self._build_team_histories(conn, match_date)
+        self._histories_cache[key] = histories
+        while len(self._histories_cache) > self._histories_cache_max:
+            self._histories_cache.popitem(last=False)
+        return histories
+
+    def _build_single_input(self, conn: sqlite3.Connection, home_team_id: int, away_team_id: int, match_date: str):
+        histories = self._get_team_histories_cached(conn, match_date)
 
         def _seq_for(team_id: int) -> Tuple[np.ndarray, np.ndarray]:
             seq = np.zeros((self.seq_len, self.seq_dim), dtype=np.float32)

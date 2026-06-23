@@ -98,6 +98,17 @@ class TheSportsDBClient:
         data = self._request("lookup_all_teams", {"id": str(league_id)})
         return data.get("teams") or []
 
+    def search_teams(self, name: str) -> List[Dict[str, Any]]:
+        """Search teams by name (searchteams.php?t=). Returns [] on miss.
+
+        Note: badge URLs are only populated on non-free API keys; the free "123"
+        demo key resolves the team record but strips strTeamBadge.
+        """
+        if not name:
+            return []
+        data = self._request("searchteams", {"t": name})
+        return data.get("teams") or []
+
     def lookup_team(self, team_id: str | int) -> Optional[Dict[str, Any]]:
         data = self._request("lookupteam", {"id": str(team_id)})
         teams = data.get("teams") or []

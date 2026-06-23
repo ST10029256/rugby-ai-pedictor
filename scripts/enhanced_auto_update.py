@@ -620,14 +620,19 @@ def main():
     try:
         api_key = parse_api_key(args.api_key)
     except ValueError as exc:
+        # Exit non-zero so CI fails loudly instead of silently "succeeding"
+        # while ingesting nothing (which freezes the data without any signal).
         logger.error(str(exc))
-        return
+        sys.exit(2)
 
     api = HighlightlyRugbyAPI(api_key=api_key, use_rapidapi=False)
     probe = api.get_leagues(limit=1)
     if not probe.get("data"):
-        logger.error("Highlightly auth failed. Check HIGHLIGHTLY_API_KEY in rugby-ai-predictor/.env")
-        return
+        logger.error(
+            "Highlightly auth/probe failed. Check HIGHLIGHTLY_API_KEY (expired key, "
+            "rate limit, or outage). Failing the run so the data freeze is visible."
+        )
+        sys.exit(3)
     
     # Connect to database
     conn = sqlite3.connect(args.db)
@@ -642,6 +647,7 @@ def main():
     )
     
     total_updated = 0
+    total_fetched = 0
     request_counter = [0]
     all_leagues = list(LEAGUE_MAPPINGS.keys())
     
@@ -667,6 +673,7 @@ def main():
                 request_counter=request_counter,
             )
             
+            total_fetched += len(games or [])
             if games:
                 updated = update_database_with_games(conn, games, snapshot_runtime=snapshot_runtime)
                 total_updated += updated
@@ -689,7 +696,17 @@ def main():
             logger.error(f"❌ Error updating {league_name}: {e}")
     
     conn.close()
-    
+
+    # If the probe passed but every league returned zero rows, the fetch is
+    # systemically broken (API degraded/changed). Fail loudly rather than
+    # committing a no-op run that looks healthy.
+    if total_fetched == 0:
+        logger.error(
+            "No games were fetched from Highlightly for ANY league. Treating as a "
+            "fetch failure so the data freeze is visible in CI."
+        )
+        sys.exit(4)
+
     logger.info(f"🎉 Update complete! Total games updated: {total_updated} (Highlightly API calls: {request_counter[0]})")
     if snapshot_runtime and snapshot_runtime.enabled:
         s = snapshot_runtime.stats

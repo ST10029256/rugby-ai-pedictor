@@ -4767,6 +4767,126 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                         total_teams += teams_count
                 logger.info(f"   Total teams: {total_teams}")
 
+                # ------------------------------------------------------------------
+                # PRIMARY logo source: Highlightly (same provider as the standings).
+                #   * League logo is deterministic and always available:
+                #       https://highlightly.net/rugby/images/leagues/{id}.png
+                #   * Team logos exist for ~78% of teams. Highlightly returns the
+                #     real URL in match rows (team.logo); when null the image does
+                #     not exist, so those fall through to the TheSportsDB block.
+                # We key team logos by Highlightly team id (stable, name-agnostic).
+                # ------------------------------------------------------------------
+                try:
+                    league_obj = standings.get("league")
+                    if not isinstance(league_obj, dict):
+                        league_obj = {}
+                        standings["league"] = league_obj
+                    league_logo_url = f"https://highlightly.net/rugby/images/leagues/{int(highlightly_league_id)}.png"
+                    league_obj["logo"] = league_logo_url
+                    league_obj["badge"] = league_logo_url
+                    logger.info(f"🏆 Set Highlightly league logo: {league_logo_url}")
+
+                    # Build {highlightly_team_id: logo_url} from match rows (cached 7d).
+                    hl_logo_by_id: Dict[str, str] = {}
+                    hl_cache_ref = None
+                    try:
+                        fs_hl = get_firestore_client()
+                        hl_cache_ref = fs_hl.collection("team_logo_cache").document(
+                            f"hl_teams::{int(highlightly_league_id)}::v1"
+                        )
+                        hl_cached = hl_cache_ref.get()
+                        hl_cached_data = hl_cached.to_dict() if getattr(hl_cached, "exists", False) else None
+                        if isinstance(hl_cached_data, dict):
+                            fetched_at = hl_cached_data.get("fetched_at")
+                            is_fresh = False
+                            try:
+                                if isinstance(fetched_at, str):
+                                    fdt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+                                    is_fresh = (datetime.utcnow() - fdt.replace(tzinfo=None)).days < 7
+                            except Exception:
+                                is_fresh = False
+                            cached_map = hl_cached_data.get("logo_by_id")
+                            if isinstance(cached_map, dict) and cached_map and is_fresh:
+                                hl_logo_by_id = {str(k): str(v) for k, v in cached_map.items() if k and v}
+                                logger.info(f"✅ Using cached Highlightly team logos ({len(hl_logo_by_id)})")
+                    except Exception as hl_cache_err:
+                        logger.warning(f"Highlightly logo cache read failed: {hl_cache_err}")
+
+                    if not hl_logo_by_id:
+                        try:
+                            seasons_to_scan = [successful_season]
+                            if isinstance(successful_season, int):
+                                seasons_to_scan.append(successful_season - 1)
+                            for scan_season in seasons_to_scan:
+                                offset = 0
+                                for _ in range(6):  # up to 600 matches per season
+                                    mresp = client.get_matches(
+                                        league_id=int(highlightly_league_id),
+                                        season=int(scan_season),
+                                        limit=100,
+                                        offset=offset,
+                                    )
+                                    rows = (mresp or {}).get("data") or []
+                                    if not rows:
+                                        break
+                                    for mrow in rows:
+                                        for side in ("homeTeam", "awayTeam"):
+                                            t = mrow.get(side) or {}
+                                            tid = t.get("id")
+                                            logo = t.get("logo")
+                                            if tid is not None and logo and str(tid) not in hl_logo_by_id:
+                                                hl_logo_by_id[str(tid)] = str(logo)
+                                    if len(rows) < 100:
+                                        break
+                                    offset += 100
+                            logger.info(f"Fetched {len(hl_logo_by_id)} Highlightly team logos from matches")
+                            if hl_cache_ref is not None and hl_logo_by_id:
+                                try:
+                                    hl_cache_ref.set(
+                                        {
+                                            "highlightly_league_id": int(highlightly_league_id),
+                                            "logo_by_id": hl_logo_by_id,
+                                            "fetched_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                                            "source": "highlightly_matches",
+                                        },
+                                        merge=True,
+                                    )
+                                except Exception as hl_w_err:
+                                    logger.warning(f"Highlightly logo cache write failed: {hl_w_err}")
+                        except Exception as hl_fetch_err:
+                            logger.warning(f"Highlightly team logo fetch failed: {hl_fetch_err}")
+
+                    # Apply Highlightly team logos onto standings rows by team id.
+                    hl_applied = 0
+                    if hl_logo_by_id:
+                        for g in groups:
+                            if not isinstance(g, dict):
+                                continue
+                            for list_key in ("standings", "teams"):
+                                rows = g.get(list_key)
+                                if not isinstance(rows, list):
+                                    continue
+                                for row in rows:
+                                    if not isinstance(row, dict):
+                                        continue
+                                    team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
+                                    tid = None
+                                    if team_obj:
+                                        tid = team_obj.get("id")
+                                    if tid is None:
+                                        tid = row.get("teamId") or row.get("id")
+                                    url = hl_logo_by_id.get(str(tid)) if tid is not None else None
+                                    if url:
+                                        if team_obj is not None:
+                                            team_obj["logo"] = url
+                                            team_obj["badge"] = url
+                                        row["logo"] = url
+                                        row["badge"] = url
+                                        hl_applied += 1
+                    logger.info(f"✅ Applied {hl_applied} Highlightly team logos into standings")
+                except Exception as hl_logo_err:
+                    logger.warning(f"Highlightly logo enrichment failed (continuing): {hl_logo_err}")
+
                 # Enrich standings with team logos (luxury UI) using TheSportsDB:
                 # Frontend passes `sportsdb_league_id` (TheSportsDB league id like 4446 for URC).
                 # We fetch all teams once and map badges to the standings teams by name.
@@ -4807,7 +4927,11 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
 
                         def _find_logo(standings_name: str, logos_by_norm: dict) -> Optional[str]:
                             """Try exact, overrides, then fuzzy match to resolve logo."""
-                            from prediction.config import STANDINGS_TEAM_OVERRIDES
+                            try:
+                                from prediction.config import STANDINGS_TEAM_OVERRIDES
+                            except Exception:
+                                # Never let a missing override map abort logo enrichment.
+                                STANDINGS_TEAM_OVERRIDES = {}
                             sn = _norm_team_name(standings_name)
                             if not sn:
                                 return None
@@ -4937,14 +5061,19 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                                             name = row.get("name") or row.get("team_name") or row.get("strTeam")
                                         if not name:
                                             continue
+                                        # Skip teams already resolved via Highlightly (primary source).
+                                        already = (team_obj and team_obj.get("logo")) or row.get("logo")
+                                        if already:
+                                            continue
                                         logo = _find_logo(str(name), logos_by_norm)
                                         if not logo and not cache_used:
                                             missed_names.append(str(name))
                                         if logo:
                                             if team_obj is not None:
-                                                team_obj.setdefault("logo", logo)
-                                                team_obj.setdefault("badge", logo)
-                                            row.setdefault("logo", logo)
+                                                team_obj["logo"] = logo
+                                                team_obj["badge"] = logo
+                                            row["logo"] = logo
+                                            row["badge"] = logo
                                             applied += 1
                             if missed_names and not cache_used:
                                 cfg = load_config()
@@ -4968,10 +5097,14 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                                                             team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
                                                             rn = (team_obj or {}).get("name") or (team_obj or {}).get("team_name") or row.get("name") or row.get("team_name") or ""
                                                             if rn and _norm_team_name(rn) == _norm_team_name(nm):
+                                                                already2 = (team_obj and team_obj.get("logo")) or row.get("logo")
+                                                                if already2:
+                                                                    break
                                                                 if team_obj is not None:
-                                                                    team_obj.setdefault("logo", badge)
-                                                                    team_obj.setdefault("badge", badge)
-                                                                row.setdefault("logo", badge)
+                                                                    team_obj["logo"] = badge
+                                                                    team_obj["badge"] = badge
+                                                                row["logo"] = badge
+                                                                row["badge"] = badge
                                                                 applied += 1
                                                                 break
                                                 break
@@ -4983,6 +5116,52 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
 
                     except Exception as logo_err:
                         logger.warning(f"Standings logo enrichment failed (continuing without logos): {logo_err}")
+
+                # FINAL fallback: curated static logos for any team neither Highlightly
+                # nor TheSportsDB resolved. Guarantees every league-table team shows a crest
+                # even without a paid TheSportsDB key. Runs regardless of sportsdb_league_id.
+                try:
+                    from prediction.config import STATIC_TEAM_LOGOS
+                    import re as _re_static
+
+                    def _norm_static(s: str) -> str:
+                        s2 = (s or "").strip().lower()
+                        s2 = _re_static.sub(r"[^a-z0-9]+", " ", s2)
+                        return _re_static.sub(r"\s+", " ", s2).strip()
+
+                    static_applied = 0
+                    for g in groups:
+                        if not isinstance(g, dict):
+                            continue
+                        for list_key in ("standings", "teams"):
+                            rows = g.get(list_key)
+                            if not isinstance(rows, list):
+                                continue
+                            for row in rows:
+                                if not isinstance(row, dict):
+                                    continue
+                                team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
+                                if (team_obj and team_obj.get("logo")) or row.get("logo"):
+                                    continue
+                                nm = None
+                                if team_obj:
+                                    nm = team_obj.get("name") or team_obj.get("team_name")
+                                if not nm:
+                                    nm = row.get("name") or row.get("team_name")
+                                if not nm:
+                                    continue
+                                url = STATIC_TEAM_LOGOS.get(_norm_static(str(nm)))
+                                if url:
+                                    if team_obj is not None:
+                                        team_obj["logo"] = url
+                                        team_obj["badge"] = url
+                                    row["logo"] = url
+                                    row["badge"] = url
+                                    static_applied += 1
+                    if static_applied:
+                        logger.info(f"✅ Applied {static_applied} curated static team logos (final fallback)")
+                except Exception as static_err:
+                    logger.warning(f"Static logo fallback failed (continuing): {static_err}")
 
                 # Write standings cache (after enrichment) so future requests skip Highlightly.
                 if cache_collection is not None and not cache_hit and not force_refresh and isinstance(successful_season, int):

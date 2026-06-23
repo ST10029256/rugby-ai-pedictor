@@ -932,8 +932,8 @@ function App() {
     const seenMatchups = new Set();
     const seenEventIds = new Set();
 
-    // Import predictMatch dynamically
-    const { predictMatch } = await import('./firebase');
+    // Import predict helpers dynamically
+    const { predictMatch, predictMatchesBatch } = await import('./firebase');
 
     // Precompute unique match tasks (so we don't waste time on duplicates)
     const tasks = [];
@@ -961,6 +961,36 @@ function App() {
       const odds = manualOdds[idKey] || manualOdds[nameKey];
 
       tasks.push({ match, matchDate, matchupKey, odds });
+    }
+
+    // Fast path: ask the backend for the whole round in a single request.
+    // It serves cached / snapshot predictions and computes only the misses,
+    // so we avoid firing one Cloud Function call per match. We still fall back
+    // to per-match calls below for anything the batch didn't return.
+    const batchByEventId = new Map();
+    const batchByNameKey = new Map();
+    try {
+      const batchMatches = tasks.map(({ match, matchDate }) => ({
+        event_id: match.id || match.event_id || null,
+        home_team: canonicalTeamNameForPrediction(match.home_team),
+        away_team: canonicalTeamNameForPrediction(match.away_team),
+        match_date: matchDate,
+      }));
+      const batchResult = await predictMatchesBatch({
+        league_id: selectedLeague,
+        matches: batchMatches,
+      });
+      const preds = batchResult?.data?.predictions || [];
+      for (const p of preds) {
+        if (p && !p.error) {
+          if (p.event_id !== null && p.event_id !== undefined) {
+            batchByEventId.set(String(p.event_id), p);
+          }
+          batchByNameKey.set(`${p.home_team}::${p.away_team}::${p.match_date}`, p);
+        }
+      }
+    } catch (batchErr) {
+      console.warn('Batch prediction unavailable, using per-match fallback:', batchErr?.message);
     }
 
     // Helper function to retry API calls with exponential backoff
@@ -1000,6 +1030,14 @@ function App() {
 
         try {
           const result = await retryWithBackoff(async () => {
+            // Prefer the batched result when present; only hit the network for misses.
+            const eid = String(match.id || match.event_id || '');
+            const nameKey = `${canonicalTeamNameForPrediction(match.home_team)}::${canonicalTeamNameForPrediction(match.away_team)}::${matchDate}`;
+            const fromBatch =
+              (eid && batchByEventId.get(eid)) || batchByNameKey.get(nameKey);
+            if (fromBatch) {
+              return { data: fromBatch };
+            }
             return await predictMatch({
               home_team: canonicalTeamNameForPrediction(match.home_team),
               away_team: canonicalTeamNameForPrediction(match.away_team),
