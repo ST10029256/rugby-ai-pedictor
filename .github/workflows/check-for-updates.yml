@@ -325,16 +325,34 @@ jobs:
           echo "Database changed: $data_changed"
           echo "Retraining required: $retrain_needed"
 
-      - name: Copy changed database into Functions source
-        if: steps.after.outputs.data_changed == 'true'
+      - name: Stage Functions database for deploy
         shell: bash
         run: |
           set -Eeuo pipefail
+          # Always copy the canonical DB (with snapshots) so retrain deploys cannot
+          # leave Firebase serving a stale rugby-ai-predictor/data.sqlite copy.
           cp data.sqlite rugby-ai-predictor/data.sqlite
           cat > rugby-ai-predictor/.env <<EOF
           LIVE_MODEL_FAMILY=${LIVE_MODEL_FAMILY}
           LIVE_MODEL_CHANNEL=${LIVE_MODEL_CHANNEL}
           EOF
+          python - <<'PY'
+          import sqlite3
+
+          with sqlite3.connect("rugby-ai-predictor/data.sqlite") as conn:
+              latest = conn.execute(
+                  """
+                  SELECT MAX(date_event)
+                  FROM event
+                  WHERE home_score IS NOT NULL AND away_score IS NOT NULL
+                  """
+              ).fetchone()[0]
+              snaps = conn.execute("SELECT COUNT(*) FROM prediction_snapshot").fetchone()[0]
+          print(f"Functions DB latest completed match: {latest}")
+          print(f"Functions DB prediction snapshots: {snaps}")
+          if snaps == 0:
+              raise SystemExit("Functions DB has zero prediction snapshots.")
+          PY
 
       - name: Sync changed game data to Firestore
         if: steps.after.outputs.data_changed == 'true'
@@ -358,8 +376,7 @@ jobs:
             sleep $((attempt * 10))
           done
 
-      - name: Deploy history and standings Functions when the DB changed
-        if: steps.after.outputs.data_changed == 'true'
+      - name: Deploy history and standings Functions
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
         shell: bash

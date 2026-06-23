@@ -33,6 +33,8 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
   PIP_NO_PYTHON_VERSION_WARNING: '1'
   WORKFLOW_REVISION: 'v4-firebase-venv'
+  LIVE_MODEL_FAMILY: champion
+  LIVE_MODEL_CHANNEL: prod_100
 
 jobs:
   prepare:
@@ -220,6 +222,32 @@ jobs:
           import torch
           print(f"PyTorch {torch.__version__}; CUDA available: {torch.cuda.is_available()}")
           PY
+
+      - name: Sync latest completed scores before training
+        env:
+          HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${HIGHLIGHTLY_API_KEY:-}" ]]; then
+            echo "::warning::HIGHLIGHTLY_API_KEY is not set; training on committed data.sqlite."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if python scripts/enhanced_auto_update.py \
+              --db data.sqlite \
+              --verbose \
+              --days-ahead 365 \
+              --days-back 400; then
+              break
+            fi
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Pre-training score sync failed after 3 attempts."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          python cleanup_duplicates_post_update.py data.sqlite
 
       - name: Run ${{ matrix.family }} evaluation training
         if: needs.prepare.outputs.training_profile == 'full'
@@ -507,6 +535,17 @@ jobs:
             --v5-report artifacts/maz_maxed_v5_metrics_latest.json \
             --output rugby-ai-predictor/league_model_champions.json \
             --artifacts-copy artifacts/league_model_champions.json
+
+      - name: Sync scores, rebuild history snapshots, and stage Functions database
+        env:
+          HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+          SYNC: 'true'
+          ONLY_MISSING: 'false'
+          DAYS_BACK: '400'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash scripts/prepare_functions_database.sh
 
       - name: Configure and deploy champion runtime
         env:
