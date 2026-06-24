@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import pickle
+from collections import OrderedDict
 from typing import Any, Dict, Tuple
 
 import numpy as np
@@ -250,6 +251,13 @@ class V5RuntimePredictor(V4RuntimePredictor):
         self.db_path = db_path
         self.v5_assets = v5_assets
         self.sportdevs_client = SportDevsClient(sportdevs_api_key or "", db_path=db_path)
+        # V5 intentionally reuses the V4 serving path but builds its own __init__,
+        # so the team-history cache that V4RuntimePredictor.__init__ creates must be
+        # initialized here too. Without it, super().predict_match() ->
+        # _get_team_histories_cached() raises AttributeError and every V5 prediction
+        # silently fails during backfill.
+        self._histories_cache: "OrderedDict[str, Dict[int, Any]]" = OrderedDict()
+        self._histories_cache_max = 8
 
         with open(v5_assets["meta_path"], "rb") as f:
             self.meta: Dict[str, Any] = pickle.load(f)
