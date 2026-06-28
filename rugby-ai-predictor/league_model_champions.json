@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-24T06:33:34.042836",
+  "generated_at": "2026-06-28T00:15:46.619906",
   "default_model_family": "v5",
   "selection_basis": "walk_forward_unseen_games",
   "policy_notes": [
