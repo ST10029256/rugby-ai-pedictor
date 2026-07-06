@@ -9,15 +9,23 @@ import LiveMatches from './components/LiveMatches';
 import ManualOddsInput from './components/ManualOddsInput';
 import PredictionsDisplay from './components/PredictionsDisplay';
 import LoginWidget from './components/LoginWidget';
+import { ProfileDrawerSummary, UserProfilePage } from './components/UserProfilePanel';
 import SubscriptionPage from './components/SubscriptionPage';
 import NewsFeed from './components/NewsFeed';
 import LeagueStandings from './components/LeagueStandings';
+import MatchLineups from './components/MatchLineups';
+import LeagueTeams from './components/LeagueTeams';
 import RugbyBallLoader from './components/RugbyBallLoader';
 import HistoricalPredictions from './components/HistoricalPredictions';
+import { VIEW_CONTENT_WRAPPER_SX } from './utils/viewLoader';
 import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
 import { MEDIA_URLS } from './utils/storageUrls';
 import './App.css';
 import { getLocalYYYYMMDD, getKickoffAtFromMatch } from './utils/date';
+import { getBiometricRegistration, handleDeviceAuthFailure, saveDeviceSession } from './utils/biometricAuth';
+import { getDeviceId } from './utils/deviceId';
+import { ensureProfileFromAuth } from './utils/userProfile';
+import { predictionsWidgetSx } from './utils/predictionsLayout';
 
 const darkTheme = createTheme({
   palette: {
@@ -48,6 +56,16 @@ const LEAGUE_CONFIGS = {
   5480: { name: "Nations Championship", neutral_mode: true },
 };
 const DEBUG_UPCOMING_LEAGUES = new Set([4714]);
+const APP_DISPLAY_NAME = 'Rugby AI Predictor';
+const APP_NAV_VIEWS = [
+  { id: 'predictions', label: 'Predictions', icon: '🎯' },
+  { id: 'news', label: 'News', icon: '📰' },
+  { id: 'standings', label: 'Standings', icon: '🏆' },
+  { id: 'teams', label: 'Teams', icon: '🏉' },
+  { id: 'lineups', label: 'Lineups', icon: '👥' },
+  { id: 'history', label: 'History', icon: '📜' },
+];
+const CONTENT_TAB_VIEWS = new Set(['news', 'standings', 'teams', 'lineups', 'history']);
 
 function extractMatchDateIso(match) {
   const raw = String(
@@ -374,9 +392,8 @@ function App() {
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', 'standings', or 'history'
-  const [allLeaguesScanLoading, setAllLeaguesScanLoading] = useState(false);
-  const [allLeaguesScanReport, setAllLeaguesScanReport] = useState('');
+  const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', 'standings', 'history', or 'profile'
+  const [profileRevision, setProfileRevision] = useState(0);
   const [userPreferences] = useState({
     followed_teams: [],
     followed_leagues: [],
@@ -388,6 +405,8 @@ function App() {
   const autoOddsLastSignatureRef = useRef('');
   
   const isMobile = useMediaQuery('(max-width:899.95px)');
+  const isMobileReelsViewport = useMediaQuery('(max-width:768px)');
+  const isMobileNewsReels = isMobileReelsViewport && activeView === 'news';
   const isTallMobileViewport = useMediaQuery('(min-height:860px)');
 
   const upcomingWindow = useMemo(() => getNextMatchWeek(upcomingMatches), [upcomingMatches]);
@@ -403,10 +422,12 @@ function App() {
     });
   }, [upcomingWindow.matches, selectedLeague]);
 
-  // Check authentication on mount - auto-login if valid key is stored
+  // Check authentication on mount — skip silent auto-login when biometric is enabled.
   useEffect(() => {
     const checkAuthentication = async () => {
       try {
+        const biometricEnabled = Boolean(getBiometricRegistration());
+
         const storedAuth = localStorage.getItem('rugby_ai_auth');
         if (storedAuth) {
           const auth = JSON.parse(storedAuth);
@@ -417,10 +438,18 @@ function App() {
             setCheckingAuth(false);
             return;
           }
+
+          // Biometric users must unlock on the login screen each visit.
+          if (biometricEnabled) {
+            setAuthenticated(false);
+            setCheckingAuth(false);
+            return;
+          }
           
           // Check if expired (with 1 hour buffer to account for timezone differences)
           if (auth.expiresAt && auth.expiresAt * 1000 < Date.now() - 3600000) {
             localStorage.removeItem('rugby_ai_auth');
+            localStorage.setItem('rugby_ai_license_key', auth.licenseKey);
             setAuthenticated(false);
             setCheckingAuth(false);
             return;
@@ -437,15 +466,24 @@ function App() {
                 subscriptionType: result.data.subscription_type || auth.subscriptionType,
                 email: result.data.email || auth.email,
                 authenticatedAt: Date.now(),
+                deviceId: getDeviceId(),
               };
               
               // Save updated auth data
               localStorage.setItem('rugby_ai_auth', JSON.stringify(updatedAuth));
+              saveDeviceSession(updatedAuth);
               setAuthData(updatedAuth);
             setAuthenticated(true);
           } else {
-              // Key is no longer valid
+              const failure = handleDeviceAuthFailure(result.data);
+              if (failure === 'blocked' || failure === 'pending') {
+                setAuthenticated(false);
+                setCheckingAuth(false);
+                return;
+              }
+              // Key is no longer valid — keep key pre-filled for renewal entry.
             localStorage.removeItem('rugby_ai_auth');
+            localStorage.setItem('rugby_ai_license_key', auth.licenseKey);
             setAuthenticated(false);
           }
           } catch (verifyError) {
@@ -470,6 +508,7 @@ function App() {
   }, []);
 
   const handleLoginSuccess = (auth) => {
+    ensureProfileFromAuth(auth);
     setAuthData(auth);
     setAuthenticated(true);
     
@@ -484,8 +523,10 @@ function App() {
   };
 
   const handleLogout = () => {
-    // Save license key before removing auth so it can be pre-filled on next login
-    if (authData && authData.licenseKey) {
+    // Keep device session for biometric login on this device.
+    if (authData?.licenseKey && getBiometricRegistration()) {
+      saveDeviceSession(authData);
+    } else if (authData?.licenseKey) {
       localStorage.setItem('rugby_ai_license_key', authData.licenseKey);
     }
     
@@ -579,30 +620,41 @@ function App() {
   }, [mobileOpen, isMobile]);
 
   // News + Standings + Predictions + History should use normal page scrolling (no inner scroll panel).
+  // Mobile news uses fixed full-screen reels below nav — lock document scroll instead.
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
     const root = document.getElementById('root');
+    const shouldUseReelsImmersive = isMobileReelsViewport && activeView === 'news';
     const shouldUsePageScroll =
-      (activeView === 'news' ||
-        activeView === 'standings' ||
-        activeView === 'predictions' ||
-        activeView === 'history');
+      (activeView === 'news' && !shouldUseReelsImmersive) ||
+      activeView === 'standings' ||
+      activeView === 'teams' ||
+      activeView === 'lineups' ||
+      activeView === 'predictions' ||
+      activeView === 'history' ||
+      activeView === 'profile';
 
     html.classList.toggle('news-page-scroll', shouldUsePageScroll);
     body.classList.toggle('news-page-scroll', shouldUsePageScroll);
+    html.classList.toggle('news-reels-immersive', shouldUseReelsImmersive);
+    body.classList.toggle('news-reels-immersive', shouldUseReelsImmersive);
     if (root) {
       root.classList.toggle('news-page-scroll', shouldUsePageScroll);
+      root.classList.toggle('news-reels-immersive', shouldUseReelsImmersive);
     }
 
     return () => {
       html.classList.remove('news-page-scroll');
       body.classList.remove('news-page-scroll');
+      html.classList.remove('news-reels-immersive');
+      body.classList.remove('news-reels-immersive');
       if (root) {
         root.classList.remove('news-page-scroll');
+        root.classList.remove('news-reels-immersive');
       }
     };
-  }, [activeView]);
+  }, [activeView, isMobileReelsViewport]);
 
   useEffect(() => {
     // Only load leagues when authenticated
@@ -1333,85 +1385,19 @@ function App() {
     setMobileOpen(prev => !prev);
   }, []);
 
+  const handleViewChange = useCallback((view) => {
+    setActiveView(view);
+    if (isMobile) {
+      setMobileOpen(false);
+    }
+  }, [isMobile]);
+
   const handleLeagueChange = useCallback((league) => {
     setSelectedLeague(league);
     if (isMobile) {
       setMobileOpen(false);
     }
   }, [isMobile]);
-
-  const checkAllLeaguesUpcoming = useCallback(async () => {
-    setAllLeaguesScanLoading(true);
-    setAllLeaguesScanReport('Scanning all leagues...\n');
-
-    const leagueEntries = Object.entries(LEAGUE_CONFIGS).sort((a, b) =>
-      String(a[1].name).localeCompare(String(b[1].name))
-    );
-    const lines = [`Checked at ${new Date().toLocaleString()}`, ''];
-
-    try {
-      const results = await Promise.all(
-        leagueEntries.map(async ([id, config]) => {
-          const leagueId = Number(id);
-          try {
-            const result = await getUpcomingMatches({ league_id: leagueId, limit: 50 });
-            const payload = result?.data || {};
-            const matches = payload.matches || [];
-            const debug = payload.debug || {};
-            return {
-              leagueId,
-              name: config.name,
-              matches,
-              debug,
-              error: payload.error || null,
-            };
-          } catch (err) {
-            return {
-              leagueId,
-              name: config.name,
-              matches: [],
-              debug: {},
-              error: err?.message || String(err),
-            };
-          }
-        })
-      );
-
-      let totalUpcoming = 0;
-      for (const row of results) {
-        const count = row.matches.length;
-        totalUpcoming += count;
-        lines.push(`${row.name} (${row.leagueId}): ${count} upcoming`);
-        if (row.error) {
-          lines.push(`  error: ${row.error}`);
-        }
-        if (row.debug && Object.keys(row.debug).length > 0) {
-          const d = row.debug;
-          lines.push(
-            `  api: checked=${d.total_checked ?? '?'} past=${d.past_dates ?? '?'} mode=${d.query_mode || 'unknown'}`
-          );
-        }
-        if (count === 0) {
-          lines.push('  (no upcoming fixtures returned)');
-        } else {
-          row.matches.slice(0, 5).forEach((m) => {
-            lines.push(`  - ${m.home_team || '?'} vs ${m.away_team || '?'} — ${m.date_event || 'TBD'}`);
-          });
-          if (count > 5) {
-            lines.push(`  ... +${count - 5} more`);
-          }
-        }
-        lines.push('');
-      }
-
-      lines.push(`Total: ${totalUpcoming} upcoming across ${results.filter((r) => r.matches.length > 0).length}/${results.length} leagues`);
-      setAllLeaguesScanReport(lines.join('\n'));
-    } catch (err) {
-      setAllLeaguesScanReport(`Scan failed: ${err?.message || String(err)}`);
-    } finally {
-      setAllLeaguesScanLoading(false);
-    }
-  }, []);
 
   // Show login widget if not authenticated
   if (checkingAuth) {
@@ -1485,9 +1471,9 @@ function App() {
       {/* Premium Header */}
       <Box sx={{ 
         display: 'flex', 
-        justifyContent: isMobile ? 'space-between' : 'center', 
+        justifyContent: isMobile ? 'center' : 'center', 
         alignItems: 'center', 
-        mb: 4,
+        mb: isMobile ? 2 : 4,
         flexShrink: 0,
         width: '100%',
         position: 'relative',
@@ -1504,151 +1490,318 @@ function App() {
           borderRadius: '2px',
         },
       }}>
+        {isMobile ? (
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: '40px 1fr 40px',
+              alignItems: 'center',
+              width: '100%',
+            }}
+          >
+            <Box aria-hidden sx={{ width: 40 }} />
+            <Typography
+              variant="h5"
+              sx={{
+                color: '#fafafa',
+                fontWeight: 800,
+                fontSize: '1.1rem',
+                textAlign: 'center',
+                letterSpacing: '-0.02em',
+                justifySelf: 'center',
+                '& .text': {
+                  background: 'linear-gradient(135deg, #fafafa 0%, #10b981 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                },
+              }}
+            >
+              <span className="text">Menu</span>
+            </Typography>
+            <IconButton
+              onClick={handleDrawerToggle}
+              sx={{
+                justifySelf: 'end',
+                color: '#fafafa',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                '&:hover': {
+                  transform: 'rotate(90deg) scale(1.1)',
+                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                  borderColor: 'rgba(16, 185, 129, 0.4)',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                },
+                '&:active': {
+                  transform: 'rotate(90deg) scale(0.95)',
+                },
+              }}
+              aria-label="close drawer"
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        ) : (
+          <>
         <Typography variant="h5" sx={{ 
           color: '#fafafa', 
           fontWeight: 800,
-          fontSize: isMobile ? '1.25rem' : '1.5rem',
-          textAlign: isMobile ? 'left' : 'center',
+          fontSize: '1.5rem',
+          textAlign: 'center',
           letterSpacing: '-0.02em',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: isMobile ? 'flex-start' : 'center',
+          justifyContent: 'center',
           gap: 1,
-          '& .emoji': {
-            fontSize: isMobile ? '1.5rem' : '1.75rem',
-            filter: 'drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3))',
-          },
           '& .text': {
             background: 'linear-gradient(135deg, #fafafa 0%, #10b981 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
-            textShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
           },
         }}>
-          <img src="/rugby_emoji.png" alt="Rugby Ball" style={{ width: '24px', height: '24px', marginRight: '8px', verticalAlign: 'middle' }} />
-          <span className="text">Control Panel</span>
+              <img src="/rugby_emoji.png" alt="Rugby Ball" style={{ width: '24px', height: '24px', marginRight: '8px', verticalAlign: 'middle' }} />
+              <span className="text">Control Panel</span>
         </Typography>
-        {isMobile && (
-          <IconButton
-            onClick={handleDrawerToggle}
-            sx={{ 
-              color: '#fafafa',
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              '&:hover': {
-                transform: 'rotate(90deg) scale(1.1)',
-                backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                borderColor: 'rgba(16, 185, 129, 0.4)',
-                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-              },
-              '&:active': {
-                transform: 'rotate(90deg) scale(0.95)',
-              },
-            }}
-            aria-label="close drawer"
-          >
-            <CloseIcon />
-          </IconButton>
+          </>
         )}
       </Box>
-      
-      {/* Premium Logout Button */}
-      <Box sx={{ 
-        mb: 3, 
-        display: 'flex', 
-        justifyContent: 'center',
-        flexShrink: 0,
-        width: '100%',
-      }}>
-        <Button
-          onClick={handleLogout}
-          startIcon={<LogoutIcon />}
-          sx={{
-            color: '#d1d5db',
-            fontSize: '0.875rem',
-            textTransform: 'none',
-            fontWeight: 500,
-            px: 2.5,
-            py: 1,
-            borderRadius: '10px',
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              color: '#fafafa',
-              backgroundColor: 'rgba(239, 68, 68, 0.15)',
-              borderColor: 'rgba(239, 68, 68, 0.3)',
-              transform: 'translateY(-2px)',
-              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
-            },
-          }}
-        >
-          Logout
-        </Button>
-      </Box>
-      <Box sx={{ 
-        flex: '1 1 auto',
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100%',
-        minHeight: 0,
-        mt: 2,
-      }}>
-        <LeagueSelector
-          leagues={leagues}
-          selectedLeague={selectedLeague}
-          onLeagueChange={handleLeagueChange}
-        />
-        <Box sx={{ mt: 2, width: '100%' }}>
-          <Button
-            fullWidth
-            variant="outlined"
-            disabled={allLeaguesScanLoading}
-            onClick={checkAllLeaguesUpcoming}
-            sx={{
-              textTransform: 'none',
-              color: '#10b981',
-              borderColor: 'rgba(16, 185, 129, 0.4)',
-              mb: 1.5,
-              '&:hover': {
-                borderColor: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.08)',
-              },
-            }}
-          >
-            {allLeaguesScanLoading ? 'Checking all leagues...' : 'Check upcoming (all leagues)'}
-          </Button>
-          {allLeaguesScanReport ? (
-            <Box
+
+      {isMobile ? (
+        <>
+          <Box sx={{ flexShrink: 0, width: '100%', mb: 2.5 }}>
+            <Typography
               sx={{
-                p: 1.5,
-                borderRadius: '10px',
-                backgroundColor: 'rgba(0, 0, 0, 0.35)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                maxHeight: 280,
-                overflow: 'auto',
+                color: '#64748b',
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                mb: 1.25,
+                px: 0.5,
               }}
             >
-              <Typography
-                component="pre"
-                sx={{
-                  m: 0,
-                  fontFamily: 'Consolas, Monaco, monospace',
-                  fontSize: '0.72rem',
-                  lineHeight: 1.45,
-                  color: '#d1d5db',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {allLeaguesScanReport}
-              </Typography>
+              League
+            </Typography>
+            <LeagueSelector
+              leagues={leagues}
+              selectedLeague={selectedLeague}
+              onLeagueChange={handleLeagueChange}
+            />
+            <Box
+              sx={{
+                width: '72%',
+                maxWidth: 220,
+                height: '2px',
+                mx: 'auto',
+                mt: 2.5,
+                borderRadius: '2px',
+                background: 'linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%)',
+                opacity: 0.6,
+              }}
+            />
+          </Box>
+
+          <Box sx={{ flex: '1 1 auto', minHeight: 0, width: '100%', mb: 2, overflowY: 'auto' }}>
+            <Typography
+              sx={{
+                color: '#64748b',
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                mb: 1.25,
+                px: 0.5,
+              }}
+            >
+              Navigate
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.65 }}>
+              {APP_NAV_VIEWS.map((item) => {
+                const isActive = activeView === item.id;
+                return (
+                  <Button
+                    key={item.id}
+                    fullWidth
+                    onClick={() => handleViewChange(item.id)}
+                    sx={{
+                      justifyContent: 'flex-start',
+                      gap: 1.25,
+                      py: 1.15,
+                      px: 1.5,
+                      borderRadius: '12px',
+                      textTransform: 'none',
+                      fontWeight: 700,
+                      fontSize: '0.95rem',
+                      color: isActive ? '#d1fae5' : '#e2e8f0',
+                      backgroundColor: isActive
+                        ? 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(16,185,129,0.08))'
+                        : 'rgba(255,255,255,0.03)',
+                      border: isActive
+                        ? '1px solid rgba(16, 185, 129, 0.45)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                      boxShadow: isActive ? '0 4px 14px rgba(16, 185, 129, 0.15)' : 'none',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        backgroundColor: isActive
+                          ? 'linear-gradient(135deg, rgba(16,185,129,0.24), rgba(16,185,129,0.12))'
+                          : 'rgba(255,255,255,0.06)',
+                        borderColor: isActive ? 'rgba(16, 185, 129, 0.55)' : 'rgba(255,255,255,0.12)',
+                        transform: 'translateX(2px)',
+                      },
+                    }}
+                  >
+                    <Box component="span" sx={{ fontSize: '1.1rem', lineHeight: 1, width: 24, textAlign: 'center' }}>
+                      {item.icon}
+                    </Box>
+                    {item.label}
+                  </Button>
+                );
+              })}
             </Box>
-          ) : null}
-        </Box>
-      </Box>
+
+            <Box
+              sx={{
+                width: '72%',
+                maxWidth: 220,
+                height: '2px',
+                mx: 'auto',
+                mt: 2.5,
+                mb: 2,
+                borderRadius: '2px',
+                background: 'linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%)',
+                opacity: 0.6,
+              }}
+            />
+            <ProfileDrawerSummary
+              authData={authData}
+              onOpenProfile={() => handleViewChange('profile')}
+              isActive={activeView === 'profile'}
+              profileRevision={profileRevision}
+            />
+          </Box>
+
+          <Box
+            sx={{
+              flexShrink: 0,
+              mt: 'auto',
+              width: '100%',
+              pt: 1.5,
+              borderTop: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <Button
+              fullWidth
+              onClick={handleLogout}
+              startIcon={<LogoutIcon />}
+              sx={{
+                color: '#d1d5db',
+                fontSize: '0.875rem',
+                textTransform: 'none',
+                fontWeight: 600,
+                px: 2.5,
+                py: 1.1,
+                borderRadius: '12px',
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                transition: 'all 0.3s ease',
+                '&:hover': {
+                  color: '#fafafa',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  borderColor: 'rgba(239, 68, 68, 0.3)',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+                },
+              }}
+            >
+              Logout
+            </Button>
+          </Box>
+        </>
+      ) : (
+        <>
+          <Box sx={{ flexShrink: 0, width: '100%', mb: 2.5 }}>
+            <Typography
+              sx={{
+                color: '#64748b',
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                mb: 1.25,
+                px: 0.5,
+              }}
+            >
+              League
+            </Typography>
+            <LeagueSelector
+              leagues={leagues}
+              selectedLeague={selectedLeague}
+              onLeagueChange={handleLeagueChange}
+            />
+            <Box
+              sx={{
+                width: '72%',
+                maxWidth: 220,
+                height: '2px',
+                mx: 'auto',
+                mt: 2.5,
+                borderRadius: '2px',
+                background: 'linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%)',
+                opacity: 0.6,
+              }}
+            />
+            <Box sx={{ mt: 2.5 }}>
+              <ProfileDrawerSummary
+                authData={authData}
+                onOpenProfile={() => handleViewChange('profile')}
+                isActive={activeView === 'profile'}
+                profileRevision={profileRevision}
+              />
+            </Box>
+          </Box>
+
+          <Box sx={{ flex: '1 1 auto', minHeight: 0 }} />
+
+          <Box
+            sx={{
+              flexShrink: 0,
+              mt: 'auto',
+              width: '100%',
+              pt: 1.5,
+              borderTop: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <Button
+              fullWidth
+              onClick={handleLogout}
+              startIcon={<LogoutIcon />}
+              sx={{
+                color: '#d1d5db',
+                fontSize: '0.875rem',
+                textTransform: 'none',
+                fontWeight: 600,
+                px: 2.5,
+                py: 1.1,
+                borderRadius: '12px',
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                transition: 'all 0.3s ease',
+                '&:hover': {
+                  color: '#fafafa',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  borderColor: 'rgba(239, 68, 68, 0.3)',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+                },
+              }}
+            >
+              Logout
+            </Button>
+          </Box>
+        </>
+      )}
     </Box>
   );
 
@@ -1664,12 +1817,15 @@ function App() {
           !isMobile &&
           (activeView === 'news' ||
             activeView === 'standings' ||
+            activeView === 'teams' ||
             activeView === 'predictions' ||
-            activeView === 'history')
+            activeView === 'lineups' ||
+            activeView === 'history' ||
+            activeView === 'profile')
             ? 'visible'
             : 'hidden',
         // Desktop only: Ensure container allows sticky positioning
-        ...(isMobile ? {} : (activeView === 'news' || activeView === 'standings' || activeView === 'predictions' || activeView === 'history' ? {
+        ...(isMobile ? {} : (activeView === 'news' || activeView === 'standings' || activeView === 'teams' || activeView === 'lineups' || activeView === 'predictions' || activeView === 'history' || activeView === 'profile' ? {
           height: 'auto',
           overflow: 'visible',
         } : {
@@ -1798,10 +1954,10 @@ function App() {
             <Box
               sx={{
                 position: 'fixed',
-                top: 'calc(env(safe-area-inset-top, 0px) + 56px)',
+                top: 'var(--app-mobile-nav-offset)',
                 left: 0,
                 width: '280px',
-                height: 'calc(100vh - (env(safe-area-inset-top, 0px) + 56px))',
+                height: 'calc(100svh - var(--app-mobile-nav-offset))',
                 background: 'linear-gradient(180deg, rgba(38, 39, 48, 0.98) 0%, rgba(31, 41, 55, 0.95) 100%)',
                 backdropFilter: 'blur(20px) saturate(180%)',
                 borderRight: '1px solid rgba(16, 185, 129, 0.2)',
@@ -1831,13 +1987,13 @@ function App() {
             width: { xs: '100%', md: 'auto' },
             maxWidth: 'none',
             display: 'flex',
-            gap: { xs: 0.25, md: 2 },
-            justifyContent: { xs: 'flex-start', md: 'center' },
+            gap: { xs: 0, md: 2 },
+            justifyContent: { xs: 'center', md: 'center' },
             alignItems: 'center',
             paddingLeft: { xs: '12px', sm: '16px', md: '32px' },
-            paddingRight: { xs: '20px', md: '32px' },
-            paddingTop: { xs: 'calc(env(safe-area-inset-top, 0px) + 12px)', md: '12px' },
-            paddingBottom: { xs: '12px', md: '12px' },
+            paddingRight: { xs: '12px', sm: '16px', md: '32px' },
+            paddingTop: { xs: 'calc(env(safe-area-inset-top, 0px) + 10px)', md: '12px' },
+            paddingBottom: { xs: '10px', md: '12px' },
             backgroundColor: '#0e1117',
             backdropFilter: 'blur(10px)',
             borderBottom: '1px solid rgba(16, 185, 129, 0.2)',
@@ -1848,183 +2004,152 @@ function App() {
             margin: 0,
             overflow: 'hidden',
           }}>
-            {isMobile && (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, mr: { xs: 0.75, sm: 1 }, width: { xs: '36px', sm: '44px' }, height: { xs: '36px', sm: '44px' } }}>
-                {!mobileOpen ? (
-                  <IconButton
-                    color="inherit"
-                    aria-label="open drawer"
-                    edge="start"
-                    onClick={handleDrawerToggle}
+            {isMobile ? (
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: '40px 1fr 40px',
+                  alignItems: 'center',
+                  width: '100%',
+                  minHeight: 36,
+                }}
+              >
+                <IconButton
+                  color="inherit"
+                  aria-label={mobileOpen ? 'close menu' : 'open menu'}
+                  onClick={handleDrawerToggle}
+                  sx={{
+                    justifySelf: 'start',
+                    backgroundColor: 'rgba(38, 39, 48, 0.95)',
+                    backdropFilter: 'blur(10px)',
+                    color: '#fafafa',
+                    padding: '7px',
+                    borderRadius: '10px',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.08)',
+                    transition: 'all 0.25s ease',
+                    '&:hover': {
+                      backgroundColor: 'rgba(16, 185, 129, 0.18)',
+                      transform: 'scale(1.04)',
+                    },
+                    '&:active': {
+                      transform: 'scale(0.96)',
+                    },
+                  }}
+                >
+                  {mobileOpen ? (
+                    <CloseIcon sx={{ fontSize: '20px' }} />
+                  ) : (
+                    <MenuIcon sx={{ fontSize: '20px' }} />
+                  )}
+                </IconButton>
+
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 0.75,
+                    minWidth: 0,
+                    px: 0.5,
+                  }}
+                >
+                  <Box
+                    component="img"
+                    src="/rugby_emoji.png"
+                    alt=""
+                    aria-hidden
                     sx={{
-                      backgroundColor: 'rgba(38, 39, 48, 0.95)',
-                      backdropFilter: 'blur(10px)',
-                      color: '#fafafa',
-                      padding: { xs: '6px', sm: '8px' },
-                      borderRadius: '10px',
-                      boxShadow: '0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
-                      transition: 'all 0.3s ease',
-                      '&:hover': {
-                        backgroundColor: 'rgba(38, 39, 48, 1)',
-                        transform: 'scale(1.03)',
-                      },
-                      '&:active': {
-                        transform: 'scale(0.95)',
-                      },
+                      width: 22,
+                      height: 22,
+                      flexShrink: 0,
+                      filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.35))',
+                    }}
+                  />
+                  <Typography
+                    sx={{
+                      fontWeight: 800,
+                      fontSize: { xs: '0.9rem', sm: '0.98rem' },
+                      letterSpacing: '-0.02em',
+                      lineHeight: 1.2,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      background: 'linear-gradient(135deg, #f8fafc 0%, #10b981 100%)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      backgroundClip: 'text',
                     }}
                   >
-                    <MenuIcon sx={{ fontSize: { xs: '20px', sm: '24px' } }} />
-                  </IconButton>
-                ) : (
-                  <Box sx={{ width: '100%', height: '100%' }} />
-                )}
+                    {APP_DISPLAY_NAME}
+                  </Typography>
+                </Box>
+
+                <Box aria-hidden sx={{ width: 40 }} />
               </Box>
-            )}
+            ) : (
             <Box
               sx={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: { xs: 0.25, md: 2 },
-                justifyContent: { xs: 'flex-start', md: 'center' },
+                gap: 2,
+                justifyContent: 'center',
                 flex: 1,
                 minWidth: 0,
-                overflowX: { xs: 'auto', md: 'visible' },
-                WebkitOverflowScrolling: 'touch',
-                scrollbarWidth: 'none',
-                '&::-webkit-scrollbar': { display: 'none' },
               }}
             >
+            {APP_NAV_VIEWS.map((item) => (
             <Button
-              onClick={() => setActiveView('predictions')}
+              key={item.id}
+              onClick={() => handleViewChange(item.id)}
               sx={{
-                color: activeView === 'predictions' ? '#10b981' : '#9ca3af',
-                borderBottom: activeView === 'predictions' ? '2px solid #10b981' : '2px solid transparent',
+                color: activeView === item.id ? '#10b981' : '#9ca3af',
+                borderBottom: activeView === item.id ? '2px solid #10b981' : '2px solid transparent',
                 borderRadius: 0,
                 textTransform: 'none',
                 fontWeight: 600,
-                px: { xs: 1, md: 3 },
-                py: { xs: 0.75, md: 1 },
+                px: 3,
+                py: 1,
                 fontSize: '14px',
-                '& .MuiButton-label, & .MuiButton-root': {
-                  fontSize: '14px',
-                },
                 whiteSpace: 'nowrap',
                 minWidth: 'fit-content',
-                height: { xs: '36px', md: 'auto' }, // Fixed height on mobile
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                flex: { xs: 1, md: 'none' }, // Equal width on mobile
                 '&:hover': {
                   backgroundColor: 'rgba(16, 185, 129, 0.1)',
                 },
               }}
             >
-              🎯 Predictions
+              {item.icon} {item.label}
             </Button>
-            <Button
-              onClick={() => setActiveView('news')}
-              sx={{
-                color: activeView === 'news' ? '#10b981' : '#9ca3af',
-                borderBottom: activeView === 'news' ? '2px solid #10b981' : '2px solid transparent',
-                borderRadius: 0,
-                textTransform: 'none',
-                fontWeight: 600,
-                px: { xs: 1, md: 3 },
-                py: { xs: 0.75, md: 1 },
-                fontSize: '14px',
-                '& .MuiButton-label, & .MuiButton-root': {
-                  fontSize: '14px',
-                },
-                whiteSpace: 'nowrap',
-                minWidth: 'fit-content',
-                height: { xs: '36px', md: 'auto' }, // Fixed height on mobile
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flex: { xs: 1, md: 'none' }, // Equal width on mobile
-                '&:hover': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                },
-              }}
-            >
-              📰 News
-            </Button>
-            <Button
-              onClick={() => setActiveView('standings')}
-              sx={{
-                color: activeView === 'standings' ? '#10b981' : '#9ca3af',
-                borderBottom: activeView === 'standings' ? '2px solid #10b981' : '2px solid transparent',
-                borderRadius: 0,
-                textTransform: 'none',
-                fontWeight: 600,
-                px: { xs: 1, md: 3 },
-                py: { xs: 0.75, md: 1 },
-                fontSize: '14px',
-                '& .MuiButton-label, & .MuiButton-root': {
-                  fontSize: '14px',
-                },
-                whiteSpace: 'nowrap',
-                minWidth: 'fit-content',
-                height: { xs: '36px', md: 'auto' }, // Fixed height on mobile
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flex: { xs: 1, md: 'none' }, // Equal width on mobile
-                '&:hover': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                },
-              }}
-            >
-              🏆 Standings
-            </Button>
-            <Button
-              onClick={() => setActiveView('history')}
-              sx={{
-                color: activeView === 'history' ? '#10b981' : '#9ca3af',
-                borderBottom: activeView === 'history' ? '2px solid #10b981' : '2px solid transparent',
-                borderRadius: 0,
-                textTransform: 'none',
-                fontWeight: 600,
-                px: { xs: 1, md: 3 },
-                py: { xs: 0.75, md: 1 },
-                fontSize: '14px',
-                '& .MuiButton-label, & .MuiButton-root': {
-                  fontSize: '14px',
-                },
-                whiteSpace: 'nowrap',
-                minWidth: 'fit-content',
-                height: { xs: '36px', md: 'auto' }, // Fixed height on mobile
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flex: { xs: 1, md: 'none' }, // Equal width on mobile
-                '&:hover': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                },
-              }}
-            >
-              📜 History
-            </Button>
+            ))}
             </Box>
+            )}
           </Box>
 
         {/* Main Content */}
         <Box
           component="main"
           className={
-            (activeView === 'news' ||
-              activeView === 'standings' ||
-              activeView === 'predictions' ||
-              activeView === 'history')
-              ? 'main-news-page-scroll'
-              : undefined
+            isMobileNewsReels
+              ? 'main-news-reels-immersive'
+              : ((activeView === 'news' ||
+                  activeView === 'standings' ||
+                  activeView === 'teams' ||
+                  activeView === 'predictions' ||
+                  activeView === 'lineups' ||
+            activeView === 'history' ||
+                  activeView === 'profile')
+                  ? 'main-news-page-scroll'
+                  : undefined)
           }
           sx={{
             flexGrow: 1,
             // Use full available width across all main views.
             p: 0,
-            pt: { xs: 'calc(84px + env(safe-area-inset-top, 0px))', sm: '84px', md: '84px' },
+            pt: isMobileNewsReels
+              ? 0
+              : { xs: 'var(--app-mobile-nav-offset)', sm: '84px', md: '84px' },
             backgroundColor: 'transparent',
             color: '#fafafa',
             width: '100%',
@@ -2037,8 +2162,12 @@ function App() {
             paddingRight: 0,
             position: 'relative',
             zIndex: 1,
-            // Desktop only: Allow main content to scroll independently
-            ...((activeView === 'news' || activeView === 'standings' || activeView === 'predictions' || activeView === 'history') ? {
+            ...(isMobileNewsReels ? {
+              overflowY: 'hidden',
+              height: '100svh',
+              maxHeight: '100svh',
+              contain: 'layout style',
+            } : ((activeView === 'news' || activeView === 'standings' || activeView === 'teams' || activeView === 'lineups' || activeView === 'predictions' || activeView === 'history' || activeView === 'profile') ? {
               overflowY: 'visible',
               height: 'auto',
               maxHeight: 'none',
@@ -2050,7 +2179,7 @@ function App() {
               maxHeight: '100vh',
               // Prevent layout shifts when dropdown opens
               contain: 'layout style',
-            }),
+            })),
           }}
         >
           <Box className="main-content-wrapper" sx={{ 
@@ -2067,34 +2196,35 @@ function App() {
             overflowX: activeView === 'predictions' ? 'visible' : 'hidden',
             boxSizing: 'border-box',
           }}>
-            {activeView === 'news' ? (
-              <NewsFeed 
-                userPreferences={userPreferences} 
-                leagueId={selectedLeague} 
-                leagueName={leagueName}
-              />
-            ) : activeView === 'standings' ? (
-              <Box sx={{ 
-                width: '100%', 
-                maxWidth: '100%',
-                mx: 0,
-                p: { xs: 1.5, sm: 2.5, md: 3.5 },
-                position: 'relative',
-                minHeight: { xs: 'calc(100svh - 180px)', sm: 'calc(100vh - 200px)' },
-                overflowX: 'visible',
-                overflowY: 'visible',
-                boxSizing: 'border-box',
-              }}>
-                <LeagueStandings leagueId={selectedLeague} leagueName={leagueName} />
+            {CONTENT_TAB_VIEWS.has(activeView) ? (
+              <Box sx={VIEW_CONTENT_WRAPPER_SX}>
+                {activeView === 'news' ? (
+                  <NewsFeed
+                    userPreferences={userPreferences}
+                    leagueId={selectedLeague}
+                    leagueName={leagueName}
+                  />
+                ) : activeView === 'standings' ? (
+                  <LeagueStandings leagueId={selectedLeague} leagueName={leagueName} />
+                ) : activeView === 'teams' ? (
+                  <LeagueTeams leagueId={selectedLeague} leagueName={leagueName} />
+                ) : activeView === 'lineups' ? (
+                  <MatchLineups leagueId={selectedLeague} leagueName={leagueName} />
+                ) : (
+                  <HistoricalPredictions leagueId={selectedLeague} leagueName={leagueName} />
+                )}
               </Box>
-            ) : activeView === 'history' ? (
-              <HistoricalPredictions leagueId={selectedLeague} leagueName={leagueName} />
+            ) : activeView === 'profile' ? (
+              <UserProfilePage
+                authData={authData}
+                onProfileChange={() => setProfileRevision((r) => r + 1)}
+              />
             ) : (
               <>
             {/* Header Video - same width as odds */}
             <Box 
               sx={{ 
-                mt: { xs: 0, sm: 0 }, 
+                mt: { xs: 2, sm: 0 },
                 width: '100%',
                 maxWidth: { xs: '100%', sm: '900px', md: '100%' },
                 height: { xs: '280px', sm: '380px', md: '550px', lg: '600px' },
@@ -2142,12 +2272,13 @@ function App() {
             </Box>
 
             {selectedLeague && (
-              <Box sx={{ width: '100%', maxWidth: { xs: '100%', sm: '900px', md: '100%' }, mx: 'auto', boxSizing: 'border-box', px: 0 }}>
+              <Box sx={{ width: '100%', boxSizing: 'border-box' }}>
               {/* League Metrics */}
               <LeagueMetrics leagueId={selectedLeague} leagueName={leagueName} />
 
               <Box
                 sx={{
+                  ...predictionsWidgetSx,
                   mb: 2.8,
                   px: { xs: 1.7, sm: 2.4 },
                   py: { xs: 1.5, sm: 1.85 },
@@ -2179,7 +2310,7 @@ function App() {
               {/* Manual Odds Input */}
               {loadingMatches ? (
                 <Box sx={{ 
-                  width: '100%', 
+                  ...predictionsWidgetSx,
                   minHeight: { xs: 'calc(100svh - 400px)', sm: 'calc(100vh - 450px)' },
                   display: 'flex',
                   flexDirection: 'column',
@@ -2199,7 +2330,7 @@ function App() {
                   showHeader={false}
                 />
               ) : (
-                <Box sx={{ mb: 4, p: 2, backgroundColor: '#1f2937', borderRadius: 2 }}>
+                <Box sx={{ ...predictionsWidgetSx, mb: 4, p: 2, backgroundColor: '#1f2937', borderRadius: 2 }}>
                   <Typography variant="h6" sx={{ mb: 1, color: '#fafafa' }}>
                     📅 Upcoming Matches
                   </Typography>
@@ -2210,7 +2341,7 @@ function App() {
               )}
 
                 {/* Generate Predictions Button */}
-                <Box sx={{ my: 4, display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center', gap: 2, width: '100%' }}>
+                <Box sx={{ ...predictionsWidgetSx, my: 4, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>
                   {generating && (
                     <Box sx={{ 
                       width: '100%', 

@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getDeviceAuthPayload } from './utils/deviceId';
 
 // Firebase config for rugby-ai-61fd0
 // For callable functions, we mainly need projectId
@@ -105,33 +106,68 @@ export const getLeagueMetrics = (data) => {
 };
 
 export const verifyLicenseKey = async (data) => {
-  // Try callable function first (handles CORS automatically)
+  const payload = { ...data, ...(await getDeviceAuthPayload()) };
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/verify_license_key_http';
   try {
-    const callable = httpsCallable(functionsRegion, 'verify_license_key');
-    return await callable(data);
-  } catch (error) {
-    // If callable fails, try HTTP endpoint as fallback
-    console.warn('Callable function failed, trying HTTP endpoint:', error);
-    try {
-      const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/verify_license_key_http';
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data || {}),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const json = await response.json().catch(() => ({}));
-      return { data: json };
-    } catch (httpError) {
-      // If both fail, throw the original callable error
-      throw error;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
+    const json = await response.json().catch(() => ({}));
+    return { data: json };
+  } catch (httpError) {
+    console.warn('HTTP verify failed, trying callable:', httpError);
+    try {
+      const callable = httpsCallable(functionsRegion, 'verify_license_key');
+      return await callable(payload);
+    } catch (error) {
+      throw httpError;
+    }
+  }
+};
+
+export const requestEmailLoginCode = async (data) => {
+  const payload = { email: data?.email || '' };
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/request_email_login_code_http';
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(json?.error || `HTTP error! status: ${response.status}`);
+    }
+    return { data: json };
+  } catch (httpError) {
+    const callable = httpsCallable(functionsRegion, 'request_email_login_code');
+    return callable(payload);
+  }
+};
+
+export const verifyEmailLoginCode = async (data) => {
+  const payload = { ...data, ...(await getDeviceAuthPayload()) };
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/verify_email_login_code_http';
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const json = await response.json().catch(() => ({}));
+    return { data: json };
+  } catch (httpError) {
+    console.warn('HTTP email verify failed, trying callable:', httpError);
+    const callable = httpsCallable(functionsRegion, 'verify_email_login_code');
+    return callable(payload);
   }
 };
 
@@ -224,7 +260,13 @@ export const getTrendingTopics = async (data) => {
   return { data: json };
 };
 
-export const getLeagueStandings = async ({ highlightlyLeagueId, sportsdbLeagueId, leagueName }) => {
+export const getLeagueStandings = async ({
+  highlightlyLeagueId,
+  sportsdbLeagueId,
+  leagueName,
+  season,
+  forceRefresh = false,
+}) => {
   // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_league_standings_http';
 
@@ -248,7 +290,9 @@ export const getLeagueStandings = async ({ highlightlyLeagueId, sportsdbLeagueId
       league_id: highlightlyLeagueId,
       sportsdb_league_id: sportsdbLeagueId,
       league_name: leagueName,
+      season,
       license_key: licenseKey,
+      force_refresh: Boolean(forceRefresh),
       // Server-side cache TTL hint (seconds). The function clamps this.
       cache_ttl_seconds: 21600, // 6 hours
     }),
@@ -263,25 +307,71 @@ export const getLeagueStandings = async ({ highlightlyLeagueId, sportsdbLeagueId
   return json;
 };
 
+export const getLeagueLineupMatches = async ({
+  sportsdbLeagueId,
+  season,
+  matchScope = 'historic',
+} = {}) => {
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_match_lineups_http';
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sportsdb_league_id: sportsdbLeagueId,
+      list_matches: true,
+      season,
+      match_scope: matchScope,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json().catch(() => ({}));
+};
+
+export const getMatchLineups = async ({
+  sportsdbLeagueId,
+  sportEventId,
+} = {}) => {
+  const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_match_lineups_http';
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sportsdb_league_id: sportsdbLeagueId,
+      sport_event_id: sportEventId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json().catch(() => ({}));
+};
+
 /**
  * Subscribe to Firestore standings cache for real-time updates.
- * When the API updates the server-side cache, this listener fires and the app can update.
- * @param {number} highlightlyLeagueId - Highlightly league ID
+ * @param {number} sportsdbLeagueId - Local/SportsDB league ID
  * @param {number[]} seasons - Seasons to listen to (e.g. [2025, 2024])
- * @param {(standings: object, season: number) => void} onUpdate - Callback when cache updates
+ * @param {(standings: object, season: number, meta: object) => void} onUpdate - Callback when cache updates
  * @returns {() => void} Unsubscribe function
  */
-export const subscribeToStandingsCache = (highlightlyLeagueId, seasons, onUpdate) => {
+export const subscribeToStandingsCache = (sportsdbLeagueId, seasons, onUpdate) => {
   const unsubs = [];
   for (const year of seasons) {
-    const docId = `hl::${Number(highlightlyLeagueId)}::season::${Number(year)}`;
+    const docId = `ldb::${Number(sportsdbLeagueId)}::season::${Number(year)}`;
     const ref = doc(db, 'standings_cache_v1', docId);
     const unsub = onSnapshot(ref, (snap) => {
       if (!snap.exists()) return;
       const data = snap.data();
       const standings = data?.standings;
       if (standings && typeof standings === 'object') {
-        onUpdate(standings, year);
+        onUpdate(standings, year, {
+          source: data?.source || null,
+        });
       }
     }, (err) => {
       console.warn('Standings cache listener error:', err);

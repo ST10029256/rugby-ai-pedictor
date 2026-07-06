@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple, Any
 from prediction.features import build_feature_table, FeatureConfig
 from prediction.sportdevs_client import SportDevsClient, extract_odds_features
+from prediction.international_leagues import (
+    has_own_or_linked_model,
+    resolve_prediction_source_league,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -686,15 +690,50 @@ class MultiLeaguePredictor:
             raise
     
     def has_trained_model(self, league_id: int) -> bool:
-        """Return True when a deployed model exists for this league."""
+        """Return True when a deployed model exists for this league or a linked international league."""
         from .storage_loader import model_exists_in_storage
 
         requested_family = self._requested_model_family(league_id)
-        return model_exists_in_storage(
-            league_id=int(league_id),
-            bucket_name=self.storage_bucket,
-            preferred_family=requested_family,
-        )
+
+        def _exists(lid: int) -> bool:
+            return model_exists_in_storage(
+                league_id=int(lid),
+                bucket_name=self.storage_bucket,
+                preferred_family=requested_family,
+            )
+
+        return has_own_or_linked_model(int(league_id), _exists)
+
+    def _resolve_prediction_league(
+        self,
+        league_id: int,
+        home_team: str,
+        away_team: str,
+    ) -> Tuple[int, Dict[str, Any]]:
+        import sqlite3
+
+        from .storage_loader import model_exists_in_storage
+
+        requested_family = self._requested_model_family(league_id)
+
+        def _exists(lid: int) -> bool:
+            return model_exists_in_storage(
+                league_id=int(lid),
+                bucket_name=self.storage_bucket,
+                preferred_family=requested_family,
+            )
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return resolve_prediction_source_league(
+                int(league_id),
+                str(home_team),
+                str(away_team),
+                conn,
+                _exists,
+            )
+        finally:
+            conn.close()
 
     def predict_match_odds_only(
         self,
@@ -763,8 +802,29 @@ class MultiLeaguePredictor:
         Returns:
             Prediction dictionary with winner, scores, and confidence
         """
-        predictor = self._get_predictor(league_id)
-        return predictor.predict_match(home_team, away_team, league_id, match_date, match_id)
+        source_league_id, link_meta = self._resolve_prediction_league(
+            int(league_id),
+            str(home_team),
+            str(away_team),
+        )
+        predictor = self._get_predictor(source_league_id)
+        result = predictor.predict_match(
+            home_team,
+            away_team,
+            int(league_id),
+            match_date,
+            match_id=match_id,
+        )
+        if isinstance(result, dict):
+            result.setdefault("requested_league_id", int(league_id))
+            result.setdefault("prediction_league_id", int(source_league_id))
+            if link_meta.get("link_source") == "international_cluster":
+                result["international_model_link"] = link_meta
+                result.setdefault(
+                    "prediction_type",
+                    f"Linked International Model ({link_meta.get('linked_to_league_id')})",
+                )
+        return result
 
 
 def demo_hybrid_prediction():

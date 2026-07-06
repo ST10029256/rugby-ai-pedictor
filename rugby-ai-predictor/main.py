@@ -2038,6 +2038,13 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                 matches.append(match_data)
             
             logger.info(f"Filtered out {women_filtered} women's matches, {len(matches)} matches remaining")
+
+            try:
+                from prediction.kickoff_times import enrich_matches_kickoff
+
+                enrich_matches_kickoff(matches)
+            except Exception as kickoff_err:
+                logger.warning(f"Kickoff enrichment failed (continuing): {kickoff_err}")
             
             # Sort by date and limit (in Python, no index needed)
             def get_sort_key(match):
@@ -2707,13 +2714,651 @@ def get_league_metrics(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e)}
 
 
+def _find_subscription_by_license_key(subscriptions_ref, license_key: str, license_key_normalized: str):
+    """Look up a subscription document by license key (multiple stored formats)."""
+    query = subscriptions_ref.where('license_key', '==', license_key).limit(1)
+    docs = list(query.stream())
+    if not docs and len(license_key_normalized) == 16:
+        formatted_key = (
+            f"{license_key_normalized[0:4]}-{license_key_normalized[4:8]}-"
+            f"{license_key_normalized[8:12]}-{license_key_normalized[12:16]}"
+        )
+        query = subscriptions_ref.where('license_key', '==', formatted_key).limit(1)
+        docs = list(query.stream())
+    if not docs:
+        query = subscriptions_ref.where('license_key', '==', license_key_normalized).limit(1)
+        docs = list(query.stream())
+    return docs
+
+
+def _expires_datetime(expires_at):
+    if not expires_at:
+        return None
+    if hasattr(expires_at, 'timestamp'):
+        return datetime.utcfromtimestamp(expires_at.timestamp())
+    if isinstance(expires_at, datetime):
+        return expires_at
+    return None
+
+
+DEVICE_BINDING_DISCLAIMER = (
+    'Your license is bound to your registered browser/device profile. '
+    'If your device changes, browser changes, or system settings change significantly, '
+    're-approval may be required.'
+)
+
+ERROR_DEVICE_PROFILE_REGISTERED = (
+    'This license is already registered to another browser/device profile. '
+    'If you changed browser, reset your device, or cleared your app data, '
+    'request approval to rebind this license.'
+)
+
+ERROR_DEVICE_REBIND_PENDING = (
+    'Your device profile changed and a re-registration request is pending. '
+    f'{DEVICE_BINDING_DISCLAIMER} '
+    'Contact support with your license key to approve access on this profile.'
+)
+
+_DEVICE_PROFILE_FIELDS = (
+    'os_family', 'browser_family', 'platform_class', 'platform', 'screen_class',
+    'timezone', 'language', 'hardware_concurrency_bucket', 'device_memory_bucket',
+    'touch_support',
+)
+
+_DEVICE_PROFILE_WEIGHTS = {
+    'os_family': 22.0,
+    'browser_family': 18.0,
+    'platform_class': 12.0,
+    'platform': 8.0,
+    'screen_class': 14.0,
+    'timezone': 10.0,
+    'language': 6.0,
+    'hardware_concurrency_bucket': 6.0,
+    'device_memory_bucket': 4.0,
+}
+
+_REBIND_TRUST_FIELDS = (
+    'os_family', 'browser_family', 'platform_class', 'platform', 'screen_class',
+)
+
+_FINGERPRINT_REBIND_THRESHOLD = 88.0
+_FINGERPRINT_REBIND_THRESHOLD_MOBILE = 95.0
+_FINGERPRINT_PENDING_THRESHOLD = 45.0
+
+_PENDING_FIELD_CLEAR = (
+    'pending_device_id', 'pending_device_fingerprint', 'pending_device_fingerprint_profile',
+    'pending_device_label', 'device_rebind_requested_at', 'pending_device_score',
+    'pending_device_reason', 'pending_device_ip_hash', 'pending_device_user_agent',
+    'pending_device_browser', 'pending_device_os', 'pending_device_last_seen_at',
+)
+
+
+def _hash_client_ip(ip: str) -> str:
+    ip = (ip or '').strip()
+    if not ip:
+        return ''
+    return hashlib.sha256(f'rugby-ai-ip::{ip}'.encode()).hexdigest()[:32]
+
+
+def _extract_request_context_callable(req) -> Dict[str, str]:
+    ip = ''
+    ua = ''
+    try:
+        raw = getattr(req, 'raw_request', None)
+        if raw is not None:
+            headers = getattr(raw, 'headers', {}) or {}
+            ip = str(headers.get('X-Forwarded-For', '') or '').split(',')[0].strip()
+            if not ip:
+                ip = str(getattr(raw, 'remote_addr', '') or '')
+            ua = str(headers.get('User-Agent', '') or '')[:512]
+    except Exception:
+        pass
+    return {'ip_hash': _hash_client_ip(ip), 'user_agent': ua}
+
+
+def _extract_request_context_http(req: https_fn.Request) -> Dict[str, str]:
+    ip = str(req.headers.get('X-Forwarded-For', '') or '').split(',')[0].strip()
+    if not ip:
+        ip = str(getattr(req, 'remote_addr', '') or '')
+    ua = str(req.headers.get('User-Agent', '') or '')[:512]
+    return {'ip_hash': _hash_client_ip(ip), 'user_agent': ua}
+
+
+def _derive_screen_class(profile: dict) -> str:
+    existing = (profile.get('screen_class') or '').strip().lower()
+    if existing:
+        return existing
+    try:
+        w = int(profile.get('screen_width') or 0)
+        h = int(profile.get('screen_height') or 0)
+    except (TypeError, ValueError):
+        w, h = 0, 0
+    max_dim = max(w, h)
+    if max_dim <= 0:
+        return 'unknown'
+    if max_dim <= 768:
+        return 'small'
+    if max_dim <= 1024:
+        return 'medium'
+    if max_dim <= 1440:
+        return 'large'
+    if max_dim <= 1920:
+        return 'xl'
+    return 'xxl'
+
+
+def _derive_platform_class(profile: dict) -> str:
+    existing = (profile.get('platform_class') or '').strip().lower()
+    if existing:
+        return existing
+    os_family = (profile.get('os_family') or '').lower()
+    if os_family in ('ios', 'android'):
+        return 'mobile'
+    return 'desktop'
+
+
+def _bucket_hardware_concurrency(value) -> str:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 'unknown'
+    if n <= 0:
+        return 'unknown'
+    if n <= 2:
+        return '1-2'
+    if n <= 4:
+        return '3-4'
+    if n <= 8:
+        return '5-8'
+    return '9+'
+
+
+def _bucket_device_memory(value) -> str:
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return 'unknown'
+    if n <= 0:
+        return 'unknown'
+    if n <= 2:
+        return '1-2'
+    if n <= 4:
+        return '3-4'
+    if n <= 8:
+        return '5-8'
+    return '9+'
+
+
+def _profile_from_user_agent(ua: str) -> Dict[str, str]:
+    """Best-effort profile when the client profile payload is missing."""
+    ua = (ua or '').strip()
+    ua_lower = ua.lower()
+    if 'iphone' in ua_lower or 'ipad' in ua_lower:
+        os_family = 'ios'
+    elif 'android' in ua_lower:
+        os_family = 'android'
+    elif 'win' in ua_lower:
+        os_family = 'windows'
+    elif 'mac' in ua_lower:
+        os_family = 'macos'
+    elif 'linux' in ua_lower:
+        os_family = 'linux'
+    else:
+        os_family = ''
+
+    if 'edg/' in ua_lower:
+        browser_family = 'edge'
+    elif 'chrome' in ua_lower and 'edg' not in ua_lower:
+        browser_family = 'chrome'
+    elif 'firefox' in ua_lower:
+        browser_family = 'firefox'
+    elif 'safari' in ua_lower and 'chrome' not in ua_lower:
+        browser_family = 'safari'
+    else:
+        browser_family = ''
+
+    if 'iphone' in ua_lower or ('android' in ua_lower and 'mobile' in ua_lower):
+        platform_class = 'mobile'
+    elif 'ipad' in ua_lower or 'tablet' in ua_lower:
+        platform_class = 'tablet'
+    elif 'android' in ua_lower:
+        platform_class = 'tablet'
+    else:
+        platform_class = 'desktop'
+
+    platform = 'Win32' if os_family == 'windows' else ('MacIntel' if os_family == 'macos' else '')
+    return _normalize_fingerprint_profile({
+        'os_family': os_family,
+        'browser_family': browser_family,
+        'platform_class': platform_class,
+        'platform': platform,
+    })
+
+
+def _profile_has_core_identity(profile: dict) -> bool:
+    return bool(
+        (profile.get('os_family') or '').strip()
+        and (profile.get('browser_family') or '').strip()
+    )
+
+
+def _resolve_device_profile(
+    raw_profile,
+    raw_profile_json: str,
+    user_agent: str,
+) -> Dict[str, str]:
+    """Resolve profile from dict, JSON string backup, or User-Agent fallback."""
+    if isinstance(raw_profile, dict) and _profile_has_core_identity(
+        _normalize_fingerprint_profile(raw_profile)
+    ):
+        return _normalize_fingerprint_profile(raw_profile)
+
+    if raw_profile_json:
+        try:
+            parsed = json.loads(raw_profile_json) if isinstance(raw_profile_json, str) else raw_profile_json
+            if isinstance(parsed, dict):
+                normalized = _normalize_fingerprint_profile(parsed)
+                if _profile_has_core_identity(normalized):
+                    return normalized
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+    if user_agent:
+        ua_profile = _profile_from_user_agent(user_agent)
+        if _profile_has_core_identity(ua_profile):
+            return ua_profile
+
+    return _normalize_fingerprint_profile(raw_profile if isinstance(raw_profile, dict) else {})
+
+
+def _compute_fingerprint_from_profile(profile: dict) -> str:
+    """Mirror client SHA-256 fingerprint from normalized high-trust profile fields."""
+    p = _normalize_fingerprint_profile(profile)
+    parts = '|||'.join([
+        p.get('os_family', ''),
+        p.get('browser_family', ''),
+        p.get('platform_class', ''),
+        p.get('platform', ''),
+        p.get('screen_class', ''),
+        p.get('timezone', ''),
+        p.get('language', ''),
+        p.get('hardware_concurrency_bucket', ''),
+        p.get('device_memory_bucket', ''),
+    ])
+    return hashlib.sha256(parts.encode('utf-8')).hexdigest()
+
+
+def _normalize_fingerprint_profile(raw) -> Dict[str, str]:
+    """Sanitize client fingerprint traits for storage and comparison."""
+    if not isinstance(raw, dict):
+        raw = {}
+    normalized: Dict[str, str] = {}
+    for field in _DEVICE_PROFILE_FIELDS:
+        value = raw.get(field, '')
+        normalized[field] = str(value or '').strip()[:128]
+
+    if not normalized.get('screen_class'):
+        normalized['screen_class'] = _derive_screen_class(raw)
+    if not normalized.get('platform_class'):
+        normalized['platform_class'] = _derive_platform_class(normalized)
+    if not normalized.get('hardware_concurrency_bucket'):
+        normalized['hardware_concurrency_bucket'] = _bucket_hardware_concurrency(
+            raw.get('hardware_concurrency')
+        )
+    if not normalized.get('device_memory_bucket'):
+        normalized['device_memory_bucket'] = _bucket_device_memory(
+            raw.get('device_memory')
+        )
+    if not normalized.get('language') and raw.get('language'):
+        normalized['language'] = str(raw.get('language')).split('-')[0].lower()[:16]
+    return normalized
+
+
+def _fingerprint_similarity(bound_profile: dict, current_profile: dict) -> float:
+    """Return 0–100 similarity score between two device fingerprint profiles."""
+    if not bound_profile or not current_profile:
+        return 0.0
+    score = 0.0
+    for field, weight in _DEVICE_PROFILE_WEIGHTS.items():
+        bound_val = (bound_profile.get(field) or '').strip().lower()
+        current_val = (current_profile.get(field) or '').strip().lower()
+        if bound_val and current_val and bound_val == current_val:
+            score += weight
+    return round(score, 1)
+
+
+def _high_trust_fields_match(bound_profile: dict, current_profile: dict) -> tuple:
+    """All critical identity fields must agree for controlled auto-rebind."""
+    mismatches = []
+    for field in _REBIND_TRUST_FIELDS:
+        bound_val = (bound_profile.get(field) or '').strip().lower()
+        current_val = (current_profile.get(field) or '').strip().lower()
+        if not bound_val or not current_val or bound_val != current_val:
+            mismatches.append(field)
+    return (len(mismatches) == 0, mismatches)
+
+
+def _storage_clear_trust_match(bound_profile: dict, current_profile: dict) -> bool:
+    """
+    Cache-clear rebind: core browser/device identity must match.
+    screen_class may be unknown on UA-only fallback; soft fields may drift.
+    """
+    required = ('os_family', 'browser_family', 'platform_class', 'platform')
+    for field in required:
+        bound_val = (bound_profile.get(field) or '').strip().lower()
+        current_val = (current_profile.get(field) or '').strip().lower()
+        if not bound_val or not current_val or bound_val != current_val:
+            return False
+    bound_sc = (bound_profile.get('screen_class') or '').strip().lower()
+    current_sc = (current_profile.get('screen_class') or '').strip().lower()
+    if current_sc and current_sc not in ('', 'unknown') and bound_sc != current_sc:
+        return False
+    return True
+
+
+def _rebind_similarity_threshold(current_profile: dict) -> float:
+    platform_class = (current_profile.get('platform_class') or '').lower()
+    if platform_class in ('mobile', 'tablet'):
+        return _FINGERPRINT_REBIND_THRESHOLD_MOBILE
+    return _FINGERPRINT_REBIND_THRESHOLD
+
+
+def _controlled_rebind_eligible(
+    bound_profile: dict,
+    current_profile: dict,
+    similarity: float,
+) -> tuple:
+    """Auto-rebind only when score is high AND high-trust fields all match."""
+    if not bound_profile or not current_profile:
+        return False, 'missing_profile'
+    trust_ok, mismatches = _high_trust_fields_match(bound_profile, current_profile)
+    if not trust_ok:
+        return False, f"trust_mismatch:{','.join(mismatches)}"
+    threshold = _rebind_similarity_threshold(current_profile)
+    if similarity < threshold:
+        return False, f'similarity_below_{threshold}'
+    return True, 'high_trust_match'
+
+
+def _clear_pending_fields(update_fields: Dict[str, Any]) -> None:
+    for field in _PENDING_FIELD_CLEAR:
+        update_fields[field] = firestore.DELETE_FIELD
+
+
+def _classify_device_binding(
+    bound_device_id: str,
+    device_id: str,
+    bound_fingerprint: str,
+    device_fingerprint: str,
+    bound_profile: dict,
+    current_profile: dict,
+    has_stored_bound_profile: bool,
+    legacy_rebind_used: bool,
+) -> tuple:
+    """
+    Classify login attempt.
+    Returns (decision, reason, similarity).
+    decision: allow | rebind | legacy_rebind | pending | block
+    """
+    similarity = _fingerprint_similarity(bound_profile, current_profile) if (
+        bound_profile and current_profile
+    ) else 0.0
+
+    if bound_device_id and bound_device_id == device_id:
+        return ('allow', 'device_id_match', similarity)
+
+    server_fp = ''
+    if _profile_has_core_identity(current_profile):
+        server_fp = _compute_fingerprint_from_profile(current_profile)
+
+    if bound_fingerprint and (
+        (device_fingerprint and bound_fingerprint == device_fingerprint)
+        or (server_fp and bound_fingerprint == server_fp)
+    ):
+        return ('rebind', 'exact_fingerprint', similarity)
+
+    # Cache cleared: new device_id but same browser/device profile.
+    if (
+        bound_device_id
+        and bound_device_id != device_id
+        and _storage_clear_trust_match(bound_profile, current_profile)
+        and _profile_has_core_identity(bound_profile)
+        and _profile_has_core_identity(current_profile)
+    ):
+        return ('rebind', 'storage_clear_trust_match', similarity)
+
+    trust_ok, mismatches = _high_trust_fields_match(bound_profile, current_profile)
+    if (
+        bound_device_id
+        and bound_device_id != device_id
+        and trust_ok
+        and _profile_has_core_identity(bound_profile)
+        and _profile_has_core_identity(current_profile)
+    ):
+        return ('rebind', 'storage_clear_full_trust_match', similarity)
+
+    if not legacy_rebind_used:
+        if bound_device_id and bound_fingerprint and not has_stored_bound_profile:
+            return ('legacy_rebind', 'missing_stored_profile', similarity)
+        if bound_device_id and not bound_fingerprint and device_fingerprint:
+            return ('legacy_rebind', 'missing_stored_fingerprint', similarity)
+
+    if bound_profile and current_profile:
+        eligible, reason = _controlled_rebind_eligible(
+            bound_profile, current_profile, similarity,
+        )
+        if eligible:
+            return ('rebind', reason, similarity)
+        if similarity >= _FINGERPRINT_PENDING_THRESHOLD:
+            return ('pending', reason or 'profile_changed', similarity)
+        return ('block', 'low_similarity', similarity)
+
+    return ('block', 'no_profile', similarity)
+
+
+def _verify_subscription_record(
+    subscription: dict,
+    subscription_id: str,
+    subscriptions_ref,
+    device_id: str,
+    device_label: str,
+    device_fingerprint: str,
+    device_fingerprint_profile: dict,
+    device_fingerprint_profile_json: str,
+    request_context: dict,
+    logger,
+) -> Dict[str, Any]:
+    """Validate subscription expiry/usage and enforce browser/device profile binding."""
+    now = datetime.utcnow()
+    expires_at = subscription.get('expires_at')
+    expires_datetime = _expires_datetime(expires_at)
+
+    if expires_datetime and expires_datetime < now:
+        logger.warning(f"Expired license key for subscription {subscription_id}")
+        return {'valid': False, 'error': 'License key has expired'}
+
+    if subscription.get('used', False) and not subscription.get('reusable', True):
+        logger.warning(f"Already used license key for subscription {subscription_id}")
+        return {'valid': False, 'error': 'License key has already been used'}
+
+    device_id = (device_id or '').strip()
+    device_fingerprint = (device_fingerprint or '').strip()
+    request_context = request_context or {}
+    current_profile = _resolve_device_profile(
+        device_fingerprint_profile,
+        device_fingerprint_profile_json,
+        request_context.get('user_agent', ''),
+    )
+    if not device_id or len(device_id) < 8:
+        return {
+            'valid': False,
+            'error': 'Device identification required. Refresh the page and try again.',
+        }
+    if not device_fingerprint or len(device_fingerprint) < 16:
+        return {
+            'valid': False,
+            'error': 'Device verification failed. Refresh the page and try again.',
+        }
+
+    bound_device_id = (subscription.get('bound_device_id') or '').strip()
+    bound_fingerprint = (subscription.get('bound_device_fingerprint') or '').strip()
+    bound_profile = _normalize_fingerprint_profile(
+        subscription.get('bound_device_fingerprint_profile') or {}
+    )
+    has_stored_bound_profile = bool(subscription.get('bound_device_fingerprint_profile'))
+    legacy_rebind_used = bool(subscription.get('legacy_rebind_used', False))
+    request_context = request_context or {}
+    update_fields: Dict[str, Any] = {
+        'last_used': firestore.SERVER_TIMESTAMP,
+        'last_device_seen_at': firestore.SERVER_TIMESTAMP,
+    }
+    device_newly_bound = False
+    device_rebound = False
+
+    # Admin approved a pending transfer — confirm pending device + fingerprint match.
+    pending_device_id = (subscription.get('pending_device_id') or '').strip()
+    pending_fingerprint = (subscription.get('pending_device_fingerprint') or '').strip()
+    if subscription.get('device_transfer_approved') and pending_device_id == device_id:
+        if pending_fingerprint and pending_fingerprint != device_fingerprint:
+            logger.warning(
+                f"Approved rebind fingerprint mismatch for subscription {subscription_id}"
+            )
+            return {
+                'valid': False,
+                'device_rebind_pending': True,
+                'error': ERROR_DEVICE_REBIND_PENDING,
+            }
+        update_fields['bound_device_id'] = device_id
+        update_fields['bound_device_fingerprint'] = device_fingerprint
+        update_fields['bound_device_fingerprint_profile'] = current_profile
+        if device_label:
+            update_fields['device_label'] = str(device_label)[:200]
+        update_fields['device_bound_at'] = firestore.SERVER_TIMESTAMP
+        update_fields['device_rebind_pending'] = False
+        update_fields['device_transfer_approved'] = False
+        _clear_pending_fields(update_fields)
+        device_rebound = True
+        logger.info(
+            f"Admin-approved device rebind completed for subscription {subscription_id}"
+        )
+    elif bound_device_id:
+        decision, reason, similarity = _classify_device_binding(
+            bound_device_id, device_id, bound_fingerprint, device_fingerprint,
+            bound_profile, current_profile, has_stored_bound_profile, legacy_rebind_used,
+        )
+        logger.info(
+            f"Device binding decision for {subscription_id}: {decision} "
+            f"(similarity={similarity}, reason={reason}, "
+            f"has_core={_profile_has_core_identity(current_profile)})"
+        )
+
+        if decision == 'allow':
+            if device_fingerprint and device_fingerprint != bound_fingerprint:
+                update_fields['bound_device_fingerprint'] = device_fingerprint
+            if current_profile and current_profile != bound_profile:
+                update_fields['bound_device_fingerprint_profile'] = current_profile
+        elif decision in ('rebind', 'legacy_rebind'):
+            update_fields['bound_device_id'] = device_id
+            update_fields['bound_device_fingerprint'] = device_fingerprint
+            update_fields['bound_device_fingerprint_profile'] = current_profile
+            update_fields['device_rebind_pending'] = False
+            update_fields['device_transfer_approved'] = False
+            _clear_pending_fields(update_fields)
+            if device_label:
+                update_fields['device_label'] = str(device_label)[:200]
+            device_rebound = True
+            if decision == 'legacy_rebind':
+                update_fields['legacy_rebind_used'] = True
+                update_fields['legacy_rebind_at'] = firestore.SERVER_TIMESTAMP
+                update_fields['legacy_rebind_reason'] = str(reason)[:200]
+                logger.info(
+                    f"Legacy one-time rebind for subscription {subscription_id} "
+                    f"(reason={reason})"
+                )
+            else:
+                logger.info(
+                    f"Controlled rebind for subscription {subscription_id} "
+                    f"(similarity={similarity}, reason={reason})"
+                )
+        elif decision == 'pending':
+            attempt_count = int(subscription.get('device_rebind_attempt_count') or 0) + 1
+            update_fields['device_rebind_pending'] = True
+            update_fields['pending_device_id'] = device_id
+            update_fields['pending_device_fingerprint'] = device_fingerprint
+            update_fields['pending_device_fingerprint_profile'] = current_profile
+            update_fields['device_rebind_requested_at'] = firestore.SERVER_TIMESTAMP
+            update_fields['pending_device_last_seen_at'] = firestore.SERVER_TIMESTAMP
+            update_fields['pending_device_score'] = similarity
+            update_fields['pending_device_reason'] = str(reason)[:200]
+            update_fields['device_rebind_attempt_count'] = attempt_count
+            if request_context.get('ip_hash'):
+                update_fields['pending_device_ip_hash'] = request_context['ip_hash']
+            if request_context.get('user_agent'):
+                update_fields['pending_device_user_agent'] = request_context['user_agent']
+            update_fields['pending_device_browser'] = current_profile.get('browser_family', '')
+            update_fields['pending_device_os'] = current_profile.get('os_family', '')
+            if device_label:
+                update_fields['pending_device_label'] = str(device_label)[:200]
+            logger.warning(
+                f"Device profile change pending approval for subscription {subscription_id} "
+                f"(similarity={similarity}, reason={reason}, attempt={attempt_count})"
+            )
+            subscriptions_ref.document(subscription_id).update(update_fields)
+            return {
+                'valid': False,
+                'device_rebind_pending': True,
+                'error': ERROR_DEVICE_REBIND_PENDING,
+            }
+        else:
+            logger.warning(
+                f"Device profile blocked for subscription {subscription_id}: "
+                f"bound={bound_device_id[:8]}... attempted={device_id[:8]}... "
+                f"(similarity={similarity}, reason={reason})"
+            )
+            return {
+                'valid': False,
+                'error': ERROR_DEVICE_PROFILE_REGISTERED,
+                'device_mismatch': True,
+            }
+    else:
+        update_fields['bound_device_id'] = device_id
+        update_fields['bound_device_fingerprint'] = device_fingerprint
+        update_fields['bound_device_fingerprint_profile'] = current_profile
+        update_fields['device_bound_at'] = firestore.SERVER_TIMESTAMP
+        if device_label:
+            update_fields['device_label'] = str(device_label)[:200]
+        device_newly_bound = True
+        logger.info(f"Bound subscription {subscription_id} to device {device_id[:8]}...")
+
+    if not subscription.get('reusable', True) and not subscription.get('used', False):
+        update_fields['used'] = True
+        update_fields['used_at'] = firestore.SERVER_TIMESTAMP
+
+    subscriptions_ref.document(subscription_id).update(update_fields)
+
+    expires_ts = expires_at.timestamp() if hasattr(expires_at, 'timestamp') else None
+    return {
+        'valid': True,
+        'expires_at': expires_ts,
+        'subscription_type': subscription.get('subscription_type', 'premium'),
+        'email': subscription.get('email', ''),
+        'device_bound': True,
+        'device_newly_bound': device_newly_bound,
+        'device_rebound': device_rebound,
+    }
+
+
 @https_fn.on_call()
 def verify_license_key(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Verify a license key and return authentication status.
     
-    Request: { 'license_key': 'XXXX-XXXX-XXXX-XXXX' }
-    Response: { 'valid': bool, 'expires_at': timestamp, 'subscription_type': str }
+    Request: {
+        'license_key': 'XXXX-XXXX-XXXX-XXXX',
+        'device_id': 'uuid-for-this-browser',
+        'device_label': 'iPhone | Windows | ...' (optional)
+    }
+    Response: { 'valid': bool, 'expires_at': timestamp, 'subscription_type': str, ... }
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -2721,88 +3366,39 @@ def verify_license_key(req: https_fn.CallableRequest) -> Dict[str, Any]:
     try:
         db = get_firestore_client()
         license_key = req.data.get('license_key', '').strip().upper()
+        device_id = req.data.get('device_id', '')
+        device_label = req.data.get('device_label', '')
+        device_fingerprint = req.data.get('device_fingerprint', '')
+        device_fingerprint_profile = req.data.get('device_fingerprint_profile', {})
+        device_fingerprint_profile_json = req.data.get('device_fingerprint_profile_json', '')
         
-        # Normalize: remove dashes and spaces for comparison
-        # Frontend sends keys without dashes, but Firestore stores with dashes
         license_key_normalized = license_key.replace('-', '').replace(' ', '')
         
-        logger.info(f"Verifying license key: {license_key[:8]}... (normalized: {license_key_normalized[:8]}...)")
+        logger.info(f"Verifying license key: {license_key[:8]}... device={str(device_id)[:8]}...")
         
         if not license_key_normalized:
             return {'valid': False, 'error': 'License key is required'}
         
-        # Query Firestore - need to check both formats (with and without dashes)
         subscriptions_ref = db.collection('subscriptions')
-        
-        # Try exact match first (in case key is stored without dashes)
-        query = subscriptions_ref.where('license_key', '==', license_key).limit(1)
-        docs = list(query.stream())
-        
-        # If not found, try with dashes formatted (XXXX-XXXX-XXXX-XXXX)
-        if not docs and len(license_key_normalized) == 16:
-            formatted_key = f"{license_key_normalized[0:4]}-{license_key_normalized[4:8]}-{license_key_normalized[8:12]}-{license_key_normalized[12:16]}"
-            query = subscriptions_ref.where('license_key', '==', formatted_key).limit(1)
-            docs = list(query.stream())
-            if docs:
-                logger.info(f"Found key with formatted dashes: {formatted_key}")
-        
-        # If still not found, try normalized (no dashes)
-        if not docs:
-            query = subscriptions_ref.where('license_key', '==', license_key_normalized).limit(1)
-            docs = list(query.stream())
-            if docs:
-                logger.info(f"Found key without dashes: {license_key_normalized}")
+        docs = _find_subscription_by_license_key(subscriptions_ref, license_key, license_key_normalized)
         
         logger.info(f"Found {len(docs)} documents matching license key")
         
         if not docs:
-            # Try to list all keys for debugging (remove in production)
-            all_docs = list(subscriptions_ref.limit(5).stream())
-            logger.warning(f"Invalid license key attempted: {license_key} (normalized: {license_key_normalized})")
-            sample_keys = [doc.to_dict().get('license_key', 'N/A')[:12] + '...' for doc in all_docs]
-            logger.info(f"Sample keys in database: {sample_keys}")
+            logger.warning(f"Invalid license key attempted: {license_key[:8]}...")
             return {'valid': False, 'error': 'Invalid license key'}
         
         subscription = docs[0].to_dict()
         subscription_id = docs[0].id
-        
-        # Check if subscription is active
-        now = datetime.utcnow()
-        expires_at = subscription.get('expires_at')
-        
-        if expires_at:
-            # Handle Firestore Timestamp
-            if hasattr(expires_at, 'timestamp'):
-                expires_datetime = datetime.utcfromtimestamp(expires_at.timestamp())
-            elif isinstance(expires_at, datetime):
-                expires_datetime = expires_at
-            else:
-                expires_datetime = datetime.utcnow() + timedelta(days=30)  # Default fallback
-            
-            if expires_datetime < now:
-                logger.warning(f"Expired license key: {license_key[:8]}...")
-                return {'valid': False, 'error': 'License key has expired'}
-        
-        # Check if already used (optional - for single-use keys)
-        if subscription.get('used', False) and not subscription.get('reusable', True):
-            logger.warning(f"Already used license key: {license_key[:8]}...")
-            return {'valid': False, 'error': 'License key has already been used'}
-        
-        # Mark as used if not reusable
-        if not subscription.get('reusable', True):
-            subscriptions_ref.document(subscription_id).update({'used': True, 'used_at': firestore.SERVER_TIMESTAMP})
-        
-        # Update last_used timestamp
-        subscriptions_ref.document(subscription_id).update({'last_used': firestore.SERVER_TIMESTAMP})
-        
-        logger.info(f"Valid license key verified: {license_key[:8]}...")
-        
-        return {
-            'valid': True,
-            'expires_at': expires_at.timestamp() if hasattr(expires_at, 'timestamp') else None,
-            'subscription_type': subscription.get('subscription_type', 'premium'),
-            'email': subscription.get('email', ''),
-        }
+        req_ctx = _extract_request_context_callable(req)
+        result = _verify_subscription_record(
+            subscription, subscription_id, subscriptions_ref,
+            device_id, device_label, device_fingerprint, device_fingerprint_profile,
+            device_fingerprint_profile_json, req_ctx, logger,
+        )
+        if result.get('valid'):
+            logger.info(f"Valid license key verified: {license_key[:8]}...")
+        return result
         
     except Exception as e:
         import traceback
@@ -2841,9 +3437,12 @@ def verify_license_key_http(req: https_fn.Request) -> https_fn.Response:
             data = dict(req.args)
         
         license_key = data.get('license_key', '').strip().upper()
-        
-        # Normalize: remove dashes and spaces for comparison
-        # Frontend sends keys without dashes, but Firestore stores with dashes
+        device_id = data.get('device_id', '')
+        device_label = data.get('device_label', '')
+        device_fingerprint = data.get('device_fingerprint', '')
+        device_fingerprint_profile = data.get('device_fingerprint_profile', {})
+        device_fingerprint_profile_json = data.get('device_fingerprint_profile_json', '')
+
         license_key_normalized = license_key.replace('-', '').replace(' ', '')
         
         if not license_key_normalized:
@@ -2854,27 +3453,12 @@ def verify_license_key_http(req: https_fn.Request) -> https_fn.Response:
                 headers=headers
             )
         
-        # Use the same verification logic as the callable function
         db = get_firestore_client()
         subscriptions_ref = db.collection('subscriptions')
-        
-        # Try exact match first (in case key is stored without dashes)
-        query = subscriptions_ref.where('license_key', '==', license_key).limit(1)
-        docs = list(query.stream())
-        
-        # If not found, try with dashes formatted (XXXX-XXXX-XXXX-XXXX)
-        if not docs and len(license_key_normalized) == 16:
-            formatted_key = f"{license_key_normalized[0:4]}-{license_key_normalized[4:8]}-{license_key_normalized[8:12]}-{license_key_normalized[12:16]}"
-            query = subscriptions_ref.where('license_key', '==', formatted_key).limit(1)
-            docs = list(query.stream())
-        
-        # If still not found, try normalized (no dashes)
-        if not docs:
-            query = subscriptions_ref.where('license_key', '==', license_key_normalized).limit(1)
-            docs = list(query.stream())
+        docs = _find_subscription_by_license_key(subscriptions_ref, license_key, license_key_normalized)
         
         if not docs:
-            logger.warning(f"Invalid license key attempted: {license_key[:8]}... (normalized: {license_key_normalized[:8]}...)")
+            logger.warning(f"Invalid license key attempted: {license_key[:8]}...")
             headers = {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
             return https_fn.Response(
                 json.dumps({'valid': False, 'error': 'Invalid license key'}),
@@ -2884,58 +3468,19 @@ def verify_license_key_http(req: https_fn.Request) -> https_fn.Response:
         
         subscription = docs[0].to_dict()
         subscription_id = docs[0].id
+        req_ctx = _extract_request_context_http(req)
+        result = _verify_subscription_record(
+            subscription, subscription_id, subscriptions_ref,
+            device_id, device_label, device_fingerprint, device_fingerprint_profile,
+            device_fingerprint_profile_json, req_ctx, logger,
+        )
         
-        # Check if subscription is active
-        now = datetime.utcnow()
-        expires_at = subscription.get('expires_at')
-        
-        if expires_at:
-            # Handle Firestore Timestamp
-            if hasattr(expires_at, 'timestamp'):
-                expires_datetime = datetime.utcfromtimestamp(expires_at.timestamp())
-            elif isinstance(expires_at, datetime):
-                expires_datetime = expires_at
-            else:
-                expires_datetime = datetime.utcnow() + timedelta(days=30)
-            
-            if expires_datetime < now:
-                logger.warning(f"Expired license key: {license_key[:8]}...")
-                headers = {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
-                return https_fn.Response(
-                    json.dumps({'valid': False, 'error': 'License key has expired'}),
-                    status=200,
-                    headers=headers
-                )
-        
-        # Check if already used (optional - for single-use keys)
-        if subscription.get('used', False) and not subscription.get('reusable', True):
-            logger.warning(f"Already used license key: {license_key[:8]}...")
-            headers = {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
-            return https_fn.Response(
-                json.dumps({'valid': False, 'error': 'License key has already been used'}),
-                status=200,
-                headers=headers
-            )
-        
-        # Mark as used if not reusable
-        if not subscription.get('reusable', True):
-            subscriptions_ref.document(subscription_id).update({'used': True, 'used_at': firestore.SERVER_TIMESTAMP})
-        
-        # Update last_used timestamp
-        subscriptions_ref.document(subscription_id).update({'last_used': firestore.SERVER_TIMESTAMP})
-        
-        logger.info(f"Valid license key verified: {license_key[:8]}...")
-        
-        response_data = {
-            'valid': True,
-            'expires_at': expires_at.timestamp() if hasattr(expires_at, 'timestamp') else None,
-            'subscription_type': subscription.get('subscription_type', 'premium'),
-            'email': subscription.get('email', ''),
-        }
+        if result.get('valid'):
+            logger.info(f"Valid license key verified: {license_key[:8]}...")
         
         headers = {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
         return https_fn.Response(
-            json.dumps(response_data),
+            json.dumps(result),
             status=200,
             headers=headers
         )
@@ -2949,6 +3494,319 @@ def verify_license_key_http(req: https_fn.Request) -> https_fn.Response:
             json.dumps({'valid': False, 'error': 'Server error verifying license key'}),
             status=500,
             headers=headers
+        )
+
+
+LOGIN_CODE_TTL_SECONDS = 600
+LOGIN_CODE_RATE_LIMIT_SECONDS = 60
+LOGIN_CODE_MAX_ATTEMPTS = 5
+
+
+def _find_subscription_by_email(subscriptions_ref, email: str):
+    """Return the best active subscription doc for an email address."""
+    email = (email or '').strip().lower()
+    if not email:
+        return None, None
+    docs = list(subscriptions_ref.where('email', '==', email).limit(10).stream())
+    if not docs:
+        return None, None
+
+    now = datetime.utcnow()
+    candidates = []
+    for doc in docs:
+        sub = doc.to_dict() or {}
+        if sub.get('active') is False:
+            continue
+        if sub.get('payment_completed') is False:
+            continue
+        expires_dt = _expires_datetime(sub.get('expires_at'))
+        if expires_dt and expires_dt < now:
+            continue
+        if not sub.get('license_key'):
+            continue
+        candidates.append((doc, sub))
+
+    if not candidates:
+        return None, None
+
+    def _sort_key(item):
+        sub = item[1]
+        for field in ('payment_date', 'created_at', 'last_used'):
+            val = sub.get(field)
+            if hasattr(val, 'timestamp'):
+                return val.timestamp()
+            if isinstance(val, datetime):
+                return val.timestamp()
+        return 0.0
+
+    candidates.sort(key=_sort_key, reverse=True)
+    doc, sub = candidates[0]
+    return doc.id, sub
+
+
+def _hash_login_code(email: str, subscription_id: str, code: str) -> str:
+    normalized = f'rugby-login::{email.strip().lower()}::{subscription_id}::{code.strip()}'
+    return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+
+def _generate_login_code() -> str:
+    return f'{secrets.randbelow(1_000_000):06d}'
+
+
+def send_login_code_email(email: str, code: str) -> bool:
+    """Email a one-time login code. Returns True if sent."""
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        gmail_user = os.getenv('GMAIL_USER')
+        gmail_password = os.getenv('GMAIL_APP_PASSWORD')
+        if not gmail_user or not gmail_password:
+            logger.warning('Gmail credentials missing — cannot send login code')
+            return False
+
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = 'Your Rugby AI Predictor sign-in code'
+        msg['From'] = f'Rugby AI Predictor <{gmail_user}>'
+        msg['To'] = email
+        msg['Reply-To'] = gmail_user
+
+        html_body = f"""
+        <html><body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+          <div style="max-width:520px;margin:0 auto;padding:20px;">
+            <h2 style="color:#22c55e;">Sign in to Rugby AI Predictor</h2>
+            <p>Use this one-time code to sign in. It expires in 10 minutes.</p>
+            <div style="background:#f8fafc;border:2px solid #22c55e;border-radius:8px;padding:20px;margin:20px 0;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">Login code</p>
+              <p style="margin:10px 0;font-size:32px;font-weight:700;color:#22c55e;letter-spacing:8px;font-family:monospace;">{code}</p>
+            </div>
+            <p style="color:#64748b;font-size:14px;">If you did not request this, you can ignore this email.</p>
+          </div>
+        </body></html>
+        """
+        text_body = (
+            f'Sign in to Rugby AI Predictor\n\n'
+            f'Your one-time login code: {code}\n\n'
+            f'This code expires in 10 minutes.\n'
+        )
+        msg.attach(MIMEText(text_body, 'plain'))
+        msg.attach(MIMEText(html_body, 'html'))
+
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            server.login(gmail_user, gmail_password)
+            server.send_message(msg)
+        return True
+    except Exception as exc:
+        logger.error(f'Failed to send login code email: {exc}')
+        return False
+
+
+def _request_email_login_code(email: str, logger) -> Dict[str, Any]:
+    """Generate and email a login code for an active subscription."""
+    email = (email or '').strip().lower()
+    if not email or '@' not in email:
+        return {'success': True, 'message': 'If an account exists for this email, a sign-in code was sent.'}
+
+    db = get_firestore_client()
+    subscriptions_ref = db.collection('subscriptions')
+    subscription_id, subscription = _find_subscription_by_email(subscriptions_ref, email)
+
+    # Uniform response — do not reveal whether the email exists.
+    uniform = {
+        'success': True,
+        'message': 'If an account exists for this email, a sign-in code was sent.',
+    }
+    if not subscription_id:
+        logger.info(f'Login code requested for unknown email: {email[:3]}...')
+        return uniform
+
+    now = datetime.utcnow()
+    sent_at = subscription.get('login_code_sent_at')
+    if sent_at and hasattr(sent_at, 'timestamp'):
+        elapsed = now.timestamp() - sent_at.timestamp()
+        if elapsed < LOGIN_CODE_RATE_LIMIT_SECONDS:
+            return uniform
+
+    code = _generate_login_code()
+    code_hash = _hash_login_code(email, subscription_id, code)
+    expires_at = now + timedelta(seconds=LOGIN_CODE_TTL_SECONDS)
+
+    subscriptions_ref.document(subscription_id).update({
+        'login_code_hash': code_hash,
+        'login_code_expires_at': expires_at,
+        'login_code_sent_at': firestore.SERVER_TIMESTAMP,
+        'login_code_attempts': 0,
+    })
+
+    if send_login_code_email(email, code):
+        logger.info(f'Login code sent for subscription {subscription_id}')
+    else:
+        logger.warning(f'Login code email failed for subscription {subscription_id}')
+    return uniform
+
+
+def _verify_email_login_code(
+    email: str,
+    code: str,
+    device_id: str,
+    device_label: str,
+    device_fingerprint: str,
+    device_fingerprint_profile: dict,
+    device_fingerprint_profile_json: str,
+    request_context: dict,
+    logger,
+) -> Dict[str, Any]:
+    """Verify email OTP and complete subscription auth with device binding."""
+    email = (email or '').strip().lower()
+    code = (code or '').strip()
+    if not email or '@' not in email:
+        return {'valid': False, 'error': 'Email is required'}
+    if not code or len(code) != 6 or not code.isdigit():
+        return {'valid': False, 'error': 'Enter the 6-digit code from your email'}
+
+    db = get_firestore_client()
+    subscriptions_ref = db.collection('subscriptions')
+    subscription_id, subscription = _find_subscription_by_email(subscriptions_ref, email)
+    if not subscription_id:
+        return {'valid': False, 'error': 'Invalid email or code'}
+
+    attempts = int(subscription.get('login_code_attempts') or 0)
+    if attempts >= LOGIN_CODE_MAX_ATTEMPTS:
+        return {'valid': False, 'error': 'Too many attempts. Request a new code.'}
+
+    stored_hash = (subscription.get('login_code_hash') or '').strip()
+    expires_at = subscription.get('login_code_expires_at')
+    expires_dt = _expires_datetime(expires_at)
+    now = datetime.utcnow()
+
+    if not stored_hash or not expires_dt or expires_dt < now:
+        return {'valid': False, 'error': 'Code expired. Request a new sign-in code.'}
+
+    expected_hash = _hash_login_code(email, subscription_id, code)
+    if stored_hash != expected_hash:
+        subscriptions_ref.document(subscription_id).update({
+            'login_code_attempts': attempts + 1,
+        })
+        return {'valid': False, 'error': 'Invalid email or code'}
+
+    subscriptions_ref.document(subscription_id).update({
+        'login_code_hash': firestore.DELETE_FIELD,
+        'login_code_expires_at': firestore.DELETE_FIELD,
+        'login_code_attempts': firestore.DELETE_FIELD,
+    })
+
+    result = _verify_subscription_record(
+        subscription, subscription_id, subscriptions_ref,
+        device_id, device_label, device_fingerprint, device_fingerprint_profile,
+        device_fingerprint_profile_json, request_context, logger,
+    )
+    if result.get('valid'):
+        license_key = (subscription.get('license_key') or '').strip()
+        result['license_key'] = license_key
+        logger.info(f'Email login verified for subscription {subscription_id}')
+    return result
+
+
+@https_fn.on_call(secrets=["GMAIL_USER", "GMAIL_APP_PASSWORD"])
+def request_email_login_code(req: https_fn.CallableRequest) -> Dict[str, Any]:
+    """Send a one-time login code to the subscription email on file."""
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        email = req.data.get('email', '')
+        return _request_email_login_code(email, logger)
+    except Exception as exc:
+        logger.error(f'Error requesting email login code: {exc}')
+        return {'success': False, 'error': 'Could not send sign-in code. Try again later.'}
+
+
+@https_fn.on_request(secrets=["GMAIL_USER", "GMAIL_APP_PASSWORD"])
+def request_email_login_code_http(req: https_fn.Request) -> https_fn.Response:
+    """HTTP endpoint to request an email login code."""
+    import logging
+    logger = logging.getLogger(__name__)
+    headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '3600',
+        })
+    try:
+        data = req.get_json(silent=True) or {} if req.method == 'POST' else dict(req.args)
+        result = _request_email_login_code(data.get('email', ''), logger)
+        return https_fn.Response(json.dumps(result), status=200, headers=headers)
+    except Exception as exc:
+        logger.error(f'Error in request_email_login_code_http: {exc}')
+        return https_fn.Response(
+            json.dumps({'success': False, 'error': 'Could not send sign-in code.'}),
+            status=500,
+            headers=headers,
+        )
+
+
+@https_fn.on_call()
+def verify_email_login_code(req: https_fn.CallableRequest) -> Dict[str, Any]:
+    """Verify email OTP and sign in with device binding."""
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        req_ctx = _extract_request_context_callable(req)
+        return _verify_email_login_code(
+            req.data.get('email', ''),
+            req.data.get('code', ''),
+            req.data.get('device_id', ''),
+            req.data.get('device_label', ''),
+            req.data.get('device_fingerprint', ''),
+            req.data.get('device_fingerprint_profile', {}),
+            req.data.get('device_fingerprint_profile_json', ''),
+            req_ctx,
+            logger,
+        )
+    except Exception as exc:
+        logger.error(f'Error verifying email login code: {exc}')
+        return {'valid': False, 'error': 'Server error verifying sign-in code'}
+
+
+@https_fn.on_request()
+def verify_email_login_code_http(req: https_fn.Request) -> https_fn.Response:
+    """HTTP endpoint to verify email OTP login."""
+    import logging
+    logger = logging.getLogger(__name__)
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '3600',
+        })
+    headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
+    try:
+        data = req.get_json(silent=True) or {} if req.method == 'POST' else dict(req.args)
+        req_ctx = _extract_request_context_http(req)
+        result = _verify_email_login_code(
+            data.get('email', ''),
+            data.get('code', ''),
+            data.get('device_id', ''),
+            data.get('device_label', ''),
+            data.get('device_fingerprint', ''),
+            data.get('device_fingerprint_profile', {}),
+            data.get('device_fingerprint_profile_json', ''),
+            req_ctx,
+            logger,
+        )
+        return https_fn.Response(json.dumps(result), status=200, headers=headers)
+    except Exception as exc:
+        logger.error(f'Error in verify_email_login_code_http: {exc}')
+        return https_fn.Response(
+            json.dumps({'valid': False, 'error': 'Server error verifying sign-in code'}),
+            status=500,
+            headers=headers,
         )
 
 
@@ -4218,9 +5076,21 @@ def proxy_video_http(req: https_fn.Request) -> https_fn.Response:
             header_value = upstream.headers.get(header_name)
             if header_value:
                 response_headers[header_name] = header_value
+        if not response_headers.get("Accept-Ranges"):
+            response_headers["Accept-Ranges"] = "bytes"
+
+        # Stream chunks instead of buffering the entire MP4 in memory.
+        # Browsers send Range requests for progressive playback; this makes reels start much faster.
+        def _stream_body():
+            try:
+                for chunk in upstream.iter_content(chunk_size=65536):
+                    if chunk:
+                        yield chunk
+            finally:
+                upstream.close()
 
         return https_fn.Response(
-            upstream.content,
+            _stream_body(),
             status=upstream.status_code,
             headers=response_headers,
         )
@@ -4389,14 +5259,15 @@ def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
 
 
-@https_fn.on_request(timeout_sec=60, memory=512, secrets=["HIGHLIGHTLY_API_KEY"])
+@https_fn.on_request(timeout_sec=60, memory=512, secrets=["SPORTRADAR_API_KEY", "APISPORTS_RUGBY_KEY"])
 def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
     """
-    Get league standings from Highlightly API
+    Get league standings from SportRadar (team logos via API-Sports).
     
     Request body:
     {
-        "league_id": 73119  # Highlightly league ID
+        "sportsdb_league_id": 4986,   # Required local league id
+        "league_id": 73119            # Optional — league banner logo only
     }
     """
     import logging
@@ -4447,120 +5318,84 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
             cache_ttl_seconds = 21600
         cache_ttl_seconds = max(900, min(cache_ttl_seconds, 86400))  # 15 min .. 24h
         
-        if not highlightly_league_id:
-            logger.error("❌ Missing league_id in request")
+        if not sportsdb_league_id:
+            logger.error("❌ Missing sportsdb_league_id in request")
             response_data = {
                 'success': False,
-                'error': 'league_id is required',
+                'error': 'sportsdb_league_id is required',
                 'standings': None
             }
             return https_fn.Response(json.dumps(response_data), status=400, headers=headers)
-        
-        logger.info(f"📊 Fetching standings for Highlightly league ID: {highlightly_league_id}")
-        
-        # Initialize Highlightly client
-        logger.info("Importing HighlightlyRugbyAPI...")
-        from prediction.highlightly_client import HighlightlyRugbyAPI
+
+        try:
+            local_league_id = int(sportsdb_league_id)
+        except (TypeError, ValueError):
+            logger.error("❌ Invalid sportsdb_league_id in request")
+            response_data = {
+                'success': False,
+                'error': 'sportsdb_league_id must be a valid integer',
+                'standings': None
+            }
+            return https_fn.Response(json.dumps(response_data), status=400, headers=headers)
+
+        # Optional: used only for league banner logo URL (not standings data).
+        highlightly_league_id = data.get('league_id')
+
+        logger.info(
+            f"📊 Fetching SportRadar standings for local league id={local_league_id}"
+            + (f" (banner logo hl id={highlightly_league_id})" if highlightly_league_id else "")
+        )
+
         import os
-        
-        logger.info("Checking for API keys...")
-        use_rapidapi = False
-        api_key = (os.getenv("HIGHLIGHTLY_API_KEY") or os.getenv("RAPIDAPI_KEY") or "").strip()
 
-        if api_key:
-            logger.info(
-                f"✅ Highlightly API key found: {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else ''} (length: {len(api_key)})"
-            )
-        else:
-            logger.error("❌ HIGHLIGHTLY_API_KEY not configured")
+        sportradar_key = (
+            os.getenv("SPORTRADAR_API_KEY") or os.getenv("SPORTRADAR_RUGBY_API_KEY") or ""
+        ).strip()
+        apisports_key = (
+            os.getenv("APISPORTS_RUGBY_KEY") or os.getenv("APISPORTS_API_KEY") or ""
+        ).strip()
+
+        if sportradar_key:
+            logger.info(f"✅ SportRadar API key configured (length: {len(sportradar_key)})")
+        if apisports_key:
+            logger.info(f"✅ API-Sports key configured (length: {len(apisports_key)})")
+
+        if not sportradar_key:
+            logger.error("❌ SPORTRADAR_API_KEY not configured")
             response_data = {
                 'success': False,
-                'error': 'HIGHLIGHTLY_API_KEY not configured',
+                'error': 'SPORTRADAR_API_KEY not configured',
                 'standings': None
             }
             return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
-        
-        logger.info(f"Initializing HighlightlyRugbyAPI client (use_rapidapi={use_rapidapi})...")
-        try:
-            client = HighlightlyRugbyAPI(api_key=api_key, use_rapidapi=use_rapidapi)
-            logger.info(f"✅ HighlightlyRugbyAPI client initialized successfully (using {'RapidAPI' if use_rapidapi else 'Highlightly Direct'})")
-        except Exception as client_error:
-            logger.error(f"❌ Failed to initialize Highlightly client: {client_error}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            response_data = {
-                'success': False,
-                'error': f'Failed to initialize API client: {str(client_error)}',
-                'standings': None
-            }
-            return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
-        
-        # Season handling:
-        # Many rugby competitions span two calendar years (e.g. 2025/26) but the API expects
-        # the *start year* (e.g. 2025). If we only try the current calendar year we will 404
-        # for URC / Premiership / Top14 etc early in the year.
+
         requested_season = data.get("season")
-        now_utc = datetime.utcnow()
-        current_year = now_utc.year
-        current_month = now_utc.month
 
-        # Highlightly league IDs that typically span Aug/Sept -> May/Jun and are keyed by start-year.
-        CROSS_YEAR_STANDINGS_LEAGUES = {
-            65460,  # United Rugby Championship
-            11847,  # English Premiership Rugby
-            14400,  # French Top 14
-        }
+        from prediction.sportradar_client import (
+            CROSS_YEAR_LOCAL_IDS,
+            NO_STANDINGS_LOCAL_IDS,
+            candidate_season_years,
+            try_fetch_sportradar_standings,
+        )
+        from prediction.standings_compute import STANDINGS_CACHE_VERSION, standings_cache_doc_id
 
-        # Rugby World Cup (59503) is held every 4 years - 2023, 2019, 2015, 2011, etc.
-        RUGBY_WORLD_CUP_LEAGUE_ID = 59503
+        if local_league_id in NO_STANDINGS_LOCAL_IDS:
+            response_data = {
+                'success': False,
+                'error': 'Standings are not available for this competition.',
+                'standings': None,
+            }
+            return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
 
-        def _dedupe_keep_order(items):
-            seen = set()
-            out = []
-            for x in items:
-                if x in seen:
-                    continue
-                seen.add(x)
-                out.append(x)
-            return out
+        seasons_to_try = candidate_season_years(local_league_id, requested_season=requested_season)
+        logger.info(f"🔍 SportRadar will try seasons (in order): {seasons_to_try}")
 
-        def _candidate_standings_seasons(league_id: int) -> list:
-            # If the caller explicitly requests a season, honor it first.
-            if requested_season is not None:
-                try:
-                    return [int(requested_season)]
-                except (TypeError, ValueError):
-                    logger.warning(f"Invalid requested season {requested_season}; falling back to auto season detection")
-
-            # Rugby World Cup: held every 4 years. Try recent tournament years first.
-            if league_id == RUGBY_WORLD_CUP_LEAGUE_ID:
-                return [2023, 2019, 2015, 2011, 2007]
-
-            # Cross-year leagues (URC, Premiership, Top 14): Jan-Jun belong to previous season start-year.
-            if league_id in CROSS_YEAR_STANDINGS_LEAGUES:
-                primary = current_year - 1 if current_month <= 6 else current_year
-                return _dedupe_keep_order([primary, primary - 1, primary + 1, current_year, current_year - 1])
-
-            # Default for most comps: try current year first, then nearby.
-            return _dedupe_keep_order([current_year, current_year - 1, current_year + 1, current_year - 2])
-
-        # Compute seasons to try (ordered)
-        try:
-            league_id_int = int(highlightly_league_id)
-        except Exception:
-            league_id_int = highlightly_league_id
-
-        seasons_to_try = _candidate_standings_seasons(league_id_int) if isinstance(league_id_int, int) else [current_year, current_year - 1]
-        logger.info(f"📅 Now (UTC): {now_utc.isoformat()} | year={current_year}, month={current_month}")
-        logger.info(f"🔍 Will try seasons (in order): {seasons_to_try}")
-        
         standings = None
         successful_season = None
-        last_error = None
         cache_hit = False
-        stale_cache_payload = None  # last known cached payload (even if expired)
+        standings_source = "sportradar"
+        stale_cache_payload = None
 
-        # Firestore cache for standings (prevents Highlightly rate-limits)
         fs_cache = None
         cache_collection = None
         try:
@@ -4571,186 +5406,61 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
             fs_cache = None
             cache_collection = None
 
-        # PRIMARY SOURCE: compute standings from our own match results.
-        # The Highlightly /standings feed is unreliable for rugby (stale,
-        # mislabeled by season, missing recent seasons, outdated grouped
-        # format), so we derive the table from completed matches. Highlightly
-        # is only used as a fallback when we have no results for the league.
         try:
-            from prediction.standings_compute import (
-                compute_standings_from_db,
-                resolve_standings_db_path,
+            sr_result = try_fetch_sportradar_standings(
+                local_league_id=local_league_id,
+                league_name=client_league_name,
+                requested_season=requested_season,
+                cache_collection=cache_collection,
+                force_refresh=force_refresh,
             )
-
-            our_league_id_for_compute = None
-            if sportsdb_league_id is not None:
-                try:
-                    our_league_id_for_compute = int(sportsdb_league_id)
-                except (TypeError, ValueError):
-                    our_league_id_for_compute = None
-
-            if our_league_id_for_compute is not None:
-                computed_db_path = resolve_standings_db_path()
-                computed = compute_standings_from_db(
-                    computed_db_path,
-                    our_league_id_for_compute,
-                    season=requested_season,
+            if sr_result:
+                standings, successful_season, cache_hit = sr_result
+                logger.info(
+                    "✅ SportRadar standings for league %s season %s (cache_hit=%s)",
+                    local_league_id,
+                    successful_season,
+                    cache_hit,
                 )
-                if computed and computed.get("groups"):
-                    standings = computed
-                    successful_season = computed.get("league", {}).get("season")
-                    logger.info(
-                        "✅ Using computed standings from results for league "
-                        f"{our_league_id_for_compute} (season {successful_season}, "
-                        f"teams={sum(len(g.get('standings', [])) for g in computed.get('groups', []))})"
+        except Exception as sr_err:
+            logger.warning(f"SportRadar standings fetch failed: {sr_err}")
+
+        # Stale SportRadar cache fallback (never Highlightly / computed tables).
+        if standings is None and cache_collection is not None and not force_refresh:
+            for year in seasons_to_try:
+                try:
+                    cache_ref = cache_collection.document(
+                        standings_cache_doc_id(local_league_id, int(year))
                     )
-        except Exception as compute_err:
-            logger.warning(f"Computed standings unavailable, falling back to Highlightly: {compute_err}")
-
-        # Fallback to Highlightly only if we couldn't compute a table.
-        for year in (seasons_to_try if standings is None else []):
-            logger.info(f"\n--- Trying season {year} ---")
-            try:
-                # Cache check BEFORE hitting Highlightly API.
-                if cache_collection is not None and not force_refresh and isinstance(league_id_int, int):
-                    try:
-                        cache_doc_id = f"hl::{int(highlightly_league_id)}::season::{int(year)}"
-                        cache_ref = cache_collection.document(cache_doc_id)
-                        cached = cache_ref.get()
-                        cached_data = cached.to_dict() if getattr(cached, "exists", False) else None
-                        if isinstance(cached_data, dict) and isinstance(cached_data.get("standings"), dict):
-                            expires_at = cached_data.get("expires_at")
-                            is_fresh = False
-                            try:
-                                if isinstance(expires_at, str):
-                                    exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-                                    is_fresh = datetime.utcnow() <= exp_dt.replace(tzinfo=None)
-                            except Exception:
-                                is_fresh = False
-
-                            if is_fresh:
-                                standings = cached_data.get("standings")
-                                successful_season = int(year)
-                                cache_hit = True
-                                logger.info(f"✅ Standings cache HIT for league={highlightly_league_id}, season={year}")
-                                break
-                            else:
-                                # Keep last stale cache as fallback if we get rate-limited.
-                                stale_cache_payload = cached_data.get("standings") or stale_cache_payload
-                                logger.info(f"🕰️ Standings cache STALE for league={highlightly_league_id}, season={year} (will revalidate)")
-                    except Exception as cache_read_err:
-                        logger.warning(f"Standings cache read failed (continuing): {cache_read_err}")
-
-                logger.info(f"Calling client.get_standings(league_id={highlightly_league_id}, season={year})...")
-                standings = client.get_standings(league_id=highlightly_league_id, season=year)
-                logger.info(f"✅ API call completed for season {year}")
-                logger.info(f"Response type: {type(standings)}")
-                
-                # Check if we got rate limited (429) - API might return empty structure
-                if isinstance(standings, dict):
-                    # Check for explicit rate limit flag
-                    if standings.get('_rate_limited'):
-                        logger.error(f"   ❌ Rate limited (429) - API quota exceeded")
-                        last_error = Exception("Rate limited (429) - API quota exceeded")
-                        # Don't try other seasons if rate limited
-                        break
-                    
-                    groups = standings.get('groups', [])
-                    league_info = standings.get('league', {})
-                    
-                    logger.info(f"   Groups count: {len(groups)}")
-                    logger.info(f"   League info: {league_info}")
-                    
-                    # Check if response is empty
-                    if len(groups) == 0 and (not league_info or not league_info.get('name')):
-                        logger.warning(f"⚠️ Empty response for season {year}")
-                        logger.warning(f"   Full response structure: {json.dumps(standings, indent=2, default=str)}")
-                        
-                        # If we have an error flag, it's definitely an error
-                        if standings.get('_error'):
-                            logger.error(f"   ❌ API Error: {standings.get('_error')}")
-                            last_error = Exception(standings.get('_error'))
-                            continue
-                        
-                        # If rate limited flag is set, handle it
-                        if standings.get('_rate_limited'):
-                            logger.error(f"   ❌ Rate limited (429) - API quota exceeded")
-                            last_error = Exception("Rate limited (429) - API quota exceeded")
-                            break
-                        
-                        # Otherwise, no data for this season
-                        logger.warning(f"   No standings data for season {year} - might not exist yet")
-                        last_error = Exception(f"No standings data for season {year}")
+                    cached = cache_ref.get()
+                    cached_data = cached.to_dict() if getattr(cached, "exists", False) else None
+                    if not isinstance(cached_data, dict):
                         continue
-                
-                if standings:
-                    logger.info(f"Response keys: {list(standings.keys()) if isinstance(standings, dict) else 'N/A'}")
-                    
-                    if isinstance(standings, dict):
-                        if standings.get('groups') or standings.get('league'):
-                            groups = standings.get('groups', [])
-                            logger.info(f"Found {len(groups)} groups in response")
-                            
-                            if groups and len(groups) > 0:
-                                logger.info(f"Analyzing groups for teams/standings...")
-                                for idx, group in enumerate(groups):
-                                    logger.info(f"  Group {idx + 1}: keys = {list(group.keys()) if isinstance(group, dict) else 'N/A'}")
-                                    if isinstance(group, dict):
-                                        standings_list = group.get('standings', [])
-                                        teams_list = group.get('teams', [])
-                                        logger.info(f"    standings: {len(standings_list)} items")
-                                        logger.info(f"    teams: {len(teams_list)} items")
-                                
-                                # Check if groups have teams/standings
-                                has_teams = any(
-                                    (g.get('standings') and len(g.get('standings', [])) > 0) or
-                                    (g.get('teams') and len(g.get('teams', [])) > 0)
-                                    for g in groups
-                                )
-                                logger.info(f"Has teams: {has_teams}")
-                                
-                                if has_teams:
-                                    total_teams = sum(
-                                        len(g.get('standings', [])) + len(g.get('teams', []))
-                                        for g in groups if isinstance(g, dict)
-                                    )
-                                    logger.info(f"✅ Found standings for league {highlightly_league_id} (season {year})")
-                                    logger.info(f"   Total teams across all groups: {total_teams}")
-                                    successful_season = year
-                                    break
-                                else:
-                                    logger.warning(f"⚠️ Groups found but no teams/standings data in season {year}")
-                            else:
-                                logger.warning(f"⚠️ Empty groups array for season {year}")
-                        else:
-                            logger.warning(f"⚠️ Response has no 'groups' or 'league' keys for season {year}")
-                    else:
-                        logger.warning(f"⚠️ Response is not a dict for season {year}")
-                else:
-                    logger.warning(f"⚠️ Empty response for season {year}")
-                    
-            except Exception as year_error:
-                error_msg = str(year_error)
-                last_error = year_error
-                logger.error(f"❌ Season {year} failed with error: {year_error}")
-                logger.error(f"   Error type: {type(year_error).__name__}")
-                
-                if '404' in error_msg:
-                    logger.info(f"   404 Not Found - standings don't exist for season {year}")
-                elif '429' in error_msg:
-                    logger.warning(f"   429 Too Many Requests - rate limited")
-                else:
-                    import traceback
-                    logger.error(f"   Full traceback: {traceback.format_exc()}")
-                continue
-        
+                    if cached_data.get("source") != "sportradar":
+                        continue
+                    cached_standings = cached_data.get("standings")
+                    if isinstance(cached_standings, dict) and cached_standings.get("groups"):
+                        stale_cache_payload = cached_standings
+                        successful_season = int(year)
+                        logger.info(
+                            "Using stale SportRadar cache for league %s season %s",
+                            local_league_id,
+                            year,
+                        )
+                        break
+                except Exception:
+                    continue
+            if stale_cache_payload is not None:
+                standings = stale_cache_payload
+                cache_hit = True
+
         logger.info("\n" + "="*80)
         logger.info("=== FINAL RESULT ===")
         logger.info("="*80)
         
         if standings and successful_season:
             logger.info(f"✅ SUCCESS: Found standings for season {successful_season}")
-            logger.info(f"   League ID: {highlightly_league_id}")
+            logger.info(f"   Local league ID: {local_league_id}")
             logger.info(f"   Season: {successful_season}")
             
             # Log standings summary
@@ -4767,418 +5477,48 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                         total_teams += teams_count
                 logger.info(f"   Total teams: {total_teams}")
 
-                # ------------------------------------------------------------------
-                # PRIMARY logo source: Highlightly (same provider as the standings).
-                #   * League logo is deterministic and always available:
-                #       https://highlightly.net/rugby/images/leagues/{id}.png
-                #   * Team logos exist for ~78% of teams. Highlightly returns the
-                #     real URL in match rows (team.logo); when null the image does
-                #     not exist, so those fall through to the TheSportsDB block.
-                # We key team logos by Highlightly team id (stable, name-agnostic).
-                # ------------------------------------------------------------------
+                # Team crests: API-Sports /teams?search= (primary), then TheSportsDB + static map.
                 try:
-                    league_obj = standings.get("league")
-                    if not isinstance(league_obj, dict):
-                        league_obj = {}
-                        standings["league"] = league_obj
-                    league_logo_url = f"https://highlightly.net/rugby/images/leagues/{int(highlightly_league_id)}.png"
-                    league_obj["logo"] = league_logo_url
-                    league_obj["badge"] = league_logo_url
-                    logger.info(f"🏆 Set Highlightly league logo: {league_logo_url}")
+                    from prediction.standings_logos import enrich_standings_logos
+                    from prediction.config import load_config
+                    from prediction.sportsdb_client import TheSportsDBClient
 
-                    # Build {highlightly_team_id: logo_url} from match rows (cached 7d).
-                    hl_logo_by_id: Dict[str, str] = {}
-                    hl_cache_ref = None
-                    try:
-                        fs_hl = get_firestore_client()
-                        hl_cache_ref = fs_hl.collection("team_logo_cache").document(
-                            f"hl_teams::{int(highlightly_league_id)}::v1"
-                        )
-                        hl_cached = hl_cache_ref.get()
-                        hl_cached_data = hl_cached.to_dict() if getattr(hl_cached, "exists", False) else None
-                        if isinstance(hl_cached_data, dict):
-                            fetched_at = hl_cached_data.get("fetched_at")
-                            is_fresh = False
-                            try:
-                                if isinstance(fetched_at, str):
-                                    fdt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
-                                    is_fresh = (datetime.utcnow() - fdt.replace(tzinfo=None)).days < 7
-                            except Exception:
-                                is_fresh = False
-                            cached_map = hl_cached_data.get("logo_by_id")
-                            if isinstance(cached_map, dict) and cached_map and is_fresh:
-                                hl_logo_by_id = {str(k): str(v) for k, v in cached_map.items() if k and v}
-                                logger.info(f"✅ Using cached Highlightly team logos ({len(hl_logo_by_id)})")
-                    except Exception as hl_cache_err:
-                        logger.warning(f"Highlightly logo cache read failed: {hl_cache_err}")
+                    cfg = load_config()
+                    sportsdb_logo_client = TheSportsDBClient(
+                        base_url=cfg.base_url,
+                        api_key=cfg.api_key,
+                        rate_limit_rpm=cfg.rate_limit_rpm,
+                    )
+                    enrich_standings_logos(
+                        standings,
+                        sportsdb_league_id=local_league_id,
+                        highlightly_league_id=highlightly_league_id,
+                        firestore_client=fs_cache,
+                        sportsdb_client=sportsdb_logo_client,
+                    )
+                except Exception as logo_err:
+                    logger.warning(
+                        "Standings logo enrichment failed (continuing without logos): %s",
+                        logo_err,
+                    )
 
-                    if not hl_logo_by_id:
-                        try:
-                            seasons_to_scan = [successful_season]
-                            if isinstance(successful_season, int):
-                                seasons_to_scan.append(successful_season - 1)
-                            for scan_season in seasons_to_scan:
-                                offset = 0
-                                for _ in range(6):  # up to 600 matches per season
-                                    mresp = client.get_matches(
-                                        league_id=int(highlightly_league_id),
-                                        season=int(scan_season),
-                                        limit=100,
-                                        offset=offset,
-                                    )
-                                    rows = (mresp or {}).get("data") or []
-                                    if not rows:
-                                        break
-                                    for mrow in rows:
-                                        for side in ("homeTeam", "awayTeam"):
-                                            t = mrow.get(side) or {}
-                                            tid = t.get("id")
-                                            logo = t.get("logo")
-                                            if tid is not None and logo and str(tid) not in hl_logo_by_id:
-                                                hl_logo_by_id[str(tid)] = str(logo)
-                                    if len(rows) < 100:
-                                        break
-                                    offset += 100
-                            logger.info(f"Fetched {len(hl_logo_by_id)} Highlightly team logos from matches")
-                            if hl_cache_ref is not None and hl_logo_by_id:
-                                try:
-                                    hl_cache_ref.set(
-                                        {
-                                            "highlightly_league_id": int(highlightly_league_id),
-                                            "logo_by_id": hl_logo_by_id,
-                                            "fetched_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-                                            "source": "highlightly_matches",
-                                        },
-                                        merge=True,
-                                    )
-                                except Exception as hl_w_err:
-                                    logger.warning(f"Highlightly logo cache write failed: {hl_w_err}")
-                        except Exception as hl_fetch_err:
-                            logger.warning(f"Highlightly team logo fetch failed: {hl_fetch_err}")
-
-                    # Apply Highlightly team logos onto standings rows by team id.
-                    hl_applied = 0
-                    if hl_logo_by_id:
-                        for g in groups:
-                            if not isinstance(g, dict):
-                                continue
-                            for list_key in ("standings", "teams"):
-                                rows = g.get(list_key)
-                                if not isinstance(rows, list):
-                                    continue
-                                for row in rows:
-                                    if not isinstance(row, dict):
-                                        continue
-                                    team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
-                                    tid = None
-                                    if team_obj:
-                                        tid = team_obj.get("id")
-                                    if tid is None:
-                                        tid = row.get("teamId") or row.get("id")
-                                    url = hl_logo_by_id.get(str(tid)) if tid is not None else None
-                                    if url:
-                                        if team_obj is not None:
-                                            team_obj["logo"] = url
-                                            team_obj["badge"] = url
-                                        row["logo"] = url
-                                        row["badge"] = url
-                                        hl_applied += 1
-                    logger.info(f"✅ Applied {hl_applied} Highlightly team logos into standings")
-                except Exception as hl_logo_err:
-                    logger.warning(f"Highlightly logo enrichment failed (continuing): {hl_logo_err}")
-
-                # Enrich standings with team logos (luxury UI) using TheSportsDB:
-                # Frontend passes `sportsdb_league_id` (TheSportsDB league id like 4446 for URC).
-                # We fetch all teams once and map badges to the standings teams by name.
-                try:
-                    sportsdb_id_int = int(sportsdb_league_id) if sportsdb_league_id is not None else None
-                except Exception:
-                    sportsdb_id_int = None
-
-                if sportsdb_id_int:
-                    try:
-                        import re
-                        from prediction.config import load_config
-                        from prediction.sportsdb_client import TheSportsDBClient
-
-                        def _norm_team_name(s: str) -> str:
-                            s2 = (s or "").strip().lower()
-                            s2 = re.sub(r"[^a-z0-9]+", " ", s2)
-                            s2 = re.sub(r"\s+", " ", s2).strip()
-                            return s2
-
-                        def _name_variants(name: str) -> list:
-                            """Generate variants for fuzzy matching (e.g. 'Glasgow Warriors RFC' -> ['glasgow warriors rfc','glasgow warriors','glasgow'])."""
-                            n = _norm_team_name(name)
-                            if not n:
-                                return []
-                            out = [n]
-                            for suffix in (" rugby", " rfc", " rugby club", " rugby union"):
-                                if n.endswith(suffix):
-                                    shortened = n[: -len(suffix)].strip()
-                                    if shortened:
-                                        out.append(shortened)
-                            words = n.split()
-                            if len(words) > 1:
-                                out.append(words[0])
-                            if len(words) >= 2:
-                                out.append(" ".join(words[:2]))
-                            return list(dict.fromkeys(out))
-
-                        def _find_logo(standings_name: str, logos_by_norm: dict) -> Optional[str]:
-                            """Try exact, overrides, then fuzzy match to resolve logo."""
-                            try:
-                                from prediction.config import STANDINGS_TEAM_OVERRIDES
-                            except Exception:
-                                # Never let a missing override map abort logo enrichment.
-                                STANDINGS_TEAM_OVERRIDES = {}
-                            sn = _norm_team_name(standings_name)
-                            if not sn:
-                                return None
-                            variants = _name_variants(standings_name)
-                            for v in variants:
-                                if v in logos_by_norm:
-                                    return logos_by_norm[v]
-                            overrides = STANDINGS_TEAM_OVERRIDES.get(sn) or []
-                            for alt in overrides:
-                                if alt in logos_by_norm:
-                                    return logos_by_norm[alt]
-                                for v in _name_variants(alt):
-                                    if v in logos_by_norm:
-                                        return logos_by_norm[v]
-                            if len(sn) < 3:
-                                return None
-                            best_url = None
-                            best_len = 0
-                            for key, url in logos_by_norm.items():
-                                if len(key) < 3:
-                                    continue
-                                if sn == key or sn in key or key in sn:
-                                    ln = min(len(sn), len(key))
-                                    if ln > best_len:
-                                        best_len = ln
-                                        best_url = url
-                            return best_url
-
-                        # Cache in Firestore to avoid calling TheSportsDB on every request
-                        logos_by_norm: Dict[str, str] = {}
-                        cache_used = False
-                        try:
-                            fs = get_firestore_client()
-                            cache_doc_id = f"league::{sportsdb_id_int}::v3"
-                            cache_ref = fs.collection("team_logo_cache").document(cache_doc_id)
-                            cached = cache_ref.get()
-                            cached_data = cached.to_dict() if getattr(cached, "exists", False) else None
-                            if isinstance(cached_data, dict):
-                                cached_logos = cached_data.get("logos_by_norm")
-                                fetched_at = cached_data.get("fetched_at")
-                                # TTL: 7 days
-                                is_fresh = False
-                                try:
-                                    if isinstance(fetched_at, str):
-                                        fetched_dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
-                                        is_fresh = (datetime.utcnow() - fetched_dt).days < 7
-                                except Exception:
-                                    is_fresh = False
-                                if isinstance(cached_logos, dict) and cached_logos and is_fresh:
-                                    logos_by_norm = {str(k): str(v) for k, v in cached_logos.items() if k and v}
-                                    cache_used = True
-                                    logger.info(f"✅ Using cached team logos for sportsdb_league_id={sportsdb_id_int} ({len(logos_by_norm)} logos)")
-                        except Exception as cache_err:
-                            logger.warning(f"Team logo cache read failed (continuing without cache): {cache_err}")
-                            fs = None
-                            cache_ref = None
-
-                        if not logos_by_norm:
-                            cfg = load_config()
-                            sportsdb = TheSportsDBClient(
-                                base_url=cfg.base_url,
-                                api_key=cfg.api_key,
-                                rate_limit_rpm=cfg.rate_limit_rpm,
-                            )
-                            teams_api = sportsdb.get_teams(sportsdb_id_int) or []
-                            if not teams_api and client_league_name:
-                                found = sportsdb.find_rugby_league(client_league_name)
-                                if found:
-                                    tsdb_id = found.get("idLeague")
-                                    if tsdb_id:
-                                        teams_api = sportsdb.get_teams(tsdb_id) or []
-                                        logger.info(f"Resolved TheSportsDB league via find_rugby_league: id={tsdb_id}")
-                            for t in teams_api:
-                                try:
-                                    name = t.get("strTeam") or ""
-                                    alt = t.get("strAlternate") or ""
-                                    badge = t.get("strTeamBadge") or t.get("strTeamLogo") or t.get("strTeamJersey") or ""
-                                    if not badge:
-                                        continue
-                                    for v in _name_variants(name) if name else []:
-                                        logos_by_norm[v] = badge
-                                    if alt:
-                                        for part in str(alt).split(","):
-                                            part = part.strip()
-                                            if part:
-                                                for v in _name_variants(part):
-                                                    logos_by_norm[v] = badge
-                                except Exception:
-                                    continue
-                            logger.info(f"Fetched {len(teams_api)} teams from TheSportsDB for league {sportsdb_id_int}; mapped logos={len(logos_by_norm)}")
-
-                            # Write cache
-                            try:
-                                if cache_ref is not None:
-                                    cache_ref.set(
-                                        {
-                                            "sportsdb_league_id": sportsdb_id_int,
-                                            "league_name": client_league_name,
-                                            "logos_by_norm": logos_by_norm,
-                                            "fetched_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-                                            "source": "thesportsdb_lookup_all_teams",
-                                        },
-                                        merge=True,
-                                    )
-                            except Exception as cache_write_err:
-                                logger.warning(f"Team logo cache write failed: {cache_write_err}")
-
-                        # Merge logos into standings structure (mutate in-place)
-                        if logos_by_norm:
-                            applied = 0
-                            missed_names = []
-                            for g in groups:
-                                if not isinstance(g, dict):
-                                    continue
-                                for list_key in ("standings", "teams"):
-                                    rows = g.get(list_key)
-                                    if not isinstance(rows, list):
-                                        continue
-                                    for row in rows:
-                                        if not isinstance(row, dict):
-                                            continue
-                                        team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
-                                        name = None
-                                        if team_obj:
-                                            name = team_obj.get("name") or team_obj.get("team_name") or team_obj.get("strTeam")
-                                        if not name:
-                                            name = row.get("name") or row.get("team_name") or row.get("strTeam")
-                                        if not name:
-                                            continue
-                                        # Skip teams already resolved via Highlightly (primary source).
-                                        already = (team_obj and team_obj.get("logo")) or row.get("logo")
-                                        if already:
-                                            continue
-                                        logo = _find_logo(str(name), logos_by_norm)
-                                        if not logo and not cache_used:
-                                            missed_names.append(str(name))
-                                        if logo:
-                                            if team_obj is not None:
-                                                team_obj["logo"] = logo
-                                                team_obj["badge"] = logo
-                                            row["logo"] = logo
-                                            row["badge"] = logo
-                                            applied += 1
-                            if missed_names and not cache_used:
-                                cfg = load_config()
-                                sportsdb = TheSportsDBClient(base_url=cfg.base_url, api_key=cfg.api_key, rate_limit_rpm=cfg.rate_limit_rpm)
-                                for nm in missed_names[:8]:
-                                    try:
-                                        searched = sportsdb.search_teams(nm)
-                                        for t in searched[:3]:
-                                            badge = t.get("strTeamBadge") or t.get("strTeamLogo") or ""
-                                            if not badge:
-                                                continue
-                                            ts_name = t.get("strTeam") or ""
-                                            if _norm_team_name(nm) in _norm_team_name(ts_name) or _norm_team_name(ts_name) in _norm_team_name(nm):
-                                                for g in groups:
-                                                    if not isinstance(g, dict):
-                                                        continue
-                                                    for rows in (g.get("standings") or [], g.get("teams") or []):
-                                                        for row in rows:
-                                                            if not isinstance(row, dict):
-                                                                continue
-                                                            team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
-                                                            rn = (team_obj or {}).get("name") or (team_obj or {}).get("team_name") or row.get("name") or row.get("team_name") or ""
-                                                            if rn and _norm_team_name(rn) == _norm_team_name(nm):
-                                                                already2 = (team_obj and team_obj.get("logo")) or row.get("logo")
-                                                                if already2:
-                                                                    break
-                                                                if team_obj is not None:
-                                                                    team_obj["logo"] = badge
-                                                                    team_obj["badge"] = badge
-                                                                row["logo"] = badge
-                                                                row["badge"] = badge
-                                                                applied += 1
-                                                                break
-                                                break
-                                    except Exception:
-                                        continue
-                            logger.info(f"✅ Applied {applied} team logos into standings payload (cache_used={cache_used})")
-                        else:
-                            logger.warning(f"No logos mapped for sportsdb_league_id={sportsdb_id_int}; standings will render initials")
-
-                    except Exception as logo_err:
-                        logger.warning(f"Standings logo enrichment failed (continuing without logos): {logo_err}")
-
-                # FINAL fallback: curated static logos for any team neither Highlightly
-                # nor TheSportsDB resolved. Guarantees every league-table team shows a crest
-                # even without a paid TheSportsDB key. Runs regardless of sportsdb_league_id.
-                try:
-                    from prediction.config import STATIC_TEAM_LOGOS
-                    import re as _re_static
-
-                    def _norm_static(s: str) -> str:
-                        s2 = (s or "").strip().lower()
-                        s2 = _re_static.sub(r"[^a-z0-9]+", " ", s2)
-                        return _re_static.sub(r"\s+", " ", s2).strip()
-
-                    static_applied = 0
-                    for g in groups:
-                        if not isinstance(g, dict):
-                            continue
-                        for list_key in ("standings", "teams"):
-                            rows = g.get(list_key)
-                            if not isinstance(rows, list):
-                                continue
-                            for row in rows:
-                                if not isinstance(row, dict):
-                                    continue
-                                team_obj = row.get("team") if isinstance(row.get("team"), dict) else None
-                                if (team_obj and team_obj.get("logo")) or row.get("logo"):
-                                    continue
-                                nm = None
-                                if team_obj:
-                                    nm = team_obj.get("name") or team_obj.get("team_name")
-                                if not nm:
-                                    nm = row.get("name") or row.get("team_name")
-                                if not nm:
-                                    continue
-                                url = STATIC_TEAM_LOGOS.get(_norm_static(str(nm)))
-                                if url:
-                                    if team_obj is not None:
-                                        team_obj["logo"] = url
-                                        team_obj["badge"] = url
-                                    row["logo"] = url
-                                    row["badge"] = url
-                                    static_applied += 1
-                    if static_applied:
-                        logger.info(f"✅ Applied {static_applied} curated static team logos (final fallback)")
-                except Exception as static_err:
-                    logger.warning(f"Static logo fallback failed (continuing): {static_err}")
-
-                # Write standings cache (after enrichment) so future requests skip Highlightly.
+                # Write standings cache (after enrichment).
                 if cache_collection is not None and not cache_hit and not force_refresh and isinstance(successful_season, int):
                     try:
-                        cache_doc_id = f"hl::{int(highlightly_league_id)}::season::{int(successful_season)}"
+                        cache_doc_id = standings_cache_doc_id(int(local_league_id), int(successful_season))
                         cache_ref = cache_collection.document(cache_doc_id)
                         expires_dt = datetime.utcnow().replace(microsecond=0) + timedelta(seconds=cache_ttl_seconds)
                         cache_ref.set(
                             {
-                                "highlightly_league_id": int(highlightly_league_id),
-                                "sportsdb_league_id": int(sportsdb_league_id) if str(sportsdb_league_id).isdigit() else sportsdb_league_id,
+                                "sportsdb_league_id": int(local_league_id),
+                                "highlightly_league_id": int(highlightly_league_id) if highlightly_league_id is not None else None,
                                 "league_name": client_league_name,
                                 "season": int(successful_season),
                                 "standings": standings,
                                 "fetched_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
                                 "expires_at": expires_dt.isoformat() + "Z",
-                                "source": "highlightly",
+                                "source": "sportradar",
+                                "cache_version": STANDINGS_CACHE_VERSION,
                             },
                             merge=True,
                         )
@@ -5193,66 +5533,41 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                 'display_season': (
                     f"{successful_season}/{str(int(successful_season) + 1)[-2:]}"
                     if isinstance(successful_season, int)
-                    and league_id_int in CROSS_YEAR_STANDINGS_LEAGUES
+                    and local_league_id in CROSS_YEAR_LOCAL_IDS
                     else str(successful_season) if successful_season is not None else None
                 ),
-                'league_id': highlightly_league_id,
+                'league_id': local_league_id,
+                'source': 'sportradar',
                 'cache_hit': cache_hit,
             }
             logger.info(f"✅ Returning success response (status 200)")
             return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
         else:
-            logger.warning(f"⚠️ NO STANDINGS FOUND")
-            logger.warning(f"   League ID: {highlightly_league_id}")
+            logger.warning("⚠️ NO STANDINGS FOUND from SportRadar")
+            logger.warning(f"   Local league ID: {local_league_id}")
             logger.warning(f"   Tried seasons: {seasons_to_try}")
-            
-            # Check if rate limited
-            error_msg = None
-            is_rate_limited = False
-            if last_error:
-                error_str = str(last_error)
-                if '429' in error_str or 'Rate limited' in error_str or 'quota exceeded' in error_str.lower():
-                    is_rate_limited = True
-            
-            if is_rate_limited:
-                error_msg = f'API rate limit exceeded. Please try again in a few minutes. (League ID: {highlightly_league_id})'
-                logger.error(f"   ❌ RATE LIMITED - API quota exceeded")
-                # If we have stale cache, return it rather than erroring.
-                if isinstance(stale_cache_payload, dict):
-                    logger.warning("Returning STALE cached standings due to rate limit.")
-                    response_data = {
-                        'success': True,
-                        'standings': stale_cache_payload,
-                        'season': None,
-                        'league_id': highlightly_league_id,
-                        'cache_hit': True,
-                        'cache_stale': True,
-                        'warning': error_msg,
-                    }
-                    return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
-            elif highlightly_league_id == RUGBY_WORLD_CUP_LEAGUE_ID:
+
+            error_msg = (
+                f'No SportRadar standings available for league {local_league_id} '
+                f'(tried seasons {seasons_to_try})'
+            )
+            if local_league_id == 4574:
                 error_msg = (
-                    'Rugby World Cup is a tournament held every 4 years (e.g. 2023, 2019, 2015). '
-                    'Standings data may not be available for this competition from the current data source.'
+                    'Rugby World Cup pool standings are keyed to tournament years (e.g. 2023). '
+                    'Try again or check SportRadar coverage for the selected season.'
                 )
-            else:
-                error_msg = f'No standings data available for league {highlightly_league_id} (tried seasons {seasons_to_try})'
-                if last_error:
-                    logger.warning(f"   Last error: {last_error}")
-                    error_msg += f'. Last error: {str(last_error)}'
-            
+
             response_data = {
                 'success': False,
                 'error': error_msg,
                 'standings': None,
-                'rate_limited': is_rate_limited,
                 'debug': {
                     'tried_seasons': seasons_to_try,
-                    'last_error': str(last_error) if last_error else None,
-                    'league_id': highlightly_league_id
+                    'sportsdb_league_id': local_league_id,
+                    'source': 'sportradar',
                 }
             }
-            logger.info(f"⚠️ Returning error response (status 200)")
+            logger.info("⚠️ Returning error response (status 200)")
             return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
             
     except Exception as e:
@@ -5283,6 +5598,174 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
         logger.info("="*80)
         logger.info("=== get_league_standings_http COMPLETED ===")
         logger.info("="*80)
+
+
+# Legacy curated fixtures (optional metadata only — match list comes from SportRadar).
+FEATURED_LINEUP_MATCHES: Dict[int, List[Dict[str, Any]]] = {}
+
+
+@https_fn.on_request(timeout_sec=120, memory=512, secrets=["SPORTRADAR_API_KEY"])
+def get_match_lineups_http(req: https_fn.Request) -> https_fn.Response:
+    """Fetch match lineups or list lineup-capable fixtures from SportRadar."""
+    import json
+    import logging
+    import os
+
+    logger = logging.getLogger(__name__)
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Content-Type": "application/json",
+    }
+
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204, headers=headers)
+
+    try:
+        data = req.get_json(silent=True) or {}
+        sportsdb_league_id = data.get("sportsdb_league_id")
+        sport_event_id = (data.get("sport_event_id") or data.get("event_id") or "").strip()
+        list_matches = bool(data.get("list_matches"))
+        requested_season = data.get("season")
+        match_scope = str(data.get("match_scope") or "historic").strip().lower()
+        if match_scope not in ("historic", "upcoming"):
+            match_scope = "historic"
+
+        try:
+            local_league_id = int(sportsdb_league_id) if sportsdb_league_id is not None else None
+        except (TypeError, ValueError):
+            local_league_id = None
+
+        sportradar_key = (
+            os.getenv("SPORTRADAR_API_KEY") or os.getenv("SPORTRADAR_RUGBY_API_KEY") or ""
+        ).strip()
+        if not sportradar_key:
+            return https_fn.Response(
+                json.dumps({"success": False, "error": "SPORTRADAR_API_KEY not configured", "lineups": None}),
+                status=500,
+                headers=headers,
+            )
+
+        from prediction.sportradar_client import SportRadarRugbyClient
+        from prediction.lineups_normalize import normalize_sportradar_lineups
+        from prediction.lineups_match_list import list_league_lineup_matches
+
+        client = SportRadarRugbyClient(api_key=sportradar_key)
+
+        if list_matches or not sport_event_id:
+            if local_league_id is None:
+                return https_fn.Response(
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": "sportsdb_league_id is required to list matches",
+                            "matches": [],
+                        }
+                    ),
+                    status=400,
+                    headers=headers,
+                )
+            listing = list_league_lineup_matches(
+                client,
+                local_league_id=local_league_id,
+                requested_season=requested_season,
+                match_scope=match_scope,
+            )
+            if listing.get("error") and not listing.get("matches"):
+                return https_fn.Response(
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": listing.get("error"),
+                            "matches": [],
+                            "sportsdb_league_id": local_league_id,
+                        }
+                    ),
+                    status=200,
+                    headers=headers,
+                )
+            return https_fn.Response(
+                json.dumps(
+                    {
+                        "success": True,
+                        "sportsdb_league_id": local_league_id,
+                        "season": listing.get("successful_season"),
+                        "season_years_tried": listing.get("season_years_tried") or [],
+                        "match_scope": match_scope,
+                        "matches": listing.get("matches") or [],
+                        "competition_id": listing.get("competition_id"),
+                    }
+                ),
+                status=200,
+                headers=headers,
+            )
+
+        featured = FEATURED_LINEUP_MATCHES.get(local_league_id or -1, [])
+
+        raw = client.fetch_event_lineups_raw(sport_event_id)
+        if not raw:
+            return https_fn.Response(
+                json.dumps(
+                    {
+                        "success": False,
+                        "error": "Lineups not available for this match",
+                        "sport_event_id": sport_event_id,
+                        "featured_matches": featured,
+                        "lineups": None,
+                    }
+                ),
+                status=200,
+                headers=headers,
+            )
+
+        payload = normalize_sportradar_lineups(raw)
+        from prediction.jersey_kits import enrich_lineup_teams_with_kits
+
+        teams_block = payload.get("teams") if isinstance(payload.get("teams"), list) else []
+        enrich_lineup_teams_with_kits(client, teams_block)
+        meta = next((m for m in featured if m.get("sport_event_id") == sport_event_id), None)
+        if not meta:
+            teams = payload.get("teams") if isinstance(payload.get("teams"), list) else []
+            home_team = next((t.get("name") for t in teams if t.get("qualifier") == "home"), None)
+            away_team = next((t.get("name") for t in teams if t.get("qualifier") == "away"), None)
+            if not home_team and len(teams) >= 1:
+                home_team = teams[0].get("name")
+            if not away_team and len(teams) >= 2:
+                away_team = teams[1].get("name")
+            match_info = payload.get("match") if isinstance(payload.get("match"), dict) else {}
+            meta = {
+                "sport_event_id": sport_event_id,
+                "label": f"{home_team or 'Home'} vs {away_team or 'Away'}",
+                "home_team": home_team,
+                "away_team": away_team,
+                "start_time": match_info.get("start_time"),
+                "round": match_info.get("round"),
+                "venue": match_info.get("venue"),
+            }
+        if meta:
+            payload["featured"] = meta
+
+        return https_fn.Response(
+            json.dumps(
+                {
+                    "success": True,
+                    "sport_event_id": sport_event_id,
+                    "sportsdb_league_id": local_league_id,
+                    "featured_matches": featured,
+                    "lineups": payload,
+                }
+            ),
+            status=200,
+            headers=headers,
+        )
+    except Exception as exc:
+        logger.exception("get_match_lineups_http failed: %s", exc)
+        return https_fn.Response(
+            json.dumps({"success": False, "error": str(exc), "lineups": None}),
+            status=500,
+            headers=headers,
+        )
 
 
 

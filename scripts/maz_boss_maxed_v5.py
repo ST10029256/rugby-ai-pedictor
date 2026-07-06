@@ -42,8 +42,17 @@ except Exception as e:
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
+RUGBY_PREDICTOR_ROOT = PROJECT_ROOT / "rugby-ai-predictor"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+if str(RUGBY_PREDICTOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(RUGBY_PREDICTOR_ROOT))
+
+from prediction.international_leagues import (  # noqa: E402
+    get_linked_league_ids,
+    international_pool_enabled,
+    is_international_rugby_league,
+)
 
 
 def _load_v4_base() -> Any:
@@ -494,6 +503,25 @@ def main() -> None:
     parser.add_argument("--league-id", type=int, default=None)
     parser.add_argument("--all-leagues", action="store_true")
     parser.add_argument("--min-games", type=int, default=120)
+    parser.add_argument(
+        "--min-train-rows",
+        type=int,
+        default=1,
+        help="Minimum completed rows required to train a league split (default: 1).",
+    )
+    parser.add_argument(
+        "--international-pool",
+        dest="international_pool",
+        action="store_true",
+        default=True,
+        help="Pool Rugby Championship / RWC / Friendlies / Nations Championship history when training cluster leagues.",
+    )
+    parser.add_argument(
+        "--no-international-pool",
+        dest="international_pool",
+        action="store_false",
+        help="Disable international cluster pooling.",
+    )
     parser.add_argument("--holdout-ratio", type=float, default=0.2)
     parser.add_argument("--walk-forward", action="store_true")
     parser.add_argument("--train-all-completed", action="store_true")
@@ -561,13 +589,26 @@ def main() -> None:
     if df_all.empty:
         raise SystemExit("No completed games found for selected leagues.")
 
-    keep_ids = [lid for lid in leagues.keys() if int((df_all["league_id"] == lid).sum()) >= args.min_games]
+    keep_ids: List[int] = []
+    for lid in leagues.keys():
+        n_own = int((df_all["league_id"] == lid).sum())
+        if international_pool_enabled(lid, args.international_pool):
+            pool_ids = get_linked_league_ids(lid)
+            n_pool = int(df_all["league_id"].isin(pool_ids).sum())
+            if n_pool >= int(args.min_train_rows):
+                keep_ids.append(lid)
+            continue
+        if n_own >= args.min_games:
+            keep_ids.append(lid)
     if args.train_all_completed and args.all_leagues and FRIENDLIES_LEAGUE_ID in leagues and FRIENDLIES_LEAGUE_ID not in keep_ids:
         n_friendlies = int((df_all["league_id"] == FRIENDLIES_LEAGUE_ID).sum())
-        if n_friendlies >= 60:
+        if n_friendlies >= max(int(args.min_train_rows), 1):
             keep_ids.append(FRIENDLIES_LEAGUE_ID)
     if not keep_ids:
-        raise SystemExit("No leagues meet --min-games threshold.")
+        raise SystemExit(
+            "No leagues meet training thresholds "
+            f"(min_games={args.min_games}, min_train_rows={args.min_train_rows})."
+        )
 
     df_all = (
         df_all[df_all["league_id"].isin(keep_ids)]
@@ -662,6 +703,8 @@ def main() -> None:
         "config": {
             "architecture": V5_ARCHITECTURE,
             "min_games": args.min_games,
+            "min_train_rows": args.min_train_rows,
+            "international_pool": bool(args.international_pool),
             "holdout_ratio": args.holdout_ratio,
             "walk_forward": bool(args.walk_forward),
             "train_all_completed": bool(args.train_all_completed),
@@ -725,8 +768,12 @@ def main() -> None:
         save_models: bool,
         train_all_mode: bool = False,
     ) -> Dict[str, Any]:
-        if len(tr_df) < 60 or (len(te_df) < 1 and not train_all_mode):
-            return {"ok": False, "reason": "insufficient split rows"}
+        min_rows = max(1, int(getattr(args, "min_train_rows", 1)))
+        if len(tr_df) < min_rows or (len(te_df) < 1 and not train_all_mode):
+            return {
+                "ok": False,
+                "reason": f"insufficient split rows (have={len(tr_df)}, need>={min_rows})",
+            }
 
         league_stats = build_league_score_stats(tr_df)
         league_env_stats = build_league_environment_stats(tr_df, args.rating_home_adv)
@@ -1013,12 +1060,29 @@ def main() -> None:
 
     for lid in keep_ids:
         name = leagues[lid]
-        g = (
-            df_all[df_all["league_id"] == lid]
-            .copy()
-            .sort_values(["date_event", "event_id"])
-            .reset_index(drop=True)
-        )
+        if international_pool_enabled(lid, args.international_pool):
+            pool_ids = get_linked_league_ids(lid)
+            g = (
+                df_all[df_all["league_id"].isin(pool_ids)]
+                .copy()
+                .sort_values(["date_event", "event_id"])
+                .reset_index(drop=True)
+            )
+            n_own = int((df_all["league_id"] == lid).sum())
+            LOG.info(
+                "[%s] international pool enabled: own_rows=%s pooled_rows=%s pool_leagues=%s",
+                name,
+                n_own,
+                len(g),
+                pool_ids,
+            )
+        else:
+            g = (
+                df_all[df_all["league_id"] == lid]
+                .copy()
+                .sort_values(["date_event", "event_id"])
+                .reset_index(drop=True)
+            )
         n = len(g)
         if args.train_all_completed:
             LOG.info("[%s] full-train mode: using all completed games (n=%s)", name, n)
@@ -1059,7 +1123,7 @@ def main() -> None:
                 payload["saved_meta"] = out.get("saved_meta")
             report["leagues"][str(lid)] = payload
         elif args.walk_forward:
-            start = max(60, int(args.wf_start_train))
+            start = max(max(1, int(args.min_train_rows)), int(args.wf_start_train))
             step = max(1, int(args.wf_step))
             if start >= n - 1:
                 report["summary"]["skipped"] += 1
