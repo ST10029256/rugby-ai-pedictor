@@ -1,6 +1,6 @@
 {
   "version": "v4",
-  "generated_at": "2026-07-08T23:53:00.813575",
+  "generated_at": "2026-07-10T00:00:14.512296",
   "config": {
     "min_games": 100,
     "holdout_ratio": 0.2,
@@ -37,7 +37,7 @@
     "save_v4_models": true,
     "save_global_pretrained": true,
     "log_level": "INFO",
-    "log_file": "artifacts/maz_maxed_v4_run_20260708_235158.log",
+    "log_file": "artifacts/maz_maxed_v4_run_20260709_235915.log",
     "global_team_index_size": 159,
     "global_league_index_size": 9,
     "sequence_feature_names": [
