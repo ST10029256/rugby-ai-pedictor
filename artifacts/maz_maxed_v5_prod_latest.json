@@ -1,6 +1,6 @@
 {
   "version": "v5",
-  "generated_at": "2026-07-14T23:48:01.226591",
+  "generated_at": "2026-07-15T23:53:25.784078",
   "config": {
     "architecture": "global_backbone_league_adapters_cross_attention_moe_score_first",
     "min_games": 100,
@@ -43,7 +43,7 @@
     "save_v5_models": true,
     "save_global_pretrained": true,
     "log_level": "INFO",
-    "log_file": "artifacts/maz_maxed_v5_run_20260714_234255.log",
+    "log_file": "artifacts/maz_maxed_v5_run_20260715_234836.log",
     "global_team_index_size": 159,
     "global_league_index_size": 10,
     "sequence_feature_names": [
