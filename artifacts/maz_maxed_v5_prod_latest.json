@@ -1,6 +1,6 @@
 {
   "version": "v5",
-  "generated_at": "2026-08-01T23:59:14.358995",
+  "generated_at": "2026-08-03T04:22:11.634437",
   "config": {
     "architecture": "global_backbone_league_adapters_cross_attention_moe_score_first",
     "min_games": 100,
@@ -43,7 +43,7 @@
     "save_v5_models": true,
     "save_global_pretrained": true,
     "log_level": "INFO",
-    "log_file": "artifacts/maz_maxed_v5_run_20260801_235603.log",
+    "log_file": "artifacts/maz_maxed_v5_run_20260803_041855.log",
     "global_team_index_size": 159,
     "global_league_index_size": 10,
     "sequence_feature_names": [
@@ -156,7 +156,7 @@
       "name": "Currie Cup",
       "status": "trained_only",
       "mode": "train_all_completed",
-      "train_rows": 757,
+      "train_rows": 758,
       "test_rows": 0,
       "ensemble_size": 3,
       "global_pretrained": true,
@@ -167,27 +167,27 @@
       "regime": "high_variance",
       "regime_idx": 2,
       "regime_uncertainty_multiplier": 1.2,
-      "alpha_avg_train": 0.49134984612464905,
-      "variance_avg_train": 43.896461486816406,
-      "ensemble_prob_std_avg_train": 0.02506755105124825,
-      "confidence_margin_variance_threshold": 145.9499694824219,
-      "confidence_prob_std_threshold": 0.04605462288929721,
-      "embedding_norm_mean": 5.278278509775798,
-      "embedding_norm_std": 1.3267093499501545,
+      "alpha_avg_train": 0.4875461757183075,
+      "variance_avg_train": 42.73686981201172,
+      "ensemble_prob_std_avg_train": 0.02456508875756899,
+      "confidence_margin_variance_threshold": 149.29180908203122,
+      "confidence_prob_std_threshold": 0.04547008283495632,
+      "embedding_norm_mean": 5.278097152709961,
+      "embedding_norm_std": 1.3267170985539753,
       "expert_usage_avg": [
-        0.25037682553132373,
-        0.2939452528953552,
-        0.25582951307296753,
-        0.19984831909338632
+        0.2425568550825119,
+        0.31136029958724976,
+        0.24700636168320975,
+        0.1990764985481898
       ],
       "train_metrics": {
         "winner_accuracy": 1.0,
-        "home_mae": 3.5167229175567627,
-        "away_mae": 4.081680774688721,
-        "overall_mae": 3.7992018461227417,
-        "brier_winner": 1.000000000033048e-12,
-        "ece_winner": 9.999999998889292e-07,
-        "rows": 757
+        "home_mae": 3.551267623901367,
+        "away_mae": 4.004482269287109,
+        "overall_mae": 3.7778749465942383,
+        "brier_winner": 1.0000000000330044e-12,
+        "ece_winner": 9.999999998890757e-07,
+        "rows": 758
       },
       "saved_seed_models": [
         "artifacts/league_5069_model_maz_maxed_v5_seed_42.pt",
