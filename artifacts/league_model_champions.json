@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-20T23:38:40.534186",
+  "generated_at": "2026-08-24T03:51:16.593065",
   "default_model_family": "v5",
   "selection_basis": "walk_forward_unseen_games",
   "policy_notes": [
@@ -21,262 +21,262 @@
     "4414": {
       "name": "English Premiership Rugby",
       "chosen_family": "v5",
-      "score": 3.197525863049804,
+      "score": 3.19716417034333,
       "deltas": {
-        "winner_accuracy": 0.1304563492063492,
-        "overall_mae": 1.675105727381176,
-        "brier_winner": 0.08359154323938024,
-        "ece_winner": 0.10593377588435035
+        "winner_accuracy": 0.13095238095238093,
+        "overall_mae": 1.6705690565563387,
+        "brier_winner": 0.08837614756621344,
+        "ece_winner": 0.10549988551077984
       },
       "v4_metrics": {
         "winner_accuracy": 0.7797619047619048,
-        "home_mae": 8.142812644678449,
-        "away_mae": 7.17816205677532,
-        "overall_mae": 7.660487350726884,
-        "brier_winner": 0.16082891957070097,
-        "ece_winner": 0.20351370178234623,
+        "home_mae": 8.116487547518714,
+        "away_mae": 7.224569307906287,
+        "overall_mae": 7.670528427712501,
+        "brier_winner": 0.16326283021848068,
+        "ece_winner": 0.2010656746163072,
         "rows": 2016
       },
       "v5_metrics": {
-        "winner_accuracy": 0.910218253968254,
-        "home_mae": 6.276098320408473,
-        "away_mae": 5.694664926282943,
-        "overall_mae": 5.985381623345708,
-        "brier_winner": 0.07723737633132073,
-        "ece_winner": 0.09757992589799588,
+        "winner_accuracy": 0.9107142857142857,
+        "home_mae": 6.260682600358176,
+        "away_mae": 5.73923614195415,
+        "overall_mae": 5.999959371156162,
+        "brier_winner": 0.07488668265226724,
+        "ece_winner": 0.09556578910552736,
         "rows": 2016
       }
     },
     "4430": {
       "name": "French Top 14",
       "chosen_family": "v5",
-      "score": 3.717192611339416,
+      "score": 3.6041467325687773,
       "deltas": {
-        "winner_accuracy": 0.1318545902649414,
-        "overall_mae": 2.0146171777834523,
-        "brier_winner": 0.08653468044559551,
-        "ece_winner": 0.10841840421183527
+        "winner_accuracy": 0.12322858903265554,
+        "overall_mae": 1.9705417856932126,
+        "brier_winner": 0.08000116982107017,
+        "ece_winner": 0.10055803743635444
       },
       "v4_metrics": {
-        "winner_accuracy": 0.7972889710412816,
-        "home_mae": 7.891393618016646,
-        "away_mae": 6.51597496263054,
-        "overall_mae": 7.203684290323593,
-        "brier_winner": 0.146784869019414,
-        "ece_winner": 0.18279540731237792,
+        "winner_accuracy": 0.8034504004929144,
+        "home_mae": 7.87863026088355,
+        "away_mae": 6.5017393544656,
+        "overall_mae": 7.190184807674575,
+        "brier_winner": 0.14348383782795698,
+        "ece_winner": 0.17952718817847052,
         "rows": 3246
       },
       "v5_metrics": {
-        "winner_accuracy": 0.929143561306223,
-        "home_mae": 5.521298616518595,
-        "away_mae": 4.856835608561687,
-        "overall_mae": 5.18906711254014,
-        "brier_winner": 0.06025018857381851,
-        "ece_winner": 0.07437700310054265,
+        "winner_accuracy": 0.9266789895255699,
+        "home_mae": 5.549515605193189,
+        "away_mae": 4.889770438769535,
+        "overall_mae": 5.219643021981362,
+        "brier_winner": 0.06348266800688682,
+        "ece_winner": 0.07896915074211608,
         "rows": 3246
       }
     },
     "4446": {
       "name": "United Rugby Championship",
       "chosen_family": "v5",
-      "score": 2.95261405884731,
+      "score": 2.7892453302062683,
       "deltas": {
-        "winner_accuracy": 0.12027027027027026,
-        "overall_mae": 1.5437497287183195,
-        "brier_winner": 0.08044948144586972,
-        "ece_winner": 0.10061187099050721
+        "winner_accuracy": 0.13063063063063063,
+        "overall_mae": 1.4060168405910876,
+        "brier_winner": 0.08118913640518564,
+        "ece_winner": 0.1020112138559054
       },
       "v4_metrics": {
-        "winner_accuracy": 0.8054054054054054,
-        "home_mae": 7.7374325614791735,
-        "away_mae": 6.6364617691383705,
-        "overall_mae": 7.186947165308772,
-        "brier_winner": 0.14186232954674532,
-        "ece_winner": 0.18166876231756557,
+        "winner_accuracy": 0.7945945945945946,
+        "home_mae": 7.782682088044313,
+        "away_mae": 6.618439068665376,
+        "overall_mae": 7.200560578354844,
+        "brier_winner": 0.14816816649632217,
+        "ece_winner": 0.1840256626997172,
         "rows": 2220
       },
       "v5_metrics": {
-        "winner_accuracy": 0.9256756756756757,
-        "home_mae": 6.040491222261308,
-        "away_mae": 5.245903650919597,
-        "overall_mae": 5.6431974365904525,
-        "brier_winner": 0.061412848100875606,
-        "ece_winner": 0.08105689132705836,
+        "winner_accuracy": 0.9252252252252252,
+        "home_mae": 6.205602690980241,
+        "away_mae": 5.3834847845472735,
+        "overall_mae": 5.794543737763757,
+        "brier_winner": 0.06697903009113652,
+        "ece_winner": 0.0820144488438118,
         "rows": 2220
       }
     },
     "4551": {
       "name": "Super Rugby",
       "chosen_family": "v5",
-      "score": 3.1917690614854277,
+      "score": 3.430387130945633,
       "deltas": {
-        "winner_accuracy": 0.10708310094813167,
-        "overall_mae": 1.755476128636161,
-        "brier_winner": 0.06761190507017617,
-        "ece_winner": 0.08348074622464445
+        "winner_accuracy": 0.11321807027328501,
+        "overall_mae": 1.8919261068321767,
+        "brier_winner": 0.07465707484008635,
+        "ece_winner": 0.0866248196855222
       },
       "v4_metrics": {
-        "winner_accuracy": 0.7880646960401562,
-        "home_mae": 8.17102578626421,
-        "away_mae": 7.30767379336296,
-        "overall_mae": 7.739349789813584,
-        "brier_winner": 0.1578654933624272,
-        "ece_winner": 0.1942577819562163,
+        "winner_accuracy": 0.7785833798103736,
+        "home_mae": 8.267264336896089,
+        "away_mae": 7.42815609637812,
+        "overall_mae": 7.847710216637104,
+        "brier_winner": 0.1652717113729924,
+        "ece_winner": 0.20632222867294567,
         "rows": 1793
       },
       "v5_metrics": {
-        "winner_accuracy": 0.8951477969882878,
-        "home_mae": 6.10883196412154,
-        "away_mae": 5.858915358233306,
-        "overall_mae": 5.983873661177423,
-        "brier_winner": 0.09025358829225102,
-        "ece_winner": 0.11077703573157184,
+        "winner_accuracy": 0.8918014500836586,
+        "home_mae": 6.023743878910811,
+        "away_mae": 5.8878243406990425,
+        "overall_mae": 5.955784109804927,
+        "brier_winner": 0.09061463653290605,
+        "ece_winner": 0.11969740898742347,
         "rows": 1793
       }
     },
     "4574": {
       "name": "Rugby World Cup",
       "chosen_family": "v5",
-      "score": 4.356413338450339,
+      "score": 3.9238916111448674,
       "deltas": {
-        "winner_accuracy": 0.06273896419881819,
-        "overall_mae": 2.6946356149305952,
-        "brier_winner": 0.014306793893758746,
-        "ece_winner": 0.06559635382055184
+        "winner_accuracy": 0.05036101344214383,
+        "overall_mae": 2.436786606025775,
+        "brier_winner": 0.018140149353989207,
+        "ece_winner": 0.06550333197818758
       },
       "v4_metrics": {
-        "winner_accuracy": 0.8095238095238095,
-        "home_mae": 11.651518594650994,
-        "away_mae": 7.253189033932156,
-        "overall_mae": 9.452353814291575,
-        "brier_winner": 0.131791718513836,
-        "ece_winner": 0.19787744858489548,
+        "winner_accuracy": 0.8174603174603174,
+        "home_mae": 10.460889468117365,
+        "away_mae": 7.655089877900624,
+        "overall_mae": 9.057989673008993,
+        "brier_winner": 0.13498862472111434,
+        "ece_winner": 0.20076578850169796,
         "rows": 126
       },
       "v5_metrics": {
-        "winner_accuracy": 0.8722627737226277,
-        "home_mae": 6.920191073939748,
-        "away_mae": 6.595245324782211,
-        "overall_mae": 6.75771819936098,
-        "brier_winner": 0.11748492462007726,
-        "ece_winner": 0.13228109476434363,
-        "rows": 1096
+        "winner_accuracy": 0.8678213309024613,
+        "home_mae": 6.943834443035839,
+        "away_mae": 6.298571690930599,
+        "overall_mae": 6.6212030669832185,
+        "brier_winner": 0.11684847536712513,
+        "ece_winner": 0.13526245652351038,
+        "rows": 1097
       }
     },
     "4714": {
       "name": "Six Nations Championship",
       "chosen_family": "v4",
-      "score": -1.1911203042956495,
+      "score": -0.9394362928324285,
       "deltas": {
-        "winner_accuracy": -0.02857142857142858,
-        "overall_mae": -0.6299838066101078,
-        "brier_winner": -0.08140343284042892,
-        "ece_winner": -0.06727392967245935
+        "winner_accuracy": 0.0,
+        "overall_mae": -0.5701494216918963,
+        "brier_winner": -0.05175556850514379,
+        "ece_winner": -0.04327545571925351
       },
       "v4_metrics": {
         "winner_accuracy": 0.7542857142857143,
-        "home_mae": 7.7713567188807895,
-        "away_mae": 7.955118588038853,
-        "overall_mae": 7.863237653459821,
-        "brier_winner": 0.16674327111904644,
-        "ece_winner": 0.20509775304865216,
+        "home_mae": 7.774832425798689,
+        "away_mae": 7.962174197605678,
+        "overall_mae": 7.868503311702183,
+        "brier_winner": 0.17128634867628723,
+        "ece_winner": 0.21324786105106325,
         "rows": 175
       },
       "v5_metrics": {
-        "winner_accuracy": 0.7257142857142858,
-        "home_mae": 8.373374666486468,
-        "away_mae": 8.61306825365339,
-        "overall_mae": 8.493221460069929,
-        "brier_winner": 0.24814670395947536,
-        "ece_winner": 0.2723716827211115,
+        "winner_accuracy": 0.7542857142857143,
+        "home_mae": 8.207515852791923,
+        "away_mae": 8.669789613996233,
+        "overall_mae": 8.438652733394079,
+        "brier_winner": 0.22304191718143102,
+        "ece_winner": 0.25652331677031676,
         "rows": 175
       }
     },
     "4986": {
       "name": "Rugby Championship",
       "chosen_family": "v5",
-      "score": 3.5429535528329534,
+      "score": 3.225493305545843,
       "deltas": {
-        "winner_accuracy": 0.16262899572111755,
-        "overall_mae": 1.7954768559478431,
-        "brier_winner": 0.09164408131650949,
-        "ece_winner": 0.1434376062802785
+        "winner_accuracy": 0.15636689403702897,
+        "overall_mae": 1.6466918071228456,
+        "brier_winner": 0.08303297342680888,
+        "ece_winner": 0.06260672704886669
       },
       "v4_metrics": {
         "winner_accuracy": 0.7068965517241379,
-        "home_mae": 9.81688982864906,
-        "away_mae": 7.296458047011803,
-        "overall_mae": 8.556673937830432,
-        "brier_winner": 0.20809081093380957,
-        "ece_winner": 0.27258564425245657,
+        "home_mae": 9.522222420264935,
+        "away_mae": 6.952294579867659,
+        "overall_mae": 8.237258500066297,
+        "brier_winner": 0.20200951942445158,
+        "ece_winner": 0.19830633387598787,
         "rows": 58
       },
       "v5_metrics": {
-        "winner_accuracy": 0.8695255474452555,
-        "home_mae": 6.932783320002312,
-        "away_mae": 6.589610843762864,
-        "overall_mae": 6.761197081882589,
-        "brier_winner": 0.11644672961730008,
-        "ece_winner": 0.12914803797217808,
-        "rows": 1096
+        "winner_accuracy": 0.8632634457611669,
+        "home_mae": 6.913360210582138,
+        "away_mae": 6.267773175304764,
+        "overall_mae": 6.590566692943451,
+        "brier_winner": 0.11897654599764271,
+        "ece_winner": 0.13569960682712118,
+        "rows": 1097
       }
     },
     "5069": {
       "name": "Currie Cup",
       "chosen_family": "v5",
-      "score": 2.067916494184207,
+      "score": 1.749302117564523,
       "deltas": {
-        "winner_accuracy": 0.04373177842565601,
-        "overall_mae": 1.2515014211916018,
-        "brier_winner": 0.0025023839307109497,
-        "ece_winner": 0.01764648635129265
+        "winner_accuracy": 0.060869565217391286,
+        "overall_mae": 0.9973827721416084,
+        "brier_winner": -0.0031011682893804793,
+        "ece_winner": 0.017134489029234257
       },
       "v4_metrics": {
-        "winner_accuracy": 0.7332361516034985,
-        "home_mae": 8.960902389214963,
-        "away_mae": 8.857671693184633,
-        "overall_mae": 8.909287041199798,
-        "brier_winner": 0.17728583089613018,
-        "ece_winner": 0.22462778795483515,
-        "rows": 686
+        "winner_accuracy": 0.7188405797101449,
+        "home_mae": 8.892006970834041,
+        "away_mae": 8.81573852594348,
+        "overall_mae": 8.85387274838876,
+        "brier_winner": 0.1839986840507367,
+        "ece_winner": 0.23330051478208091,
+        "rows": 690
       },
       "v5_metrics": {
-        "winner_accuracy": 0.7769679300291545,
-        "home_mae": 7.57089850367332,
-        "away_mae": 7.744672736343072,
-        "overall_mae": 7.657785620008196,
-        "brier_winner": 0.17478344696541923,
-        "ece_winner": 0.2069813016035425,
-        "rows": 686
+        "winner_accuracy": 0.7797101449275362,
+        "home_mae": 7.770454296167346,
+        "away_mae": 7.942525656326957,
+        "overall_mae": 7.856489976247151,
+        "brier_winner": 0.18709985234011717,
+        "ece_winner": 0.21616602575284666,
+        "rows": 690
       }
     },
     "5479": {
       "name": "Rugby Union International Friendlies",
       "chosen_family": "v5",
-      "score": 2.84299861786346,
+      "score": 3.0474380574322284,
       "deltas": {
-        "winner_accuracy": 0.04781970503360067,
-        "overall_mae": 1.7278649935319095,
-        "brier_winner": 0.021434642684225777,
-        "ece_winner": 0.051316886329290184
+        "winner_accuracy": 0.07410299326030745,
+        "overall_mae": 1.782876811436858,
+        "brier_winner": 0.031191977198245457,
+        "ece_winner": 0.06069185338328789
       },
       "v4_metrics": {
-        "winner_accuracy": 0.8207934336525308,
-        "home_mae": 8.805292232581268,
-        "away_mae": 8.165556805893758,
-        "overall_mae": 8.485424519237512,
-        "brier_winner": 0.13740924412282973,
-        "ece_winner": 0.1809420736340375,
-        "rows": 731
+        "winner_accuracy": 0.7909836065573771,
+        "home_mae": 8.552605326709852,
+        "away_mae": 8.232509026761916,
+        "overall_mae": 8.392557176735885,
+        "brier_winner": 0.14635177660628965,
+        "ece_winner": 0.1946848467994176,
+        "rows": 732
       },
       "v5_metrics": {
-        "winner_accuracy": 0.8686131386861314,
-        "home_mae": 6.924569536299601,
-        "away_mae": 6.590549515111603,
-        "overall_mae": 6.757559525705602,
-        "brier_winner": 0.11597460143860396,
-        "ece_winner": 0.1296251873047473,
-        "rows": 1096
+        "winner_accuracy": 0.8650865998176845,
+        "home_mae": 6.9420962572749785,
+        "away_mae": 6.277264473323075,
+        "overall_mae": 6.609680365299027,
+        "brier_winner": 0.11515979940804419,
+        "ece_winner": 0.13399299341612972,
+        "rows": 1097
       }
     }
   }
