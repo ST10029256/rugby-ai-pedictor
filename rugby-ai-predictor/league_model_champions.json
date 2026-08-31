@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-24T03:51:16.593065",
+  "generated_at": "2026-08-31T08:14:38.653403",
   "default_model_family": "v5",
   "selection_basis": "walk_forward_unseen_games",
   "policy_notes": [
@@ -15,8 +15,7 @@
     "4714": "v4",
     "4986": "v5",
     "5069": "v5",
-    "5479": "v5",
-    "5480": "v5"
+    "5479": "v5"
   },
   "league_details": {
     "4414": {
