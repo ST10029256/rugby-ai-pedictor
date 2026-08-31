@@ -20,8 +20,6 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
-from prediction.prediction_integrity import refuse_reason
-
 # Import Firestore Timestamp for type checking
 try:
     from google.cloud.firestore_v1 import Timestamp as FirestoreTimestamp  # type: ignore
@@ -317,6 +315,11 @@ def _upsert_prediction_snapshot_row(
     """
     cur = conn.cursor()
     if str(snapshot_type) == "pre_kickoff_live":
+        # Imported here rather than at module scope: the functions discovery
+        # step execs this file with the function directory off sys.path, so a
+        # top-level `prediction.*` import fails the deploy before it starts.
+        from prediction.prediction_integrity import refuse_reason
+
         refusal = refuse_reason(
             kickoff_at=kickoff_at,
             has_actual_score=(actual_home_score is not None and actual_away_score is not None),
@@ -1798,6 +1801,8 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                     state_conn.close()
             except Exception as state_err:
                 logger.warning(f"Batch predict: fixture state lookup failed: {state_err}")
+
+        from prediction.prediction_integrity import refuse_reason
 
         predictor = None
         results: List[Dict[str, Any]] = []
