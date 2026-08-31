@@ -143,8 +143,10 @@ jobs:
             scripts/detect_completed_matches.py
             scripts/fix_team_identity.py
             scripts/sync_to_firestore.py
+            scripts/check_prediction_integrity.py
             rugby-ai-predictor/prediction/highlightly_leagues.py
             rugby-ai-predictor/prediction/team_identity.py
+            rugby-ai-predictor/prediction/prediction_integrity.py
           )
 
           for file in "${required_files[@]}"; do
@@ -235,6 +237,12 @@ jobs:
           set -Eeuo pipefail
           python scripts/fix_team_identity.py --db data.sqlite --apply
 
+      - name: Verify predictions are forecasts, not hindsight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/check_prediction_integrity.py --db data.sqlite
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
@@ -242,26 +250,19 @@ jobs:
           create_credentials_file: true
           cleanup_credentials: true
 
-      - name: Rebuild all prediction snapshots (full refresh)
-        if: steps.mode.outputs.full_refresh == 'true'
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python rugby-ai-predictor/backfill_v4_predictions_all_games.py \
-            --db data.sqlite \
-            --batch-size 500
-
-      - name: Backfill prediction snapshots for new games (incremental)
-        if: steps.mode.outputs.full_refresh != 'true'
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          # Only score completed games that are missing a snapshot for the live model
-          # version, so daily runs stay cheap while history keeps AI predictions.
-          python rugby-ai-predictor/backfill_v4_predictions_all_games.py \
-            --db data.sqlite \
-            --only-missing \
-            --batch-size 500
+      # Completed games are deliberately NOT re-scored here.
+      #
+      # A prediction is only meaningful if it was made before kickoff, and the
+      # freeze inside enhanced_auto_update.py above already stores one for every
+      # fixture in the next two days. Scoring a finished game instead used the
+      # current model, which production training fits on that very result, so the
+      # numbers looked uncannily accurate and were not forecasts at all. Those
+      # rows (snapshot_type='historical_backfill') were also read by nothing:
+      # the history endpoint joins pre_kickoff_live only. Rebuilding them cost
+      # roughly 11k model runs a night for output no user ever saw.
+      #
+      # backfill_v4_predictions_all_games.py still exists for deliberate offline
+      # analysis; it must not run on a schedule.
 
       - name: Detect newly completed matches after synchronization
         env:

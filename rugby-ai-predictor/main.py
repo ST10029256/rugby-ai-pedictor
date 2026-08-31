@@ -20,6 +20,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
+from prediction.prediction_integrity import refuse_reason
+
 # Import Firestore Timestamp for type checking
 try:
     from google.cloud.firestore_v1 import Timestamp as FirestoreTimestamp  # type: ignore
@@ -308,10 +310,24 @@ def _upsert_prediction_snapshot_row(
 
     ``pre_kickoff_live`` is immutable once stored: conflict does nothing to
     prediction fields (history must never pick up a later retrained model).
+    It is also refused outright once kickoff has passed, so a fixture that
+    never got a forecast in time stays empty instead of gaining a back-dated
+    one from a model that was trained on the result.
     Other snapshot types (e.g. historical_backfill) may upsert freely.
     """
     cur = conn.cursor()
     if str(snapshot_type) == "pre_kickoff_live":
+        refusal = refuse_reason(
+            kickoff_at=kickoff_at,
+            has_actual_score=(actual_home_score is not None and actual_away_score is not None),
+            predicted_at=predicted_at,
+        )
+        if refusal:
+            logging.getLogger(__name__).info(
+                "Refusing pre-kickoff snapshot for match %s: %s", match_id, refusal
+            )
+            return
+
         cur.execute(
             """
             INSERT INTO prediction_snapshot (
@@ -1753,9 +1769,46 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
             except Exception as read_err:
                 logger.warning(f"Batch predict: cache read failed: {read_err}")
 
+        # Kickoff times and final scores for every fixture in the request, so a
+        # match that has already started is served from its frozen snapshot or
+        # not at all. Computing one now would use a model that has since been
+        # trained on the result.
+        fixture_state: Dict[int, Dict[str, Any]] = {}
+        event_ids = [item["event_id"] for item in normalized if item["event_id"] is not None]
+        if event_ids:
+            try:
+                import sqlite3 as _sqlite3
+
+                state_conn = _sqlite3.connect(db_path)
+                try:
+                    placeholders = ",".join("?" * len(event_ids))
+                    for row in state_conn.execute(
+                        f"""
+                        SELECT id, timestamp, date_event, home_score, away_score
+                        FROM event WHERE id IN ({placeholders})
+                        """,
+                        event_ids,
+                    ):
+                        fixture_state[int(row[0])] = {
+                            "kickoff_at": row[1] or row[2],
+                            "date_event": row[2],
+                            "has_actual_score": row[3] is not None and row[4] is not None,
+                        }
+                finally:
+                    state_conn.close()
+            except Exception as state_err:
+                logger.warning(f"Batch predict: fixture state lookup failed: {state_err}")
+
         predictor = None
         results: List[Dict[str, Any]] = []
-        counts = {"cache": 0, "snapshot": 0, "computed": 0, "failed": 0, "frozen": 0}
+        counts = {
+            "cache": 0,
+            "snapshot": 0,
+            "computed": 0,
+            "failed": 0,
+            "frozen": 0,
+            "not_recorded": 0,
+        }
 
         for item in normalized:
             key = item["cache_key"]
@@ -1779,6 +1832,27 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                     counts["snapshot"] += 1
 
             if pred is None:
+                state = fixture_state.get(event_id) if event_id is not None else None
+                refusal = refuse_reason(
+                    kickoff_at=(state or {}).get("kickoff_at", match_date),
+                    has_actual_score=bool((state or {}).get("has_actual_score")),
+                    date_event=(state or {}).get("date_event", match_date),
+                )
+                if refusal:
+                    counts["not_recorded"] += 1
+                    results.append(
+                        {
+                            "event_id": event_id,
+                            "home_team": home,
+                            "away_team": away,
+                            "match_date": match_date,
+                            "prediction_unavailable": True,
+                            "unavailable_reason": refusal,
+                            "_source": "not_recorded",
+                        }
+                    )
+                    continue
+
                 try:
                     if predictor is None:
                         predictor = get_predictor()

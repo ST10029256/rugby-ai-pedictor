@@ -536,11 +536,14 @@ jobs:
             --output rugby-ai-predictor/league_model_champions.json \
             --artifacts-copy artifacts/league_model_champions.json
 
-      - name: Sync scores, rebuild history snapshots, and stage Functions database
+      # Finished games are not re-scored after training. The model has just been
+      # fitted on those results, so its "predictions" for them would be recall,
+      # not forecast. History is built from forecasts frozen before kickoff.
+      - name: Sync scores and stage Functions database
         env:
           HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
           SYNC: 'true'
-          ONLY_MISSING: 'false'
+          BACKFILL: 'false'
           DAYS_BACK: '400'
         shell: bash
         run: |

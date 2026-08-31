@@ -204,7 +204,29 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
         ensure_highlightly_match_id_column(sqlite_conn)
     except Exception:
         pass
-    
+
+    # Shared bookmaker odds, refreshed hourly by scripts/refresh_match_odds.py.
+    # Carrying them on the fixture means the app can prefill the odds boxes from
+    # data it already has, instead of every viewer firing one odds request per
+    # fixture on screen.
+    odds_by_match: Dict[int, Dict[str, Any]] = {}
+    try:
+        for row in sqlite_conn.execute(
+            """
+            SELECT match_id, home_odds, away_odds, bookmaker_count, fetched_at
+            FROM match_odds WHERE bookmaker_count > 0
+            """
+        ):
+            odds_by_match[int(row[0])] = {
+                'odds_home': row[1],
+                'odds_away': row[2],
+                'odds_bookmaker_count': row[3],
+                'odds_fetched_at': row[4],
+            }
+    except sqlite3.OperationalError:
+        # Table appears the first time the odds refresh runs.
+        pass
+
     # Get all matches from SQLite
     cursor.execute("""
         SELECT 
@@ -299,7 +321,8 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
             'sqlite_event_id': match_data['id'],
             'synced_at': SERVER_TIMESTAMP if SERVER_TIMESTAMP else datetime.now()
         }
-        
+        firestore_data.update(odds_by_match.get(int(match_data['id']), {}))
+
         # Remove None values (except scores which can be None for upcoming matches)
         firestore_data = {k: v for k, v in firestore_data.items() 
                          if v is not None or k in ['home_score', 'away_score']}
@@ -354,7 +377,9 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
                         if firestore_data.get('date_event') is not None:
                             patch['date_event'] = firestore_data['date_event']
 
-                    # Keep team/league metadata aligned when this is clearly the same fixture.
+                    # Keep team/league metadata aligned when this is clearly the same
+                    # fixture. Odds are included because they are refreshed hourly and
+                    # the app reads them straight off the fixture.
                     for key in (
                         'home_team_name',
                         'away_team_name',
@@ -363,6 +388,10 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
                         'league_id',
                         'highlightly_match_id',
                         'sqlite_event_id',
+                        'odds_home',
+                        'odds_away',
+                        'odds_bookmaker_count',
+                        'odds_fetched_at',
                     ):
                         if firestore_data.get(key) is not None and existing_data.get(key) != firestore_data.get(key):
                             patch[key] = firestore_data[key]

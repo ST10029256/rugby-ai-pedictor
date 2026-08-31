@@ -28,6 +28,8 @@ try:
 except Exception:  # pragma: no cover
     MultiLeaguePredictor = None  # type: ignore
 
+from prediction.prediction_integrity import refuse_reason
+
 
 def _load_local_env_files() -> None:
     """Load env vars from repo-level and functions-level .env files."""
@@ -364,20 +366,30 @@ class SnapshotRuntime:
             self.stats["errors"] += 1
             logger.debug(f"SnapshotRuntime error for event {event_id}: {e}")
 
-    def freeze_upcoming(self, conn: sqlite3.Connection, hours_ahead: int = 24, limit: int = 400) -> Dict[str, int]:
+    def freeze_upcoming(self, conn: sqlite3.Connection, hours_ahead: int = 48, limit: int = 400) -> Dict[str, int]:
         """Freeze immutable pre-kickoff snapshots for all upcoming fixtures in the horizon.
 
-        Runs during the daily Highlightly sync so today's / tomorrow's games are
-        stored before kickoff. Existing pre_kickoff_live rows are never overwritten.
+        Runs during the daily sync so every fixture is predicted before it is
+        played. The horizon is filtered in SQL: selecting all unfinished games
+        and narrowing afterwards let hundreds of stale past fixtures - games
+        that never received a final score - fill the row limit and push out the
+        fixtures actually about to kick off.
+
+        The default horizon deliberately spans two days rather than one, so a
+        single failed nightly run does not leave a day of games with no
+        prediction. Existing rows are never overwritten.
         """
-        stats = {"scanned": 0, "created": 0, "skipped_existing": 0, "errors": 0}
+        stats = {"scanned": 0, "created": 0, "skipped_existing": 0, "skipped_started": 0, "errors": 0}
         if not self.enabled:
+            logger.warning(
+                "Upcoming freeze skipped: snapshot runtime disabled (predictor import failed?)"
+            )
             return stats
 
         _ensure_prediction_snapshot_table(conn)
         cur = conn.cursor()
         now = datetime.utcnow()
-        cutoff = now + timedelta(hours=max(1, int(hours_ahead)))
+        horizon_days = max(1, (max(1, int(hours_ahead)) + 23) // 24)
         cur.execute(
             """
             SELECT
@@ -393,14 +405,17 @@ class SnapshotRuntime:
             WHERE e.home_team_id IS NOT NULL
               AND e.away_team_id IS NOT NULL
               AND (e.home_score IS NULL OR e.away_score IS NULL)
+              AND e.date_event IS NOT NULL
+              AND date(e.date_event) BETWEEN date('now') AND date('now', ?)
             ORDER BY COALESCE(e.timestamp, e.date_event) ASC
             LIMIT ?
             """,
-            (max(1, int(limit)),),
+            (f"+{horizon_days} days", max(1, int(limit))),
         )
         rows = cur.fetchall()
         predictor = self._get_predictor()
         if predictor is None:
+            logger.warning("Upcoming freeze skipped: predictor unavailable")
             stats["errors"] += 1
             return stats
 
@@ -411,9 +426,17 @@ class SnapshotRuntime:
             kickoff_dt = self._parse_kickoff(
                 {"timestamp": kickoff_ts, "date_event": date_event}
             )
-            if kickoff_dt is None:
-                continue
-            if kickoff_dt < now or kickoff_dt > cutoff:
+
+            # A fixture that has already started must never gain a prediction:
+            # the model is retrained on finished games, so a late snapshot would
+            # record a forecast nobody made.
+            refusal = refuse_reason(
+                kickoff_at=kickoff_ts or date_event,
+                has_actual_score=False,
+                date_event=date_event,
+            )
+            if refusal:
+                stats["skipped_started"] += 1
                 continue
 
             cur.execute(
@@ -450,7 +473,7 @@ class SnapshotRuntime:
                         int(league_id),
                         self.model_version,
                         datetime.utcnow().isoformat(),
-                        kickoff_dt.isoformat(),
+                        kickoff_dt.isoformat() if kickoff_dt else str(date_event),
                         str(home_team),
                         str(away_team),
                         pred.get("predicted_winner"),
@@ -470,7 +493,10 @@ class SnapshotRuntime:
             except Exception as e:
                 stats["errors"] += 1
                 self.stats["errors"] += 1
-                logger.debug("freeze_upcoming failed for match %s: %s", match_id, e)
+                logger.warning(
+                    "Upcoming freeze failed for match %s (%s v %s): %s",
+                    match_id, home_team, away_team, e,
+                )
 
         conn.commit()
         return stats
@@ -917,16 +943,28 @@ def main():
 
     if snapshot_runtime and snapshot_runtime.enabled:
         try:
-            freeze_stats = snapshot_runtime.freeze_upcoming(conn, hours_ahead=24, limit=400)
+            freeze_stats = snapshot_runtime.freeze_upcoming(conn, hours_ahead=48, limit=1000)
             logger.info(
-                "🧊 Upcoming day freeze: scanned=%s created=%s skipped_existing=%s errors=%s",
+                "🧊 Upcoming freeze: scanned=%s created=%s skipped_existing=%s "
+                "skipped_started=%s errors=%s",
                 freeze_stats["scanned"],
                 freeze_stats["created"],
                 freeze_stats["skipped_existing"],
+                freeze_stats["skipped_started"],
                 freeze_stats["errors"],
             )
+            # A fixture with no snapshot by kickoff can never get one, so a run
+            # that saw upcoming games and stored none is a silent data loss.
+            unstored = freeze_stats["scanned"] - freeze_stats["created"] - freeze_stats["skipped_existing"]
+            if freeze_stats["scanned"] > 0 and unstored > 0:
+                logger.warning(
+                    "Upcoming freeze left %s of %s scanned fixtures without a prediction "
+                    "(%s already started, %s failed). Those games will show no prediction.",
+                    unstored, freeze_stats["scanned"],
+                    freeze_stats["skipped_started"], freeze_stats["errors"],
+                )
         except Exception as freeze_err:
-            logger.warning("Upcoming day freeze failed: %s", freeze_err)
+            logger.error("Upcoming freeze failed: %s", freeze_err)
 
     try:
         from killer_v1_rebuilt.freeze import default_live_dir, freeze_is_ready

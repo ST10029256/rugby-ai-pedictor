@@ -27,6 +27,7 @@ import { getDeviceId } from './utils/deviceId';
 import { ensureProfileFromAuth } from './utils/userProfile';
 import { predictionsWidgetSx } from './utils/predictionsLayout';
 import { applyLeagueDisplayNames, modelTeamNameForPrediction } from './utils/teamDisplayNames';
+import { hasUsableOdds, impliedHomeProbability, oddsAdjustedView } from './utils/oddsAdjustment';
 
 const darkTheme = createTheme({
   palette: {
@@ -906,114 +907,52 @@ function App() {
     }
     autoOddsLastSignatureRef.current = signature;
 
-    const toDecimalOdds = (winProb) => {
-      const p = Number(winProb);
-      if (!Number.isFinite(p) || p <= 0 || p >= 1) return null;
-      return Number((1 / p).toFixed(2));
-    };
+    // Odds arrive on the fixture itself, refreshed hourly for everyone by
+    // scripts/refresh_match_odds.py. This used to fire one request per fixture
+    // per viewer, so the same round was priced thousands of times over and two
+    // people could be shown different odds depending on when they loaded.
+    const hydrateSharedBookmakerOdds = () => {
+      const fills = {};
 
-    const hydrateLiveBookmakerOdds = async () => {
-      try {
-        const { predictMatch } = await import('./firebase');
-        const tasks = [];
+      for (const match of upcomingWindowMatches) {
+        const homeOdds = Number(match.odds_home);
+        const awayOdds = Number(match.odds_away);
+        if (!(homeOdds > 0) || !(awayOdds > 0)) continue;
 
-        for (const match of upcomingWindowMatches) {
-          const matchDate = extractMatchDateIso(match) || getLocalYYYYMMDD();
-          const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
-          const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
-          const dedupeKey = `${idKey}::${String(match.id || match.event_id || '')}`;
-          if (autoOddsFetchedKeysRef.current.has(dedupeKey)) continue;
-          autoOddsFetchedKeysRef.current.add(dedupeKey);
-          tasks.push({ match, matchDate, idKey, nameKey });
-        }
+        const matchDate = extractMatchDateIso(match) || getLocalYYYYMMDD();
+        const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
+        const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
+        const dedupeKey = `${idKey}::${String(match.id || match.event_id || '')}`;
+        if (autoOddsFetchedKeysRef.current.has(dedupeKey)) continue;
+        autoOddsFetchedKeysRef.current.add(dedupeKey);
 
-        const concurrency = Math.min(2, tasks.length || 1);
-        let taskIndex = 0;
-        const oddsFillStats = {
-          filled: 0,
-          noBookmaker: 0,
-          invalid: 0,
-          preserved: 0,
+        const auto = {
+          home: Number(homeOdds.toFixed(2)),
+          away: Number(awayOdds.toFixed(2)),
         };
-
-        const worker = async () => {
-          while (!cancelled && taskIndex < tasks.length) {
-            const currentIndex = taskIndex++;
-            const { match, matchDate, idKey, nameKey } = tasks[currentIndex];
-            try {
-              const result = await predictMatch({
-                home_team: predictionTeamName(match, 'home'),
-                away_team: predictionTeamName(match, 'away'),
-                league_id: selectedLeague,
-                match_date: matchDate,
-                event_id: match.id || match.event_id || null,
-                enhanced: false,
-                odds_only: true,
-              });
-              if (cancelled || runId !== autoOddsRunRef.current) {
-                continue;
-              }
-              const pred = result?.data || {};
-              const bookmakerCount = Number(pred.bookmaker_count || 0);
-              const homeProb = Number(pred.bookmaker_home_win_prob);
-              if (bookmakerCount <= 0) {
-                oddsFillStats.noBookmaker += 1;
-                continue;
-              }
-
-              const avgHome = Number(pred.avg_home_odds);
-              const avgAway = Number(pred.avg_away_odds);
-              const homeOdds = avgHome > 0
-                ? Number(avgHome.toFixed(2))
-                : toDecimalOdds(homeProb);
-              const awayOdds = avgAway > 0
-                ? Number(avgAway.toFixed(2))
-                : toDecimalOdds(1 - homeProb);
-              if (!homeOdds || !awayOdds) {
-                oddsFillStats.invalid += 1;
-                continue;
-              }
-
-              const wasCancelled = cancelled;
-              const activeRunId = runId;
-              const auto = { home: homeOdds, away: awayOdds };
-              setManualOdds((prev) => {
-                if (wasCancelled || activeRunId !== autoOddsRunRef.current) {
-                  return prev;
-                }
-                const existing = prev[idKey] || prev[nameKey];
-                if (existing && Number(existing.home) > 0 && Number(existing.away) > 0) {
-                  oddsFillStats.preserved += 1;
-                  return prev;
-                }
-                oddsFillStats.filled += 1;
-                return {
-                  ...prev,
-                  [idKey]: auto,
-                  [nameKey]: auto,
-                };
-              });
-            } catch (_) {
-              // Best-effort autofill only.
-            }
-          }
-        };
-
-        await Promise.all(Array.from({ length: concurrency }, () => worker()));
-        if (cancelled || runId !== autoOddsRunRef.current) {
-          return;
-        }
-        // Keep variables to make troubleshooting easy if logs are re-enabled.
-        void oddsFillStats.filled;
-        void oddsFillStats.noBookmaker;
-        void oddsFillStats.invalid;
-        void oddsFillStats.preserved;
-      } catch (_) {
-        // Keep manual input usable even if autofill fails.
+        fills[idKey] = auto;
+        fills[nameKey] = auto;
       }
+
+      if (cancelled || runId !== autoOddsRunRef.current || !Object.keys(fills).length) {
+        return;
+      }
+
+      setManualOdds((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const [key, auto] of Object.entries(fills)) {
+          const existing = prev[key];
+          // Anything the user typed wins over the shared market price.
+          if (existing && Number(existing.home) > 0 && Number(existing.away) > 0) continue;
+          next[key] = auto;
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
     };
 
-    hydrateLiveBookmakerOdds();
+    hydrateSharedBookmakerOdds();
     return () => {
       cancelled = true;
     };
@@ -1147,25 +1086,48 @@ function App() {
 
           if (result && result.data && !result.data.error) {
             const pred = result.data;
+
+            // The match started without a forecast being frozen, so none exists.
+            // One cannot be produced now: the model has since been trained on
+            // the result, so any number would be hindsight dressed as a
+            // prediction. Say so rather than showing a fabricated scoreline.
+            if (pred.prediction_unavailable) {
+              newPredictions.push({
+                home_team: match.home_team,
+                away_team: match.away_team,
+                date: matchDate,
+                kickoff_at: kickoffAt,
+                league_id: selectedLeague,
+                home_team_id: match.home_team_id,
+                away_team_id: match.away_team_id,
+                prediction_unavailable: true,
+                unavailable_reason: pred.unavailable_reason || 'No pre-kickoff forecast was recorded',
+                winner: null,
+                predicted_winner: null,
+                confidence: null,
+                home_score: null,
+                away_score: null,
+                show_scores: false,
+                model_available: false,
+              });
+              continue;
+            }
+
             const modelAvailable = pred.model_available !== false && pred.show_scores !== false;
             const bookmakerHomeWinProb = pred.bookmaker_home_win_prob ?? null;
             const bookmakerCount = pred.bookmaker_count ?? 0;
 
             if (!modelAvailable) {
-              let homeWinProb = pred.home_win_prob ?? bookmakerHomeWinProb ?? 0.5;
-              let predictionType = pred.prediction_type || 'Bookmaker Odds Only';
-
-              if (odds && odds.home > 0 && odds.away > 0) {
-                const homeDecimal = parseFloat(odds.home);
-                const awayDecimal = parseFloat(odds.away);
-                if (homeDecimal > 0 && awayDecimal > 0) {
-                  const homeProbRaw = 1.0 / homeDecimal;
-                  const awayProbRaw = 1.0 / awayDecimal;
-                  const totalProb = homeProbRaw + awayProbRaw;
-                  homeWinProb = homeProbRaw / totalProb;
-                  predictionType = 'Bookmaker Odds Only';
-                }
-              }
+              // No trained model for this league, so the market is all there is.
+              // A user's own odds replace the shared market price here rather
+              // than competing with an AI number, since there isn't one.
+              const userImplied = hasUsableOdds(odds)
+                ? impliedHomeProbability(odds.home, odds.away)
+                : null;
+              const homeWinProb = userImplied ?? pred.home_win_prob ?? bookmakerHomeWinProb ?? 0.5;
+              const predictionType = userImplied !== null
+                ? 'Your Odds Only'
+                : (pred.prediction_type || 'Bookmaker Odds Only');
 
               let winner;
               let finalConfidence;
@@ -1222,7 +1184,7 @@ function App() {
                 confidence_boost: 0,
                 home_team_id: match.home_team_id,
                 away_team_id: match.away_team_id,
-                live_odds_available: bookmakerCount > 0 || !!(odds && odds.home > 0 && odds.away > 0),
+                live_odds_available: bookmakerCount > 0 || hasUsableOdds(odds),
                 manual_odds: odds,
               });
               continue;
@@ -1237,31 +1199,20 @@ function App() {
             const displayAwayScore = Math.round(predictedAwayScore);
             const isDisplayedDraw = displayHomeScore === displayAwayScore;
 
-            // Start from backend output (can already be Hybrid AI + Live Odds).
-            let homeWinProb = backendHybridProb;
-            let predictionType = pred.prediction_type || (bookmakerCount > 0 ? 'Hybrid AI + Live Odds' : 'AI Only (No Odds)');
+            // The backend value is the single source of truth: it was computed
+            // once before kickoff and stored, so every user sees this exact
+            // number. The browser must not recompute it — doing so previously
+            // meant a user's odds silently rewrote "the AI prediction".
+            const homeWinProb = backendHybridProb;
+            const predictionType = pred.prediction_type || (bookmakerCount > 0 ? 'Hybrid AI + Live Odds' : 'AI Only (No Odds)');
 
-            if (odds && odds.home > 0 && odds.away > 0) {
-              try {
-                const homeDecimal = parseFloat(odds.home);
-                const awayDecimal = parseFloat(odds.away);
-
-                if (homeDecimal > 0 && awayDecimal > 0) {
-                  const homeProbRaw = 1.0 / homeDecimal;
-                  const awayProbRaw = 1.0 / awayDecimal;
-                  const totalProb = homeProbRaw + awayProbRaw;
-                  const oddsHomeWinProb = homeProbRaw / totalProb;
-
-                  const aiWeight = 0.4;
-                  const oddsWeight = 0.6;
-                  homeWinProb = aiWeight * aiHomeWinProb + oddsWeight * oddsHomeWinProb;
-
-                  predictionType = 'Hybrid AI + Manual Odds';
-                }
-              } catch (e) {
-                predictionType = 'AI Only (Invalid Manual Odds)';
-              }
-            }
+            // A user's own odds produce a separate, clearly-labelled figure.
+            const yourOddsView = oddsAdjustedView(
+              aiHomeWinProb,
+              odds,
+              match.home_team,
+              match.away_team
+            );
 
             let winner;
             let finalConfidence;
@@ -1290,18 +1241,11 @@ function App() {
               finalConfidence = 0.5;
             }
 
-            // Keep displayed scores consistent with final winner after odds blending.
-            let alignedHomeScore = displayHomeScore;
-            let alignedAwayScore = displayAwayScore;
-            if (winner === match.away_team && alignedHomeScore >= alignedAwayScore) {
-              [alignedHomeScore, alignedAwayScore] = [alignedAwayScore, alignedHomeScore];
-            } else if (winner === match.home_team && alignedAwayScore >= alignedHomeScore) {
-              [alignedHomeScore, alignedAwayScore] = [alignedAwayScore, alignedHomeScore];
-            } else if (winner === 'Draw' && alignedHomeScore !== alignedAwayScore) {
-              const avg = Math.round((alignedHomeScore + alignedAwayScore) / 2);
-              alignedHomeScore = avg;
-              alignedAwayScore = avg;
-            }
+            // Scores are shown exactly as the model produced them. They used to
+            // be swapped around to agree with an odds-adjusted winner, which
+            // displayed a scoreline the model never predicted.
+            const alignedHomeScore = displayHomeScore;
+            const alignedAwayScore = displayAwayScore;
 
             const scoreDiff = Math.abs(alignedHomeScore - alignedAwayScore);
             let intensity = 'Tight Margin (3-5 pts)';
@@ -1345,10 +1289,15 @@ function App() {
               confidence_boost: finalConfidence - Math.max(aiHomeWinProb, 1 - aiHomeWinProb),
               home_team_id: match.home_team_id,
               away_team_id: match.away_team_id,
-              live_odds_available: bookmakerCount > 0 || !!(odds && odds.home > 0 && odds.away > 0),
+              live_odds_available: bookmakerCount > 0 || hasUsableOdds(odds),
               manual_odds: odds,
               show_scores: true,
               model_available: true,
+              // Shown next to the AI prediction, never in place of it.
+              your_odds_home_win_prob: yourOddsView ? yourOddsView.home_win_prob : null,
+              your_odds_winner: yourOddsView ? yourOddsView.winner : null,
+              your_odds_confidence: yourOddsView ? yourOddsView.confidence : null,
+              your_odds_implied_home_win_prob: yourOddsView ? yourOddsView.odds_implied_home_win_prob : null,
             };
 
             newPredictions.push(finalPrediction);
