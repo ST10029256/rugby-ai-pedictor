@@ -18,8 +18,11 @@ except Exception:  # pragma: no cover
     load_dotenv = None  # type: ignore
 
 from prediction.standings_compute import (
+    CROSS_YEAR_LOCAL_IDS,
+    NO_STANDINGS_LOCAL_IDS,
     STANDINGS_CACHE_VERSION,
     _enrich_standings_row,
+    candidate_season_years,
     normalize_highlightly_standings,
     standings_cache_doc_id,
     standings_table_usable,
@@ -47,18 +50,6 @@ SPORTRADAR_COMPETITION_BY_LOCAL_ID: Dict[int, str] = {
     5479: "sr:competition:876",   # International Friendlies (no table)
     5480: "sr:competition:51392",  # Nations Championship
 }
-
-# Leagues with no meaningful league table in the app
-NO_STANDINGS_LOCAL_IDS = {5479}
-
-# Force a specific calendar/start year (SportRadar season label matching)
-FORCE_SEASON_YEAR_BY_LOCAL_ID: Dict[int, List[int]] = {
-    4574: [2023, 2019],  # RWC — not 2027 placeholder
-    5069: [2025, 2026, 2024],  # Currie Cup — prefer 2025 over empty 2026
-    4714: [2026, 2025, 2024],  # Six Nations — Feb/Mar tournament labelled by edition year
-}
-
-CROSS_YEAR_LOCAL_IDS = {4446, 4414, 4430}
 
 # Fallback when seasons.json is rate-limited or unavailable (from SR audit, Jul 2026).
 FALLBACK_SEASON_IDS_BY_LOCAL: Dict[int, List[str]] = {
@@ -110,52 +101,6 @@ def competition_for_local_id(local_league_id: int) -> Optional[str]:
     return SPORTRADAR_COMPETITION_BY_LOCAL_ID.get(int(local_league_id))
 
 
-def candidate_season_years(
-    local_league_id: int,
-    *,
-    requested_season: Any = None,
-    now: Optional[datetime] = None,
-) -> List[int]:
-    """Ordered calendar/start years to try for a local league id."""
-    lid = int(local_league_id)
-    forced = FORCE_SEASON_YEAR_BY_LOCAL_ID.get(lid)
-    if forced and requested_season is None:
-        return list(forced)
-
-    now = now or datetime.utcnow()
-    year = now.year
-    month = now.month
-
-    if forced:
-        out = list(forced)
-    elif lid in CROSS_YEAR_LOCAL_IDS:
-        # Aug-Jun competitions: Jan-Jul belong to the season that started previous calendar year.
-        primary = year - 1 if month <= 7 else year
-        out = [primary, primary - 1, primary + 1, year, year - 1]
-    else:
-        out = [year, year - 1, year + 1, year - 2]
-
-    seen: set[int] = set()
-    deduped: List[int] = []
-    for y in out:
-        if y not in seen:
-            seen.add(y)
-            deduped.append(y)
-
-    if requested_season is not None:
-        try:
-            req = int(requested_season)
-            merged = [req]
-            for y in deduped:
-                if y not in merged:
-                    merged.append(y)
-            return merged
-        except (TypeError, ValueError):
-            pass
-
-    return deduped
-
-
 def _parse_season_start_year(season: Dict[str, Any]) -> Optional[int]:
     """Extract a numeric start year from a SportRadar season object."""
     for key in ("year", "name"):
@@ -188,6 +133,7 @@ class SportRadarRugbyClient:
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.api_key = (api_key or get_api_key()).strip()
         self.session = requests.Session()
+        self.rate_limited = False
         if self.api_key:
             self.session.headers.update(
                 {"accept": "application/json", "x-api-key": self.api_key}
@@ -213,6 +159,7 @@ class SportRadarRugbyClient:
                     time.sleep(REQUEST_DELAY_S)
                 resp = self.session.get(url, params=merged, timeout=25)
                 if resp.status_code == 429:
+                    self.rate_limited = True
                     retry_after = 5 * (attempt + 1)
                     try:
                         retry_after = max(retry_after, int(resp.headers.get("Retry-After", retry_after)))
@@ -266,10 +213,8 @@ class SportRadarRugbyClient:
             if sid:
                 return str(sid)
 
-        if local_league_id is not None:
-            for sid in FALLBACK_SEASON_IDS_BY_LOCAL.get(int(local_league_id), []):
-                if sid:
-                    return str(sid)
+        # Do not return year-agnostic FALLBACK_SEASON_IDS here — that would label a
+        # previous season as the requested year and block the latest→previous fallback.
         return None
 
     def resolve_season_ids_for_year(

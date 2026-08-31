@@ -26,6 +26,7 @@ import { getBiometricRegistration, handleDeviceAuthFailure, saveDeviceSession } 
 import { getDeviceId } from './utils/deviceId';
 import { ensureProfileFromAuth } from './utils/userProfile';
 import { predictionsWidgetSx } from './utils/predictionsLayout';
+import { applyLeagueDisplayNames, modelTeamNameForPrediction } from './utils/teamDisplayNames';
 
 const darkTheme = createTheme({
   palette: {
@@ -157,6 +158,15 @@ function normalizeTeamNameForDedupe(name) {
     'bluessuperrugby': 'blues',
     'crusaderssuperrugby': 'crusaders',
     'chiefssuperrugby': 'chiefs',
+    // Currie Cup standings labels ↔ Highlightly short names
+    'goldenlions': 'lions',
+    'bluebulls': 'bulls',
+    'sharksxv': 'sharks',
+    'sharkscurriecup': 'sharks',
+    'stormersxxiii': 'stormers',
+    'stormersxiii': 'stormers',
+    'bolandcavaliers': 'boland',
+    'freestatecheetahs': 'cheetahs',
   };
   const key = cleaned.replace(/\s+/g, '');
   return aliases[key] || cleaned;
@@ -180,6 +190,24 @@ function canonicalTeamNameForPrediction(name) {
     chiefs: 'Chiefs',
   };
   return toTitle[norm] || raw;
+}
+
+function predictionTeamName(match, side = 'home') {
+  return canonicalTeamNameForPrediction(modelTeamNameForPrediction(match, side));
+}
+
+function apiWinnerMatchesSide(apiWinner, match, side = 'home') {
+  const label = String(apiWinner || '').trim().toLowerCase();
+  if (!label) return false;
+  const display = String(side === 'away' ? match?.away_team : match?.home_team || '').trim().toLowerCase();
+  const raw = String(
+    side === 'away'
+      ? (match?.away_team_raw || match?.away_team || '')
+      : (match?.home_team_raw || match?.home_team || '')
+  )
+    .trim()
+    .toLowerCase();
+  return label === display || label === raw;
 }
 
 function hasMeaningfulKickoffForMatch(match, leagueId) {
@@ -275,7 +303,9 @@ function getUpcomingExclusionReason(match, leagueId) {
         }
         return null;
       }
-      // If kickoff timestamp date disagrees with fixture date, keep using date-only fallback.
+      // Corrupted/stale rows where stored kickoff day disagrees with fixture day.
+      // These are usually duplicate sqlite-id clones and should not appear in odds.
+      return 'kickoff_date_mismatch';
     }
   }
 
@@ -307,7 +337,20 @@ function dedupeUpcomingMatches(matches, leagueId) {
     const hasKickoff = hasMeaningfulKickoffForMatch(match, leagueId);
     const hasIds = Boolean(match?.home_team_id && match?.away_team_id);
     const hasEventId = Boolean(match?.event_id || match?.id);
-    return (hasKickoff ? 4 : 0) + (hasIds ? 2 : 0) + (hasEventId ? 1 : 0);
+    const hlId = match?.highlightly_match_id || match?.highlightlyMatchId;
+    const docId = match?.id || match?.event_id;
+    const isCanonicalHlDoc =
+      hlId !== undefined &&
+      hlId !== null &&
+      String(hlId).trim() !== '' &&
+      String(docId) === String(hlId);
+    // Prefer Highlightly-canonical docs so sqlite-id clones lose dedupe ties.
+    return (
+      (isCanonicalHlDoc ? 8 : 0) +
+      (hasKickoff ? 4 : 0) +
+      (hasIds ? 2 : 0) +
+      (hasEventId ? 1 : 0)
+    );
   };
 
   const byKey = new Map();
@@ -792,7 +835,9 @@ function App() {
         const result = await getUpcomingMatches({ league_id: selectedLeague, limit: 50 });
         
         if (result && result.data) {
-          const matches = result.data.matches || [];
+          const matches = (result.data.matches || []).map((m) =>
+            applyLeagueDisplayNames(m, selectedLeague)
+          );
           const dedupedMatches = dedupeUpcomingMatches(matches, selectedLeague);
           const diagnostics = dedupedMatches.map((m) => {
             const reason = getUpcomingExclusionReason(m, selectedLeague);
@@ -897,8 +942,8 @@ function App() {
             const { match, matchDate, idKey, nameKey } = tasks[currentIndex];
             try {
               const result = await predictMatch({
-                home_team: canonicalTeamNameForPrediction(match.home_team),
-                away_team: canonicalTeamNameForPrediction(match.away_team),
+                home_team: predictionTeamName(match, 'home'),
+                away_team: predictionTeamName(match, 'away'),
                 league_id: selectedLeague,
                 match_date: matchDate,
                 event_id: match.id || match.event_id || null,
@@ -1024,8 +1069,8 @@ function App() {
     try {
       const batchMatches = tasks.map(({ match, matchDate }) => ({
         event_id: match.id || match.event_id || null,
-        home_team: canonicalTeamNameForPrediction(match.home_team),
-        away_team: canonicalTeamNameForPrediction(match.away_team),
+        home_team: predictionTeamName(match, 'home'),
+        away_team: predictionTeamName(match, 'away'),
         match_date: matchDate,
       }));
       const batchResult = await predictMatchesBatch({
@@ -1084,15 +1129,15 @@ function App() {
           const result = await retryWithBackoff(async () => {
             // Prefer the batched result when present; only hit the network for misses.
             const eid = String(match.id || match.event_id || '');
-            const nameKey = `${canonicalTeamNameForPrediction(match.home_team)}::${canonicalTeamNameForPrediction(match.away_team)}::${matchDate}`;
+            const nameKey = `${predictionTeamName(match, 'home')}::${predictionTeamName(match, 'away')}::${matchDate}`;
             const fromBatch =
               (eid && batchByEventId.get(eid)) || batchByNameKey.get(nameKey);
             if (fromBatch) {
               return { data: fromBatch };
             }
             return await predictMatch({
-              home_team: canonicalTeamNameForPrediction(match.home_team),
-              away_team: canonicalTeamNameForPrediction(match.away_team),
+              home_team: predictionTeamName(match, 'home'),
+              away_team: predictionTeamName(match, 'away'),
               league_id: selectedLeague,
               match_date: matchDate,
               event_id: match.id || match.event_id || null,
@@ -1128,10 +1173,10 @@ function App() {
               if (apiWinner === 'Draw' || apiWinner === 'draw') {
                 winner = 'Draw';
                 finalConfidence = 0.5;
-              } else if (apiWinner === 'Home' || apiWinner === match.home_team) {
+              } else if (apiWinner === 'Home' || apiWinnerMatchesSide(apiWinner, match, 'home')) {
                 winner = match.home_team;
                 finalConfidence = homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb;
-              } else if (apiWinner === 'Away' || apiWinner === match.away_team) {
+              } else if (apiWinner === 'Away' || apiWinnerMatchesSide(apiWinner, match, 'away')) {
                 winner = match.away_team;
                 finalConfidence = homeWinProb < 0.5 ? 1 - homeWinProb : homeWinProb;
               } else if (homeWinProb > 0.5) {
@@ -1225,10 +1270,10 @@ function App() {
             if (apiWinner === 'Draw' || apiWinner === 'draw') {
               winner = 'Draw';
               finalConfidence = 0.5;
-            } else if (apiWinner === 'Home' || apiWinner === match.home_team) {
+            } else if (apiWinner === 'Home' || apiWinnerMatchesSide(apiWinner, match, 'home')) {
               winner = match.home_team;
               finalConfidence = homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb;
-            } else if (apiWinner === 'Away' || apiWinner === match.away_team) {
+            } else if (apiWinner === 'Away' || apiWinnerMatchesSide(apiWinner, match, 'away')) {
               winner = match.away_team;
               finalConfidence = homeWinProb < 0.5 ? 1 - homeWinProb : homeWinProb;
             } else if (isDisplayedDraw || predictedHomeScore === predictedAwayScore) {
@@ -2197,7 +2242,13 @@ function App() {
             boxSizing: 'border-box',
           }}>
             {CONTENT_TAB_VIEWS.has(activeView) ? (
-              <Box sx={VIEW_CONTENT_WRAPPER_SX}>
+              <Box
+                sx={
+                  activeView === 'lineups'
+                    ? { ...VIEW_CONTENT_WRAPPER_SX, bgcolor: 'transparent' }
+                    : VIEW_CONTENT_WRAPPER_SX
+                }
+              >
                 {activeView === 'news' ? (
                   <NewsFeed
                     userPreferences={userPreferences}

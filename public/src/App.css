@@ -308,6 +308,11 @@ video,
   }
 }
 
+/* Shared mobile top nav offset: safe-area + 10px pad + 36px row + 10px pad */
+:root {
+  --app-mobile-nav-offset: calc(56px + env(safe-area-inset-top, 0px));
+}
+
 /* Full-page scroll mode for top-level app views */
 html.news-page-scroll,
 body.news-page-scroll,
@@ -320,6 +325,21 @@ body.news-page-scroll,
   overflow-y: visible !important;
   height: auto !important;
   max-height: none !important;
+}
+
+/* Mobile news reels: lock page scroll, reels scroll internally below nav */
+html.news-reels-immersive,
+body.news-reels-immersive,
+#root.news-reels-immersive {
+  overflow: hidden !important;
+  height: 100svh !important;
+  overscroll-behavior: none;
+}
+
+.main-news-reels-immersive {
+  overflow: hidden !important;
+  height: 100svh !important;
+  max-height: 100svh !important;
 }
 
 /* Allow menu to be visible but constrained */
@@ -852,11 +872,12 @@ body.news-page-scroll,
   box-shadow: 0 8px 32px rgba(44, 62, 80, 0.3);
   transition: all 0.3s ease;
   cursor: pointer;
-  min-width: 300px;
   width: 100%;
-  max-width: 400px;
-  touch-action: manipulation; /* Better touch response */
-  -webkit-tap-highlight-color: transparent; /* Remove tap highlight on mobile */
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .generate-button:hover:not(:disabled) {
@@ -1389,25 +1410,11 @@ h2.match-title {
   grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 1rem;
   margin: 1rem 0;
-  padding: 1rem;
+  padding: 0;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
-}
-
-@media (min-width: 1024px) {
-  .custom-metrics-container {
-    max-width: 1400px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-}
-
-@media (min-width: 1440px) {
-  .custom-metrics-container {
-    max-width: 1600px;
-  }
 }
 
 .custom-metric {
@@ -1896,7 +1903,7 @@ h2.match-title {
   .custom-metrics-container {
     grid-template-columns: 1fr 1fr;
     gap: 0.5rem;
-    padding: 0.5rem;
+    padding: 0;
     margin: 0.75rem 0;
     width: 100%;
     max-width: 100%;
@@ -1996,11 +2003,9 @@ h2.match-title {
   .generate-button {
     padding: 0.875rem 1.5rem;
     font-size: 1rem;
-    min-width: auto;
-    width: calc(100% - 2rem);
-    max-width: calc(100vw - 2rem);
-    box-sizing: border-box;
-    margin: 0 1rem;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
   }
   
   /* League Selector Mobile */
@@ -2144,6 +2149,43 @@ h2.match-title {
 
 /* Tablet and Desktop Optimizations */
 @media (min-width: 769px) {
+  .manual-odds-match-box .MuiGrid-container {
+    justify-content: center !important;
+  }
+
+  .manual-odds-match-box .MuiGrid-item {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .manual-odds-match-box .MuiTypography-root {
+    text-align: center !important;
+    width: 100%;
+  }
+
+  .manual-odds-match-box .MuiTextField-root {
+    width: 100%;
+  }
+
+  .manual-odds-match-box .MuiTextField-root .MuiOutlinedInput-root input {
+    text-align: center !important;
+  }
+
+  .manual-odds-match-box .MuiTextField-root .MuiInputLabel-root {
+    left: 14px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    transform-origin: left center !important;
+    right: auto !important;
+    text-align: left !important;
+  }
+
+  .manual-odds-match-box .MuiTextField-root .MuiInputLabel-shrink {
+    transform: translateY(-130%) scale(0.75) !important;
+    transform-origin: left top !important;
+  }
+
   .custom-metrics-container {
     grid-template-columns: 1fr 1fr 1fr 1fr;
     gap: 1rem;
@@ -2260,7 +2302,7 @@ h2.match-title {
   
   .custom-metrics-container {
     gap: 1.5rem;
-    padding: 1.5rem;
+    padding: 0;
   }
   
   .custom-metric {

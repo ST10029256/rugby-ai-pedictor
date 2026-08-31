@@ -21,7 +21,8 @@ import {
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getLeagueStandings, subscribeToStandingsCache } from '../firebase';
 import { formatStandingsSeasonLabel, getPrimaryStandingsSeasonYear } from '../utils/season';
-import RugbyBallLoader from './RugbyBallLoader';
+import { TabLoadingScreen } from '../utils/viewLoader';
+import { buildTeamLogoCandidates, resolveTeamLogoUrl } from '../utils/teamLogos';
 
 // League ID mapping: Our league ID -> Highlightly league ID
 const LEAGUE_ID_MAPPING = {
@@ -35,6 +36,115 @@ const LEAGUE_ID_MAPPING = {
   4714: 44185, // Six Nations Championship
   5479: 72268, // Rugby Union International Friendlies (Friendly International - no standings as friendlies don't have league tables)
   5480: 124179, // Nations Championship (round-robin; no standings endpoint on Highlightly)
+};
+
+const PREM_LEAGUE_ID = 4414;
+
+/** Wikimedia thumb URLs were only a problem for old Premiership fallbacks — not other leagues. */
+const isBrokenPremLogoUrl = (url, localLeagueId) => {
+  if (Number(localLeagueId) !== PREM_LEAGUE_ID) return false;
+  if (!url || typeof url !== 'string') return false;
+  return url.includes('upload.wikimedia.org') && url.includes('/thumb/');
+};
+
+const normTeamLogoKey = (name) =>
+  String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/** Client-side Premiership crest fallbacks (mirrors backend STATIC_TEAM_LOGOS). */
+const PREM_TEAM_LOGO_FALLBACKS = {
+  'northampton saints': 'https://highlightly.net/rugby/images/teams/56099.png',
+  'bath rugby': 'https://highlightly.net/rugby/images/teams/50142.png',
+  bath: 'https://highlightly.net/rugby/images/teams/50142.png',
+  'exeter chiefs': 'https://highlightly.net/rugby/images/teams/51844.png',
+  'exeter rc chiefs': 'https://highlightly.net/rugby/images/teams/51844.png',
+  'leicester tigers': 'https://highlightly.net/rugby/images/teams/54397.png',
+  saracens: 'https://highlightly.net/rugby/images/teams/57801.png',
+  'saracens fc': 'https://highlightly.net/rugby/images/teams/57801.png',
+  'bristol bears': 'https://highlightly.net/rugby/images/teams/50993.png',
+  bristol: 'https://highlightly.net/rugby/images/teams/50993.png',
+  'sale sharks': 'https://highlightly.net/rugby/images/teams/56950.png',
+  'gloucester rugby': 'https://highlightly.net/rugby/images/teams/52695.png',
+  gloucester: 'https://highlightly.net/rugby/images/teams/52695.png',
+  harlequins: 'https://highlightly.net/rugby/images/teams/53546.png',
+  'harlequins fc': 'https://highlightly.net/rugby/images/teams/53546.png',
+  'newcastle red bulls': 'https://highlightly.net/rugby/images/teams/789661.png',
+  'newcastle falcons': 'https://highlightly.net/rugby/images/teams/69715.png',
+};
+
+const getHighlightlyLeagueLogoUrl = (localLeagueId) => {
+  const hlId = LEAGUE_ID_MAPPING[localLeagueId];
+  if (!hlId) return null;
+  return `https://highlightly.net/rugby/images/leagues/${hlId}.png`;
+};
+
+const pickTeamLogoSrc = (logo, teamName, localLeagueId) => {
+  if (logo && typeof logo === 'string' && !isBrokenPremLogoUrl(logo, localLeagueId)) {
+    return logo;
+  }
+  return resolveTeamLogoUrl(teamName, { leagueId: localLeagueId });
+};
+
+const TeamStandingsLogo = ({ teamName, logo, localLeagueId, size = 62, borderRadius = 2 }) => {
+  const candidates = React.useMemo(
+    () => buildTeamLogoCandidates(teamName, { leagueId: localLeagueId, explicitLogo: logo }),
+    [teamName, logo, localLeagueId]
+  );
+  const [candidateIndex, setCandidateIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    setCandidateIndex(0);
+  }, [teamName, logo, localLeagueId, candidates.length]);
+
+  const src = candidates[candidateIndex] || null;
+
+  if (!src || candidateIndex >= candidates.length) {
+    return (
+      <Box sx={{ width: size, height: size, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+        <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontWeight: 900 }}>
+          {teamName?.[0] || '?'}
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      component="img"
+      src={src}
+      alt={teamName}
+      referrerPolicy="no-referrer"
+      onError={() => {
+        setCandidateIndex((prev) => (prev + 1 < candidates.length ? prev + 1 : candidates.length));
+      }}
+      sx={{
+        width: size,
+        height: size,
+        objectFit: 'contain',
+        display: 'block',
+        flexShrink: 0,
+        borderRadius,
+      }}
+    />
+  );
+};
+
+const isComputedStandings = (standings) =>
+  Boolean(
+    standings?._computed ||
+      standings?._source === 'match_results' ||
+      standings?.note
+  );
+
+const isLegacyStandingsCache = (standings) => {
+  if (!standings) return false;
+  const source = standings?._source;
+  // SportRadar caches are obsolete; force a refresh to Highlightly/SQLite.
+  if (source === 'sportradar') return true;
+  if (source === 'highlightly' || source === 'match_results') return false;
+  return isComputedStandings(standings) || Boolean(source && source !== 'highlightly');
 };
 
 const LeagueStandings = ({ leagueId, leagueName }) => {
@@ -57,7 +167,54 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     } catch (e) {
       // ignore
     }
-    return `standings_cache::${license}::sportsdb_${sportsdbLeagueId}::hl_${highlightlyLeagueId}`;
+    return `standings_cache_v5::${license}::sportsdb_${sportsdbLeagueId}::hl_${highlightlyLeagueId}`;
+  };
+
+  const countTeamsWithLogos = (standingsPayload) => {
+    if (!standingsPayload || !Array.isArray(standingsPayload.groups)) {
+      return { total: 0, withLogo: 0 };
+    }
+    let total = 0;
+    let withLogo = 0;
+    for (const group of standingsPayload.groups) {
+      const rows = group?.standings || group?.teams || [];
+      for (const row of rows) {
+        total += 1;
+        const team = row?.team || row || {};
+        const logo = team.logo || team.badge || row.logo || row.badge;
+        if (logo) withLogo += 1;
+      }
+    }
+    return { total, withLogo };
+  };
+
+  const cacheNeedsLogoRefresh = (standingsPayload) => {
+    if (!standingsPayload) return false;
+    const isPrem = Number(leagueId) === PREM_LEAGUE_ID;
+
+    if (isPrem) {
+      const leagueLogo =
+        standingsPayload?.league?.logo ||
+        standingsPayload?.league?.badge ||
+        standingsPayload?.league?.image;
+      if (!leagueLogo || isBrokenPremLogoUrl(leagueLogo, leagueId)) return true;
+    }
+
+    const { total, withLogo } = countTeamsWithLogos(standingsPayload);
+    if (total > 0 && withLogo === 0) return true;
+    if (total >= 4 && withLogo / total < 0.8) return true;
+
+    if (!isPrem) return false;
+
+    for (const group of standingsPayload.groups || []) {
+      const rows = group?.standings || group?.teams || [];
+      for (const row of rows) {
+        const team = row?.team || row || {};
+        const logo = team.logo || team.badge || row.logo || row.badge;
+        if (isBrokenPremLogoUrl(logo, leagueId)) return true;
+      }
+    }
+    return false;
   };
 
   useEffect(() => {
@@ -66,6 +223,8 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
         setLoading(false);
         return;
       }
+
+      let cachedStandings = null;
 
       try {
         setError(null);
@@ -84,7 +243,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
           return;
         }
         if (leagueId === 5480) {
-          setError('Standings are not available for Nations Championship on Highlightly. Use the upcoming fixtures view for July test matches.');
+          setError('Standings are not available for Nations Championship yet.');
           setLoading(false);
           return;
         }
@@ -105,19 +264,37 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
         }
 
         const cachedAt = cached?.cachedAt ? Number(cached.cachedAt) : null;
-        const cachedStandings = cached?.standings || null;
+        cachedStandings = cached?.standings || null;
         const cacheAge = cachedAt ? now - cachedAt : null;
         const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
         const cachedSeason = Number(cached?.season ?? cachedStandings?.league?.season);
         const cacheSeasonStale = Number.isFinite(cachedSeason) && cachedSeason < primarySeason;
+        const cacheIsLegacyComputed = isLegacyStandingsCache(cachedStandings);
+        const cacheMissingLogos = cacheNeedsLogoRefresh(cachedStandings);
 
-        if (cachedStandings && cacheAge !== null && cacheAge >= 0 && cacheAge < TTL_MS && !cacheSeasonStale) {
+        if (
+          cachedStandings &&
+          cacheAge !== null &&
+          cacheAge >= 0 &&
+          cacheAge < TTL_MS &&
+          !cacheSeasonStale &&
+          !cacheIsLegacyComputed &&
+          !cacheMissingLogos
+        ) {
           setStandings(cachedStandings);
           setLoading(false);
           return;
         }
 
-        if (cachedStandings && cacheAge !== null && cacheAge >= 0 && cacheAge < STALE_MAX_MS && !cacheSeasonStale) {
+        if (
+          cachedStandings &&
+          cacheAge !== null &&
+          cacheAge >= 0 &&
+          cacheAge < STALE_MAX_MS &&
+          !cacheSeasonStale &&
+          !cacheIsLegacyComputed &&
+          !cacheMissingLogos
+        ) {
           // Stale-while-revalidate: render instantly, refresh in background.
           setStandings(cachedStandings);
           setLoading(false);
@@ -129,28 +306,34 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
           highlightlyLeagueId,
           sportsdbLeagueId: leagueId,
           leagueName,
+          season: primarySeason,
+          forceRefresh: cacheIsLegacyComputed || cacheMissingLogos,
         });
         
         if (data && data.success && data.standings) {
-          setStandings(data.standings);
+          const nextStandings = data.standings;
+          setStandings(nextStandings);
           try {
             localStorage.setItem(
               cacheKey,
               JSON.stringify({
                 cachedAt: now,
-                standings: data.standings,
-                season: data.season ?? data.standings?.league?.season ?? null,
+                standings: nextStandings,
+                season: data.season ?? nextStandings?.league?.season ?? null,
+                source: nextStandings?._source || 'match_results',
               })
             );
           } catch (e) {
             // ignore quota issues
           }
-        } else {
+        } else if (!cachedStandings) {
           setError(data?.error || 'No standings data available');
         }
       } catch (err) {
         console.error('Error loading standings:', err);
-        setError('Failed to load standings');
+        if (!cachedStandings) {
+          setError('Failed to load standings');
+        }
       } finally {
         setLoading(false);
       }
@@ -167,8 +350,13 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
 
     const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
 
-    const unsub = subscribeToStandingsCache(highlightlyLeagueId, [primarySeason], (newStandings) => {
+    const unsub = subscribeToStandingsCache(leagueId, [primarySeason], (newStandings, _season, meta) => {
+      if (!newStandings || typeof newStandings !== 'object') return;
+      const source = newStandings._source || meta?.source;
+      if (source && source !== 'highlightly' && source !== 'match_results') return;
+
       setStandings(newStandings);
+
       const cacheKey = getLicenseCacheKey(leagueId, highlightlyLeagueId);
       try {
         localStorage.setItem(
@@ -177,6 +365,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
             cachedAt: Date.now(),
             standings: newStandings,
             season: newStandings?.league?.season ?? null,
+            source: newStandings?._source || 'match_results',
           })
         );
       } catch (e) {
@@ -192,17 +381,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
   }
 
   if (loading) {
-    return (
-      <Box sx={{ 
-        width: '100%',
-        minHeight: { xs: 'calc(100svh - 160px)', sm: 'calc(100vh - 180px)' },
-        display: 'grid',
-        placeItems: 'center',
-        boxSizing: 'border-box',
-      }}>
-        <RugbyBallLoader size={100} color="#10b981" compact label="Loading standings..." />
-      </Box>
-    );
+    return <TabLoadingScreen label="Loading standings..." />;
   }
 
   if (error) {
@@ -242,16 +421,17 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
   const groups = Array.isArray(standings.groups) ? standings.groups : [];
 
   const getTeamLogo = (teamData, row) => {
-    if (!teamData || typeof teamData !== 'object') return null;
-    return (
-      teamData.logo ||
-      teamData.image ||
-      teamData.badge ||
-      teamData.team_logo ||
-      teamData.strTeamBadge ||
+    const teamName = teamData?.name || teamData?.team_name || teamData?.strTeam || row?.teamName || '';
+    const fromApi =
+      teamData?.logo ||
+      teamData?.image ||
+      teamData?.badge ||
+      teamData?.team_logo ||
+      teamData?.strTeamBadge ||
       (row && typeof row === 'object' ? row.logo || row.badge : null) ||
-      null
-    );
+      null;
+    if (fromApi && !isBrokenPremLogoUrl(fromApi, leagueId)) return fromApi;
+    return resolveTeamLogoUrl(teamName, { leagueId });
   };
 
   const toNumberOrNull = (v) => {
@@ -348,8 +528,10 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
   };
 
   const getLeagueLogo = (leagueObj) => {
-    if (!leagueObj || typeof leagueObj !== 'object') return null;
-    return (
+    if (!leagueObj || typeof leagueObj !== 'object') {
+      return getHighlightlyLeagueLogoUrl(leagueId);
+    }
+    const fromApi =
       leagueObj.logo ||
       leagueObj.badge ||
       leagueObj.image ||
@@ -357,8 +539,9 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
       leagueObj.strLogo ||
       leagueObj.strBadge ||
       leagueObj.strBanner ||
-      null
-    );
+      null;
+    if (fromApi && !isBrokenPremLogoUrl(fromApi, leagueId)) return fromApi;
+    return getHighlightlyLeagueLogoUrl(leagueId);
   };
 
   const getLeagueMonogram = (name) => {
@@ -492,31 +675,12 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
                     {rank.label}
                   </Box>
 
-                  {r.logo ? (
-                    <Box
-                      component="img"
-                      src={r.logo}
-                      alt={r.teamName}
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                      sx={{
-                        width: 62,
-                        height: 62,
-                        objectFit: 'contain',
-                        display: 'block',
-                        flexShrink: 0,
-                        borderRadius: 2,
-                      }}
-                    />
-                  ) : (
-                    <Box sx={{ width: 62, height: 62, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                      <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontWeight: 900 }}>
-                        {r.teamName?.[0] || '?'}
-                      </Typography>
-                    </Box>
-                  )}
+                  <TeamStandingsLogo
+                    teamName={r.teamName}
+                    logo={r.logo}
+                    localLeagueId={leagueId}
+                    size={62}
+                  />
 
                   <Box sx={{ minWidth: 0 }}>
                     <Typography
@@ -697,31 +861,13 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
                       >
                         {rank.label}
                       </Box>
-                      {r.logo ? (
-                        <Box
-                          component="img"
-                          src={r.logo}
-                          alt={r.teamName}
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                          }}
-                          sx={{
-                            width: 52,
-                            height: 52,
-                            objectFit: 'contain',
-                            display: 'block',
-                            flexShrink: 0,
-                            borderRadius: 1.6,
-                          }}
-                        />
-                      ) : (
-                        <Box sx={{ width: 52, height: 52, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                          <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontWeight: 900 }}>
-                            {r.teamName?.[0] || '?'}
-                          </Typography>
-                        </Box>
-                      )}
+                      <TeamStandingsLogo
+                        teamName={r.teamName}
+                        logo={r.logo}
+                        localLeagueId={leagueId}
+                        size={52}
+                        borderRadius={1.6}
+                      />
                       <Box sx={{ minWidth: 0 }}>
                         <Typography sx={{ color: 'white', fontWeight: 800, fontSize: '0.9rem' }} noWrap>
                           {r.teamName}
@@ -961,31 +1107,13 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
                         }}
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-                          {r.logo ? (
-                            <Box
-                              component="img"
-                              src={r.logo}
-                              alt={r.teamName}
-                              referrerPolicy="no-referrer"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none';
-                              }}
-                              sx={{
-                                width: 58,
-                                height: 58,
-                                objectFit: 'contain',
-                                display: 'block',
-                                flexShrink: 0,
-                                borderRadius: 1.75,
-                              }}
-                            />
-                          ) : (
-                            <Box sx={{ width: 58, height: 58, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                              <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontWeight: 900 }}>
-                                {r.teamName?.[0] || '?'}
-                              </Typography>
-                            </Box>
-                          )}
+                          <TeamStandingsLogo
+                            teamName={r.teamName}
+                            logo={r.logo}
+                            localLeagueId={leagueId}
+                            size={58}
+                            borderRadius={1.75}
+                          />
                           <Box sx={{ minWidth: 0 }}>
                             <Typography sx={{ color: 'rgba(255,255,255,0.98)', fontWeight: 950, letterSpacing: 0.2 }} noWrap>
                               {r.teamName}
@@ -1097,6 +1225,11 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
                   setLogoCircleSize({ xs, sm });
                 }}
                 onError={(e) => {
+                  const fallback = getHighlightlyLeagueLogoUrl(leagueId);
+                  if (fallback && e.currentTarget.src !== fallback) {
+                    e.currentTarget.src = fallback;
+                    return;
+                  }
                   e.currentTarget.style.display = 'none';
                   setLogoCircleSize({ xs: 84, sm: 100 });
                 }}

@@ -304,7 +304,49 @@ def _upsert_prediction_snapshot_row(
     score_error: Optional[float],
     source_note: Optional[str] = None,
 ) -> None:
+    """Insert/update a snapshot row.
+
+    ``pre_kickoff_live`` is immutable once stored: conflict does nothing to
+    prediction fields (history must never pick up a later retrained model).
+    Other snapshot types (e.g. historical_backfill) may upsert freely.
+    """
     cur = conn.cursor()
+    if str(snapshot_type) == "pre_kickoff_live":
+        cur.execute(
+            """
+            INSERT INTO prediction_snapshot (
+                match_id, league_id, model_version, snapshot_type, predicted_at, kickoff_at,
+                home_team, away_team, predicted_winner, predicted_home_score, predicted_away_score,
+                confidence, home_win_prob, away_win_prob, actual_home_score, actual_away_score,
+                actual_winner, prediction_correct, score_error, source_note, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(match_id, model_version, snapshot_type) DO NOTHING
+            """,
+            (
+                int(match_id),
+                league_id,
+                model_version,
+                snapshot_type,
+                predicted_at,
+                kickoff_at,
+                home_team,
+                away_team,
+                predicted_winner,
+                predicted_home_score,
+                predicted_away_score,
+                confidence,
+                home_win_prob,
+                away_win_prob,
+                actual_home_score,
+                actual_away_score,
+                actual_winner,
+                prediction_correct,
+                score_error,
+                source_note,
+            ),
+        )
+        return
+
     cur.execute(
         """
         INSERT INTO prediction_snapshot (
@@ -357,6 +399,64 @@ def _upsert_prediction_snapshot_row(
             source_note,
         ),
     )
+
+
+def _freeze_pre_kickoff_from_prediction(
+    conn: Any,
+    *,
+    match_id: Any,
+    league_id: Optional[int],
+    model_version: str,
+    pred: Dict[str, Any],
+    home_team: str,
+    away_team: str,
+    match_date: str,
+    kickoff_at: Optional[str] = None,
+    source_note: str = "live_upcoming_freeze",
+) -> bool:
+    """Persist an immutable pre-kickoff snapshot if one does not already exist.
+
+    Returns True when a new row was inserted.
+    """
+    if match_id is None:
+        return False
+    try:
+        mid = int(match_id)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(pred, dict) or pred.get("error"):
+        return False
+    if pred.get("predicted_winner") is None and pred.get("predicted_home_score") is None:
+        return False
+
+    _ensure_prediction_snapshot_table(conn)
+    before = conn.total_changes
+    from datetime import datetime as _dt
+
+    _upsert_prediction_snapshot_row(
+        conn,
+        match_id=mid,
+        league_id=int(league_id) if league_id is not None else None,
+        model_version=str(model_version),
+        snapshot_type="pre_kickoff_live",
+        predicted_at=_dt.utcnow().isoformat(),
+        kickoff_at=kickoff_at or str(match_date),
+        home_team=home_team,
+        away_team=away_team,
+        predicted_winner=pred.get("predicted_winner"),
+        predicted_home_score=float(pred["predicted_home_score"]) if pred.get("predicted_home_score") is not None else None,
+        predicted_away_score=float(pred["predicted_away_score"]) if pred.get("predicted_away_score") is not None else None,
+        confidence=float(pred["confidence"]) if pred.get("confidence") is not None else None,
+        home_win_prob=float(pred["home_win_prob"]) if pred.get("home_win_prob") is not None else None,
+        away_win_prob=float(pred["away_win_prob"]) if pred.get("away_win_prob") is not None else None,
+        actual_home_score=None,
+        actual_away_score=None,
+        actual_winner=None,
+        prediction_correct=None,
+        score_error=None,
+        source_note=source_note,
+    )
+    return conn.total_changes > before
 def _parse_firestore_date(date_event: Any) -> Optional[datetime]:
     """Best-effort conversion of Firestore date field to a `datetime`."""
     try:
@@ -764,7 +864,7 @@ def _get_league_mappings():
 # Initialize predictors (lazy loading - will be imported when needed)
 _predictor = None
 _enhanced_predictor = None
-LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4")
+LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "champion")
 LIVE_MODEL_CHANNEL = os.getenv("LIVE_MODEL_CHANNEL", "prod_100")
 
 
@@ -1655,7 +1755,7 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
 
         predictor = None
         results: List[Dict[str, Any]] = []
-        counts = {"cache": 0, "snapshot": 0, "computed": 0, "failed": 0}
+        counts = {"cache": 0, "snapshot": 0, "computed": 0, "failed": 0, "frozen": 0}
 
         for item in normalized:
             key = item["cache_key"]
@@ -1694,6 +1794,36 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                     pred.setdefault("model_family", LIVE_MODEL_FAMILY)
                     pred.setdefault("model_channel", LIVE_MODEL_CHANNEL)
                     counts["computed"] += 1
+                    # Freeze immutable pre-kickoff history the first time we
+                    # compute this fixture live (with odds). Never overwrite.
+                    if event_id is not None:
+                        try:
+                            import sqlite3 as _sqlite3
+
+                            snap_conn = _sqlite3.connect(db_path)
+                            try:
+                                inserted = _freeze_pre_kickoff_from_prediction(
+                                    snap_conn,
+                                    match_id=event_id,
+                                    league_id=league_id_int,
+                                    model_version=model_version,
+                                    pred=pred,
+                                    home_team=home,
+                                    away_team=away,
+                                    match_date=match_date,
+                                    source_note="batch_predict_upcoming_freeze",
+                                )
+                                if inserted:
+                                    snap_conn.commit()
+                                    counts["frozen"] = counts.get("frozen", 0) + 1
+                            finally:
+                                snap_conn.close()
+                        except Exception as freeze_err:
+                            logger.debug(
+                                "Batch predict: freeze snapshot failed for %s: %s",
+                                event_id,
+                                freeze_err,
+                            )
                     # Write back to the shared cache (best effort).
                     if cache_col is not None:
                         try:
@@ -1749,7 +1879,7 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
         )
 
 
-@https_fn.on_call()
+@https_fn.on_call(secrets=["HIGHLIGHTLY_API_KEY"])
 def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get upcoming matches for a league
@@ -2032,8 +2162,17 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                     logger.debug(f"Filtered out women's match: {home_team_name} vs {away_team_name}")
                     continue  # Skip women's matches
                 
-                match_data['home_team'] = home_team_name
-                match_data['away_team'] = away_team_name
+                try:
+                    from prediction.team_display_names import display_team_name_for_league
+
+                    lid = match_data.get('league_id') or league_id
+                    match_data['home_team_raw'] = home_team_name
+                    match_data['away_team_raw'] = away_team_name
+                    match_data['home_team'] = display_team_name_for_league(home_team_name, lid)
+                    match_data['away_team'] = display_team_name_for_league(away_team_name, lid)
+                except Exception:
+                    match_data['home_team'] = home_team_name
+                    match_data['away_team'] = away_team_name
                 
                 matches.append(match_data)
             
@@ -2042,7 +2181,11 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             try:
                 from prediction.kickoff_times import enrich_matches_kickoff
 
-                enrich_matches_kickoff(matches)
+                enrich_matches_kickoff(
+                    matches,
+                    league_id=int(league_id) if league_id else None,
+                    api_key=os.getenv("HIGHLIGHTLY_API_KEY"),
+                )
             except Exception as kickoff_err:
                 logger.warning(f"Kickoff enrichment failed (continuing): {kickoff_err}")
             
@@ -3553,13 +3696,19 @@ def _generate_login_code() -> str:
     return f'{secrets.randbelow(1_000_000):06d}'
 
 
+def _gmail_smtp_credentials():
+    """Normalize Gmail SMTP secrets (strip whitespace; drop spaces in app password)."""
+    gmail_user = (os.getenv('GMAIL_USER') or '').strip()
+    gmail_password = (os.getenv('GMAIL_APP_PASSWORD') or '').strip().replace(' ', '')
+    return (gmail_user or None), (gmail_password or None)
+
+
 def send_login_code_email(email: str, code: str) -> bool:
     """Email a one-time login code. Returns True if sent."""
     import logging
     logger = logging.getLogger(__name__)
     try:
-        gmail_user = os.getenv('GMAIL_USER')
-        gmail_password = os.getenv('GMAIL_APP_PASSWORD')
+        gmail_user, gmail_password = _gmail_smtp_credentials()
         if not gmail_user or not gmail_password:
             logger.warning('Gmail credentials missing — cannot send login code')
             return False
@@ -4106,8 +4255,7 @@ def send_license_key_email(email: str, name: str, license_key: str, subscription
         # 2. Legacy Firebase Functions config
         # 3. Secret Manager API as fallback
         
-        gmail_user = os.getenv('GMAIL_USER')
-        gmail_password = os.getenv('GMAIL_APP_PASSWORD')
+        gmail_user, gmail_password = _gmail_smtp_credentials()
         
         # Try legacy config method (works with older firebase-functions versions)
         # Legacy config is available via FIREBASE_CONFIG environment variable (JSON)
@@ -4228,11 +4376,17 @@ def send_license_key_email(email: str, name: str, license_key: str, subscription
                 logger.error(f"Traceback: {traceback.format_exc()}")
         
         # Debug logging
+        if gmail_user:
+            gmail_user = str(gmail_user).strip()
+        if gmail_password:
+            gmail_password = str(gmail_password).strip().replace(' ', '')
         logger.info(f"Checking for Gmail credentials...")
         logger.info(f"GMAIL_USER exists: {gmail_user is not None}")
         logger.info(f"GMAIL_APP_PASSWORD exists: {gmail_password is not None}")
         if gmail_user:
             logger.info(f"GMAIL_USER value: {gmail_user[:3]}...{gmail_user[-3:] if len(gmail_user) > 6 else '***'}")
+        if gmail_password:
+            logger.info(f"GMAIL_APP_PASSWORD length: {len(gmail_password)}")
         if not gmail_user or not gmail_password:
             logger.warning("Gmail credentials not found in environment variables or Secret Manager!")
             logger.warning("Available env vars starting with GMAIL: " + str([k for k in os.environ.keys() if 'GMAIL' in k.upper()]))
@@ -5259,19 +5413,22 @@ def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
 
 
-@https_fn.on_request(timeout_sec=60, memory=512, secrets=["SPORTRADAR_API_KEY", "APISPORTS_RUGBY_KEY"])
+@https_fn.on_request(timeout_sec=120, memory=512, secrets=["HIGHLIGHTLY_API_KEY", "APISPORTS_RUGBY_KEY"])
 def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
     """
-    Get league standings from SportRadar (team logos via API-Sports).
+    Get league standings from Highlightly, falling back to SQLite match results.
+    Team logos via static map / API-Sports enrichment.
     
     Request body:
     {
         "sportsdb_league_id": 4986,   # Required local league id
-        "league_id": 73119            # Optional — league banner logo only
+        "league_id": 73119,           # Optional Highlightly league id
+        "season": 2026                # Optional preferred season year
     }
     """
     import logging
     import json
+    import os
     from datetime import datetime, timedelta
     logger = logging.getLogger(__name__)
     
@@ -5279,7 +5436,6 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
     logger.info("=== get_league_standings_http CALLED ===")
     logger.info("="*80)
     logger.info(f"Request method: {req.method}")
-    logger.info(f"Request headers: {dict(req.headers)}")
     
     headers = {
         "Access-Control-Allow-Origin": "*",
@@ -5289,112 +5445,96 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
     }
     
     try:
-        # Parse request data
         if req.method == 'OPTIONS':
-            logger.info("OPTIONS request - returning CORS preflight")
             return https_fn.Response('', status=204, headers=headers)
         
-        logger.info("Parsing request JSON...")
         data = req.get_json(silent=True) or {}
         logger.info(f"Request data: {json.dumps(data, indent=2)}")
         
         highlightly_league_id = data.get('league_id')
         sportsdb_league_id = data.get('sportsdb_league_id')
         client_league_name = data.get('league_name')
-        license_key = data.get('license_key')
         force_refresh = bool(data.get('force_refresh', False))
         cache_ttl_seconds_raw = data.get('cache_ttl_seconds')
-        logger.info(f"Extracted league_id: {highlightly_league_id} (type: {type(highlightly_league_id)})")
-        logger.info(f"Optional sportsdb_league_id: {sportsdb_league_id} (type: {type(sportsdb_league_id)})")
-        if client_league_name:
-            logger.info(f"Optional league_name: {client_league_name}")
-        if license_key:
-            logger.info("Optional license_key provided (used for client caching).")
 
-        # Standings cache TTL (server-side). Clamp to keep Firestore load reasonable.
         try:
-            cache_ttl_seconds = int(cache_ttl_seconds_raw) if cache_ttl_seconds_raw is not None else 21600  # 6h
+            cache_ttl_seconds = int(cache_ttl_seconds_raw) if cache_ttl_seconds_raw is not None else 21600
         except Exception:
             cache_ttl_seconds = 21600
-        cache_ttl_seconds = max(900, min(cache_ttl_seconds, 86400))  # 15 min .. 24h
+        cache_ttl_seconds = max(900, min(cache_ttl_seconds, 86400))
         
         if not sportsdb_league_id:
-            logger.error("❌ Missing sportsdb_league_id in request")
-            response_data = {
-                'success': False,
-                'error': 'sportsdb_league_id is required',
-                'standings': None
-            }
-            return https_fn.Response(json.dumps(response_data), status=400, headers=headers)
+            return https_fn.Response(
+                json.dumps({'success': False, 'error': 'sportsdb_league_id is required', 'standings': None}),
+                status=400,
+                headers=headers,
+            )
 
         try:
             local_league_id = int(sportsdb_league_id)
         except (TypeError, ValueError):
-            logger.error("❌ Invalid sportsdb_league_id in request")
-            response_data = {
-                'success': False,
-                'error': 'sportsdb_league_id must be a valid integer',
-                'standings': None
-            }
-            return https_fn.Response(json.dumps(response_data), status=400, headers=headers)
+            return https_fn.Response(
+                json.dumps({'success': False, 'error': 'sportsdb_league_id must be a valid integer', 'standings': None}),
+                status=400,
+                headers=headers,
+            )
 
-        # Optional: used only for league banner logo URL (not standings data).
-        highlightly_league_id = data.get('league_id')
-
-        logger.info(
-            f"📊 Fetching SportRadar standings for local league id={local_league_id}"
-            + (f" (banner logo hl id={highlightly_league_id})" if highlightly_league_id else "")
-        )
-
-        import os
-
-        sportradar_key = (
-            os.getenv("SPORTRADAR_API_KEY") or os.getenv("SPORTRADAR_RUGBY_API_KEY") or ""
-        ).strip()
-        apisports_key = (
-            os.getenv("APISPORTS_RUGBY_KEY") or os.getenv("APISPORTS_API_KEY") or ""
-        ).strip()
-
-        if sportradar_key:
-            logger.info(f"✅ SportRadar API key configured (length: {len(sportradar_key)})")
-        if apisports_key:
-            logger.info(f"✅ API-Sports key configured (length: {len(apisports_key)})")
-
-        if not sportradar_key:
-            logger.error("❌ SPORTRADAR_API_KEY not configured")
-            response_data = {
-                'success': False,
-                'error': 'SPORTRADAR_API_KEY not configured',
-                'standings': None
-            }
-            return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
-
-        requested_season = data.get("season")
-
-        from prediction.sportradar_client import (
+        from prediction.highlightly_leagues import HIGHLIGHTLY_LEAGUE_MAPPINGS
+        from prediction.standings_compute import (
             CROSS_YEAR_LOCAL_IDS,
             NO_STANDINGS_LOCAL_IDS,
+            STANDINGS_CACHE_VERSION,
             candidate_season_years,
-            try_fetch_sportradar_standings,
+            compute_standings_from_db,
+            count_standings_logos,
+            fetch_highlightly_standings_for_year,
+            load_standings_cache_document,
+            standings_cache_doc_id,
+            standings_table_usable,
         )
-        from prediction.standings_compute import STANDINGS_CACHE_VERSION, standings_cache_doc_id
+
+        if highlightly_league_id is None:
+            mapped = HIGHLIGHTLY_LEAGUE_MAPPINGS.get(local_league_id)
+            if mapped:
+                highlightly_league_id = mapped[1]
+        try:
+            highlightly_league_id = int(highlightly_league_id) if highlightly_league_id is not None else None
+        except (TypeError, ValueError):
+            highlightly_league_id = None
+
+        logger.info(
+            "Fetching standings league=%s hl=%s (Highlightly → SQLite)",
+            local_league_id,
+            highlightly_league_id,
+        )
+
+        highlightly_key = (
+            os.getenv("HIGHLIGHTLY_API_KEY") or os.getenv("RAPIDAPI_KEY") or ""
+        ).strip()
+        if highlightly_key:
+            logger.info("Highlightly API key configured (length=%s)", len(highlightly_key))
+        else:
+            logger.warning("HIGHLIGHTLY_API_KEY missing — will use SQLite match_results only")
 
         if local_league_id in NO_STANDINGS_LOCAL_IDS:
-            response_data = {
-                'success': False,
-                'error': 'Standings are not available for this competition.',
-                'standings': None,
-            }
-            return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
+            return https_fn.Response(
+                json.dumps({
+                    'success': False,
+                    'error': 'Standings are not available for this competition.',
+                    'standings': None,
+                }),
+                status=200,
+                headers=headers,
+            )
 
+        requested_season = data.get("season")
         seasons_to_try = candidate_season_years(local_league_id, requested_season=requested_season)
-        logger.info(f"🔍 SportRadar will try seasons (in order): {seasons_to_try}")
+        logger.info("Standings seasons to try (latest first): %s", seasons_to_try)
 
         standings = None
         successful_season = None
         cache_hit = False
-        standings_source = "sportradar"
-        stale_cache_payload = None
+        standings_source = None
 
         fs_cache = None
         cache_collection = None
@@ -5402,113 +5542,111 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
             fs_cache = get_firestore_client()
             cache_collection = fs_cache.collection("standings_cache_v1")
         except Exception as cache_init_err:
-            logger.warning(f"Standings cache init failed (continuing without cache): {cache_init_err}")
-            fs_cache = None
-            cache_collection = None
+            logger.warning("Standings cache init failed: %s", cache_init_err)
 
-        try:
-            sr_result = try_fetch_sportradar_standings(
-                local_league_id=local_league_id,
-                league_name=client_league_name,
-                requested_season=requested_season,
-                cache_collection=cache_collection,
-                force_refresh=force_refresh,
-            )
-            if sr_result:
-                standings, successful_season, cache_hit = sr_result
-                logger.info(
-                    "✅ SportRadar standings for league %s season %s (cache_hit=%s)",
+        db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
+
+        # Per year: cache → SQLite match results → Highlightly.
+        # Prefer DB when present (Highlightly /standings is often stale/mislabeled).
+        for year in seasons_to_try:
+            if standings is not None:
+                break
+
+            if cache_collection is not None and not force_refresh:
+                cached_result = load_standings_cache_document(
+                    cache_collection,
                     local_league_id,
-                    successful_season,
-                    cache_hit,
+                    int(year),
+                    fresh_only=False,
                 )
-        except Exception as sr_err:
-            logger.warning(f"SportRadar standings fetch failed: {sr_err}")
-
-        # Stale SportRadar cache fallback (never Highlightly / computed tables).
-        if standings is None and cache_collection is not None and not force_refresh:
-            for year in seasons_to_try:
-                try:
-                    cache_ref = cache_collection.document(
-                        standings_cache_doc_id(local_league_id, int(year))
+                if cached_result:
+                    standings, successful_season, is_fresh, standings_source = cached_result
+                    cache_hit = True
+                    logger.info(
+                        "Standings cache HIT league=%s season=%s source=%s fresh=%s",
+                        local_league_id,
+                        successful_season,
+                        standings_source,
+                        is_fresh,
                     )
-                    cached = cache_ref.get()
-                    cached_data = cached.to_dict() if getattr(cached, "exists", False) else None
-                    if not isinstance(cached_data, dict):
-                        continue
-                    if cached_data.get("source") != "sportradar":
-                        continue
-                    cached_standings = cached_data.get("standings")
-                    if isinstance(cached_standings, dict) and cached_standings.get("groups"):
-                        stale_cache_payload = cached_standings
-                        successful_season = int(year)
-                        logger.info(
-                            "Using stale SportRadar cache for league %s season %s",
-                            local_league_id,
-                            year,
-                        )
-                        break
-                except Exception:
-                    continue
-            if stale_cache_payload is not None:
-                standings = stale_cache_payload
-                cache_hit = True
+                    break
 
-        logger.info("\n" + "="*80)
-        logger.info("=== FINAL RESULT ===")
-        logger.info("="*80)
+            try:
+                computed = compute_standings_from_db(db_path, local_league_id, year)
+                if computed and isinstance(computed, dict) and standings_table_usable(computed):
+                    standings = computed
+                    successful_season = int(year)
+                    standings_source = "match_results"
+                    cache_hit = False
+                    logger.info(
+                        "SQLite match_results standings OK league=%s season=%s",
+                        local_league_id,
+                        year,
+                    )
+                    break
+            except Exception as compute_err:
+                logger.warning("Computed standings failed season=%s: %s", year, compute_err)
+
+            if highlightly_key and highlightly_league_id is not None:
+                try:
+                    hl = fetch_highlightly_standings_for_year(
+                        highlightly_league_id=highlightly_league_id,
+                        season_year=int(year),
+                        league_name=client_league_name,
+                        api_key=highlightly_key,
+                    )
+                    if hl and standings_table_usable(hl):
+                        standings = hl
+                        successful_season = int(year)
+                        standings_source = "highlightly"
+                        cache_hit = False
+                        logger.info("Highlightly standings OK league=%s season=%s", local_league_id, year)
+                        break
+                except Exception as hl_err:
+                    logger.warning("Highlightly standings failed season=%s: %s", year, hl_err)
+
+        logger.info("=== FINAL RESULT season=%s source=%s ===", successful_season, standings_source)
         
         if standings and successful_season:
-            logger.info(f"✅ SUCCESS: Found standings for season {successful_season}")
-            logger.info(f"   Local league ID: {local_league_id}")
-            logger.info(f"   Season: {successful_season}")
-            
-            # Log standings summary
             if isinstance(standings, dict):
-                groups = standings.get('groups', [])
-                league_info = standings.get('league', {})
-                logger.info(f"   Groups: {len(groups)}")
-                logger.info(f"   League info: {league_info.get('name', 'N/A')} - {league_info.get('season', 'N/A')}")
-                
-                total_teams = 0
-                for group in groups:
-                    if isinstance(group, dict):
-                        teams_count = len(group.get('standings', [])) + len(group.get('teams', []))
-                        total_teams += teams_count
-                logger.info(f"   Total teams: {total_teams}")
-
-                # Team crests: API-Sports /teams?search= (primary), then TheSportsDB + static map.
+                standings["_source"] = standings_source or standings.get("_source") or "match_results"
                 try:
-                    from prediction.standings_logos import enrich_standings_logos
+                    from prediction.standings_logos import (
+                        apply_static_standings_logos,
+                        enrich_standings_logos,
+                    )
                     from prediction.config import load_config
                     from prediction.sportsdb_client import TheSportsDBClient
 
-                    cfg = load_config()
-                    sportsdb_logo_client = TheSportsDBClient(
-                        base_url=cfg.base_url,
-                        api_key=cfg.api_key,
-                        rate_limit_rpm=cfg.rate_limit_rpm,
+                    apply_static_standings_logos(standings)
+                    with_logo, logo_total = count_standings_logos(standings)
+                    need_live_logos = (
+                        logo_total > 0
+                        and with_logo / logo_total < 0.8
+                        and not cache_hit
                     )
-                    enrich_standings_logos(
-                        standings,
-                        sportsdb_league_id=local_league_id,
-                        highlightly_league_id=highlightly_league_id,
-                        firestore_client=fs_cache,
-                        sportsdb_client=sportsdb_logo_client,
-                    )
+                    if need_live_logos:
+                        cfg = load_config()
+                        sportsdb_logo_client = TheSportsDBClient(
+                            base_url=cfg.base_url,
+                            api_key=cfg.api_key,
+                            rate_limit_rpm=cfg.rate_limit_rpm,
+                        )
+                        enrich_standings_logos(
+                            standings,
+                            sportsdb_league_id=local_league_id,
+                            highlightly_league_id=highlightly_league_id,
+                            firestore_client=fs_cache,
+                            sportsdb_client=sportsdb_logo_client,
+                        )
                 except Exception as logo_err:
-                    logger.warning(
-                        "Standings logo enrichment failed (continuing without logos): %s",
-                        logo_err,
-                    )
+                    logger.warning("Standings logo enrichment failed: %s", logo_err)
 
-                # Write standings cache (after enrichment).
                 if cache_collection is not None and not cache_hit and not force_refresh and isinstance(successful_season, int):
                     try:
                         cache_doc_id = standings_cache_doc_id(int(local_league_id), int(successful_season))
-                        cache_ref = cache_collection.document(cache_doc_id)
                         expires_dt = datetime.utcnow().replace(microsecond=0) + timedelta(seconds=cache_ttl_seconds)
-                        cache_ref.set(
+                        cache_collection.document(cache_doc_id).set(
                             {
                                 "sportsdb_league_id": int(local_league_id),
                                 "highlightly_league_id": int(highlightly_league_id) if highlightly_league_id is not None else None,
@@ -5517,14 +5655,14 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                                 "standings": standings,
                                 "fetched_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
                                 "expires_at": expires_dt.isoformat() + "Z",
-                                "source": "sportradar",
+                                "source": standings_source or "match_results",
                                 "cache_version": STANDINGS_CACHE_VERSION,
                             },
                             merge=True,
                         )
-                        logger.info(f"✅ Wrote standings cache doc {cache_doc_id} (ttl={cache_ttl_seconds}s)")
+                        logger.info("Wrote standings cache %s source=%s", cache_doc_id, standings_source)
                     except Exception as cache_write_err:
-                        logger.warning(f"Standings cache write failed: {cache_write_err}")
+                        logger.warning("Standings cache write failed: %s", cache_write_err)
             
             response_data = {
                 'success': True,
@@ -5537,38 +5675,34 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                     else str(successful_season) if successful_season is not None else None
                 ),
                 'league_id': local_league_id,
-                'source': 'sportradar',
+                'source': standings_source,
                 'cache_hit': cache_hit,
             }
-            logger.info(f"✅ Returning success response (status 200)")
             return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
-        else:
-            logger.warning("⚠️ NO STANDINGS FOUND from SportRadar")
-            logger.warning(f"   Local league ID: {local_league_id}")
-            logger.warning(f"   Tried seasons: {seasons_to_try}")
 
+        error_msg = (
+            f'No standings available for league {local_league_id} '
+            f'(tried seasons {seasons_to_try} via Highlightly + match results)'
+        )
+        if local_league_id == 4574:
             error_msg = (
-                f'No SportRadar standings available for league {local_league_id} '
-                f'(tried seasons {seasons_to_try})'
+                'Rugby World Cup pool standings are keyed to tournament years (e.g. 2023). '
+                'Try again once match data for that tournament is in the database.'
             )
-            if local_league_id == 4574:
-                error_msg = (
-                    'Rugby World Cup pool standings are keyed to tournament years (e.g. 2023). '
-                    'Try again or check SportRadar coverage for the selected season.'
-                )
-
-            response_data = {
+        return https_fn.Response(
+            json.dumps({
                 'success': False,
                 'error': error_msg,
                 'standings': None,
                 'debug': {
                     'tried_seasons': seasons_to_try,
                     'sportsdb_league_id': local_league_id,
-                    'source': 'sportradar',
-                }
-            }
-            logger.info("⚠️ Returning error response (status 200)")
-            return https_fn.Response(json.dumps(response_data), status=200, headers=headers)
+                    'sources': ['highlightly', 'match_results'],
+                },
+            }),
+            status=200,
+            headers=headers,
+        )
             
     except Exception as e:
         logger.error("="*80)
@@ -5647,9 +5781,14 @@ def get_match_lineups_http(req: https_fn.Request) -> https_fn.Response:
                 headers=headers,
             )
 
-        from prediction.sportradar_client import SportRadarRugbyClient
+        from prediction.sportradar_client import (
+            SportRadarRugbyClient,
+            candidate_season_years,
+            competition_for_local_id,
+        )
         from prediction.lineups_normalize import normalize_sportradar_lineups
         from prediction.lineups_match_list import list_league_lineup_matches
+        from prediction.lineups_cache import load_lineups_match_cache, write_lineups_match_cache
 
         client = SportRadarRugbyClient(api_key=sportradar_key)
 
@@ -5666,13 +5805,81 @@ def get_match_lineups_http(req: https_fn.Request) -> https_fn.Response:
                     status=400,
                     headers=headers,
                 )
+
+            lineups_cache_collection = None
+            try:
+                lineups_cache_collection = get_firestore_client().collection(
+                    "lineups_matches_cache_v1"
+                )
+            except Exception:
+                lineups_cache_collection = None
+
+            season_hint = None
+            try:
+                season_hint = int(requested_season) if requested_season is not None else None
+            except (TypeError, ValueError):
+                season_hint = None
+            if season_hint is None:
+                years = candidate_season_years(local_league_id)
+                season_hint = years[0] if years else None
+
+            cached_matches = None
+            cached_season = None
+            cached_fresh = False
+            if lineups_cache_collection is not None:
+                cached = load_lineups_match_cache(
+                    lineups_cache_collection,
+                    local_league_id=local_league_id,
+                    match_scope=match_scope,
+                    season=season_hint,
+                    allow_stale=True,
+                )
+                if cached:
+                    cached_matches, cached_season, cached_fresh = cached
+
+            if cached_matches and cached_fresh:
+                return https_fn.Response(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "sportsdb_league_id": local_league_id,
+                            "season": cached_season or season_hint,
+                            "season_years_tried": [cached_season or season_hint],
+                            "match_scope": match_scope,
+                            "matches": cached_matches,
+                            "competition_id": competition_for_local_id(local_league_id),
+                            "cache_hit": True,
+                        }
+                    ),
+                    status=200,
+                    headers=headers,
+                )
+
             listing = list_league_lineup_matches(
                 client,
                 local_league_id=local_league_id,
                 requested_season=requested_season,
                 match_scope=match_scope,
             )
-            if listing.get("error") and not listing.get("matches"):
+            matches = listing.get("matches") or []
+            successful_season = listing.get("successful_season") or season_hint
+            rate_limited = bool(listing.get("rate_limited"))
+
+            if not matches and cached_matches:
+                matches = cached_matches
+                successful_season = cached_season or successful_season
+
+            if matches and lineups_cache_collection is not None and not rate_limited:
+                write_lineups_match_cache(
+                    lineups_cache_collection,
+                    local_league_id=local_league_id,
+                    match_scope=match_scope,
+                    season=successful_season,
+                    matches=matches,
+                    competition_id=listing.get("competition_id"),
+                )
+
+            if listing.get("error") and not matches:
                 return https_fn.Response(
                     json.dumps(
                         {
@@ -5685,16 +5892,43 @@ def get_match_lineups_http(req: https_fn.Request) -> https_fn.Response:
                     status=200,
                     headers=headers,
                 )
+
+            if not matches:
+                err = (
+                    "SportRadar is rate limiting lineup requests. Try again in a few minutes."
+                    if rate_limited
+                    else (
+                        "No upcoming fixtures with lineups found for this league."
+                        if match_scope == "upcoming"
+                        else "No completed matches with lineups found for this league."
+                    )
+                )
+                return https_fn.Response(
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": err,
+                            "matches": [],
+                            "sportsdb_league_id": local_league_id,
+                            "rate_limited": rate_limited,
+                        }
+                    ),
+                    status=200,
+                    headers=headers,
+                )
+
             return https_fn.Response(
                 json.dumps(
                     {
                         "success": True,
                         "sportsdb_league_id": local_league_id,
-                        "season": listing.get("successful_season"),
+                        "season": successful_season,
                         "season_years_tried": listing.get("season_years_tried") or [],
                         "match_scope": match_scope,
-                        "matches": listing.get("matches") or [],
+                        "matches": matches,
                         "competition_id": listing.get("competition_id"),
+                        "cache_hit": bool(cached_matches and not listing.get("matches")),
+                        "rate_limited": rate_limited,
                     }
                 ),
                 status=200,
@@ -5796,18 +6030,26 @@ def capture_upcoming_prediction_snapshots_http(req: https_fn.Request) -> https_f
 
     try:
         data = req.get_json(silent=True) or {}
-        hours_ahead = int(data.get("hours_ahead", 36))
-        # "Just before kickoff" window (defaults to 0-20 minutes before kickoff).
+        hours_ahead = int(data.get("hours_ahead", 24))
+        # Freeze every upcoming fixture in the horizon once (same-day / next day).
+        # Optional narrow window still supported via min/max minutes if provided.
+        use_narrow_window = (
+            "min_minutes_before_kickoff" in data or "max_minutes_before_kickoff" in data
+        )
         min_minutes_before_kickoff = int(data.get("min_minutes_before_kickoff", 0))
-        max_minutes_before_kickoff = int(data.get("max_minutes_before_kickoff", 20))
+        max_minutes_before_kickoff = int(
+            data.get("max_minutes_before_kickoff", hours_ahead * 60)
+        )
         limit = int(data.get("limit", 400))
         league_id_filter = data.get("league_id")
         dry_run = bool(data.get("dry_run", False))
         model_version = str(data.get("model_version") or _get_live_model_version())
 
         hours_ahead = max(1, min(hours_ahead, 168))
-        min_minutes_before_kickoff = max(0, min(min_minutes_before_kickoff, 240))
-        max_minutes_before_kickoff = max(min_minutes_before_kickoff, min(max_minutes_before_kickoff, 360))
+        min_minutes_before_kickoff = max(0, min(min_minutes_before_kickoff, 48 * 60))
+        max_minutes_before_kickoff = max(
+            min_minutes_before_kickoff, min(max_minutes_before_kickoff, 48 * 60)
+        )
         limit = max(1, min(limit, 2000))
 
         db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
@@ -5885,12 +6127,13 @@ def capture_upcoming_prediction_snapshots_http(req: https_fn.Request) -> https_f
             if kickoff_dt < now_utc or kickoff_dt > cutoff_utc:
                 continue
             minutes_to_kickoff = (kickoff_dt - now_utc).total_seconds() / 60.0
-            in_snapshot_window = (
-                minutes_to_kickoff >= float(min_minutes_before_kickoff)
-                and minutes_to_kickoff <= float(max_minutes_before_kickoff)
-            )
-            if not in_snapshot_window:
-                continue
+            if use_narrow_window:
+                in_snapshot_window = (
+                    minutes_to_kickoff >= float(min_minutes_before_kickoff)
+                    and minutes_to_kickoff <= float(max_minutes_before_kickoff)
+                )
+                if not in_snapshot_window:
+                    continue
             within_window += 1
 
             cursor.execute(
@@ -5938,7 +6181,7 @@ def capture_upcoming_prediction_snapshots_http(req: https_fn.Request) -> https_f
                         actual_winner=None,
                         prediction_correct=None,
                         score_error=None,
-                        source_note="auto_upcoming_window",
+                        source_note="auto_upcoming_day_freeze",
                     )
                 created_or_updated += 1
             except Exception as e:
@@ -6587,7 +6830,8 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 SELECT
                     substr(e.date_event, 1, 4) AS yr,
                     COUNT(1) AS total,
-                    SUM(CASE WHEN e.home_score IS NOT NULL AND e.away_score IS NOT NULL AND date(e.date_event) <= date('now') THEN 1 ELSE 0 END) AS completed
+                    SUM(CASE WHEN e.home_score IS NOT NULL AND e.away_score IS NOT NULL AND date(e.date_event) <= date('now')
+                              AND upper(IFNULL(e.status, '')) NOT IN ('DUP', 'CANC', 'CANCELLED') THEN 1 ELSE 0 END) AS completed
                 FROM event e
                 WHERE e.date_event IS NOT NULL
             """
@@ -6646,6 +6890,8 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             "e.away_score IS NOT NULL",
             "e.date_event IS NOT NULL",
             "date(e.date_event) <= date('now')",
+            # Hide clone/cancelled SportsDB leftovers that still have scores.
+            "upper(IFNULL(e.status, '')) NOT IN ('DUP', 'CANC', 'CANCELLED')",
         ]
         event_params: list[Any] = []
         if league_id:
@@ -6706,13 +6952,9 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             LEFT JOIN league l ON e.league_id = l.id
             LEFT JOIN team t1 ON e.home_team_id = t1.id
             LEFT JOIN team t2 ON e.away_team_id = t2.id
-            LEFT JOIN prediction_snapshot s ON s.rowid = (
-                SELECT s2.rowid
-                FROM prediction_snapshot s2
-                WHERE s2.match_id = e.id AND s2.model_version = ?
-                ORDER BY CASE s2.snapshot_type WHEN 'pre_kickoff_live' THEN 0 ELSE 1 END, s2.id DESC
-                LIMIT 1
-            )
+            LEFT JOIN prediction_snapshot s ON s.match_id = e.id
+                AND s.model_version = ?
+                AND s.snapshot_type = 'pre_kickoff_live'
             WHERE {event_filter_sql}
             ORDER BY e.date_event ASC, e.league_id
             LIMIT ? OFFSET ?

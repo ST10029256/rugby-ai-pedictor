@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, CircularProgress } from '@mui/material';
 import { getLiveMatches } from '../firebase';
+import { predictionsWidgetSx } from '../utils/predictionsLayout';
 
 function LiveMatches({ leagueId }) {
   const [matches, setMatches] = useState([]);
@@ -59,7 +60,7 @@ function LiveMatches({ leagueId }) {
   }
 
   return (
-    <Box sx={{ mb: 4 }}>
+    <Box sx={{ ...predictionsWidgetSx, mb: 4 }}>
       <Typography variant="h6" sx={{ mb: 2, color: '#fafafa', fontWeight: 700 }}>
         🔴 Live Matches (Next 24 Hours)
       </Typography>

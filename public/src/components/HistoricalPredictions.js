@@ -25,7 +25,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import { getHistoricalPredictions, getHistoricalBacktest } from '../firebase';
-import RugbyBallLoader from './RugbyBallLoader';
+import { TabLoadingScreen } from '../utils/viewLoader';
 import { hasMeaningfulTime, formatSASTDateYMD, formatSASTTimePM } from '../utils/date';
 import leagueSeasonWindows from '../data/leagueSeasonWindows.json';
 
@@ -360,19 +360,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
   };
 
   if (loading) {
-    return (
-      <Box
-        sx={{
-          width: '100%',
-          minHeight: { xs: 'calc(100svh - 160px)', sm: 'calc(100vh - 180px)' },
-          display: 'grid',
-          placeItems: 'center',
-          boxSizing: 'border-box',
-        }}
-      >
-        <RugbyBallLoader size={100} color="#10b981" compact label="Loading history..." />
-      </Box>
-    );
+    return <TabLoadingScreen label="Loading history..." />;
   }
 
   if (error) {

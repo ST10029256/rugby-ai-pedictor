@@ -65,7 +65,29 @@ def cleanup_database(db_path: str = "data.sqlite") -> int:
     ensured = ensure_configured_leagues(conn, league_names)
     print(f"Ensured {ensured} configured league rows exist")
 
-    # 2. Remove duplicate events (same league, date, teams) - keep the lowest id.
+    # 2. Remove duplicate events.
+    #    a) Same Highlightly match id -> keep canonical id == highlightly_match_id when possible.
+    #    b) Same league/date/teams -> prefer row with highlightly_match_id, else lowest id.
+    dup_deleted = 0
+
+    cursor.execute(
+        """
+        SELECT highlightly_match_id, COUNT(*) AS count, GROUP_CONCAT(id) AS ids
+        FROM event
+        WHERE highlightly_match_id IS NOT NULL
+        GROUP BY highlightly_match_id
+        HAVING COUNT(*) > 1
+        """
+    )
+    for hl_id, _count, ids_csv in cursor.fetchall():
+        ids = sorted(int(x) for x in str(ids_csv).split(","))
+        keep = int(hl_id) if int(hl_id) in ids else ids[0]
+        for del_id in ids:
+            if del_id == keep:
+                continue
+            cursor.execute("DELETE FROM event WHERE id = ?", (del_id,))
+            dup_deleted += 1
+
     cursor.execute(
         """
         SELECT league_id, DATE(date_event), home_team_id, away_team_id,
@@ -76,14 +98,33 @@ def cleanup_database(db_path: str = "data.sqlite") -> int:
         """
     )
     duplicates = cursor.fetchall()
-    dup_deleted = 0
     for dup in duplicates:
         ids = sorted(int(x) for x in str(dup[5]).split(","))
-        for del_id in ids[1:]:
+        # Prefer a row whose highlightly_match_id is set (and ideally equals id).
+        keep = ids[0]
+        best_score = -1
+        for eid in ids:
+            row = cursor.execute(
+                "SELECT highlightly_match_id FROM event WHERE id = ?",
+                (eid,),
+            ).fetchone()
+            hl = row[0] if row else None
+            score = 0
+            if hl is not None:
+                score += 2
+                if int(hl) == int(eid):
+                    score += 2
+            if score > best_score:
+                best_score = score
+                keep = eid
+        for del_id in ids:
+            if del_id == keep:
+                continue
             cursor.execute("DELETE FROM event WHERE id = ?", (del_id,))
             dup_deleted += 1
+
     if dup_deleted:
-        print(f"Removed {dup_deleted} duplicate events (from {len(duplicates)} groups)")
+        print(f"Removed {dup_deleted} duplicate events")
     else:
         print("No duplicate events found")
 

@@ -107,6 +107,7 @@ class SocialMediaFetcher:
                 has_video = any((m.get("type") in {"video", "animated_gif"}) for m in media_items)
                 video_url = None
                 image_url = None
+                preview_image_url = None
                 media_urls: List[str] = []
                 video_variants: List[str] = []
 
@@ -122,11 +123,10 @@ class SocialMediaFetcher:
                         variants = media.get("variants", []) if isinstance(media.get("variants"), list) else []
                         mp4_variants = [v for v in variants if isinstance(v, dict) and "video/mp4" in str(v.get("content_type", ""))]
                         if mp4_variants:
-                            # Keep all MP4 variants so frontend can retry lower bitrates if needed.
+                            # Lowest bitrate first so clients can start with the smallest MP4.
                             sorted_variants = sorted(
                                 mp4_variants,
                                 key=lambda v: int(v.get("bit_rate", 0) or 0),
-                                reverse=True,
                             )
                             for variant in sorted_variants:
                                 v_url = variant.get("url")
@@ -136,8 +136,11 @@ class SocialMediaFetcher:
                             if video_variants and not video_url:
                                 video_url = video_variants[0]
                         preview = media.get("preview_image_url")
-                        if preview and not image_url:
-                            image_url = preview
+                        if preview:
+                            if not preview_image_url:
+                                preview_image_url = preview
+                            if not image_url:
+                                image_url = preview
 
                 tweets.append({
                     "platform": "twitter",
@@ -150,6 +153,7 @@ class SocialMediaFetcher:
                     "is_video": has_video,
                     "video_url": video_url,
                     "video_variants": video_variants,
+                    "preview_image_url": preview_image_url,
                     "image_url": image_url,
                     "media_urls": media_urls,
                     "author_name": author_name,

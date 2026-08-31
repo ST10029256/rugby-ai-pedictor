@@ -11,9 +11,9 @@
     5479,
     5480
   ],
-  "games_updated": 6,
-  "timestamp": "2026-07-04T22:45:33.029025",
-  "reason": "new_games_fetched",
-  "trigger": "comprehensive_data_update",
-  "description": "Found 6 new/updated games from Highlightly - retraining all models to capture latest data"
+  "games_updated": 11657,
+  "timestamp": "2026-08-31T06:35:00.000000",
+  "reason": "team_identity_repair",
+  "trigger": "fix_team_identity",
+  "description": "Team identity rebuilt: Currie Cup provinces split from their URC/Super Rugby franchises, Fiji separated from Fijian Drua, 15 clubs merged back together and 455 duplicate fixtures removed. Every model must retrain because team ids, Elo and embeddings all changed meaning."
 }

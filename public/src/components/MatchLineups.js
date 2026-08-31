@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
-  Button,
   FormControl,
   Grid,
   InputLabel,
@@ -15,10 +14,11 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { TabLoadingScreen, VIEW_LOADER_SX } from '../utils/viewLoader';
+import RugbyBallLoader from './RugbyBallLoader';
 import { getLeagueLineupMatches, getLeagueStandings, getMatchLineups } from '../firebase';
 import { getPrimaryStandingsSeasonYear } from '../utils/season';
 import {
+  buildTeamLogoCandidates,
   buildTeamLogoMapFromStandings,
   getHighlightlyLeagueId,
   readStandingsLogoCache,
@@ -38,8 +38,6 @@ import {
 } from '../utils/lineups';
 
 
-/** Matches Standings tab loader container for error / info states. */
-const LOADER_SX = VIEW_LOADER_SX;
 
 /** Matches PredictionsDisplay kickoff typography — clean, no glow filters. */
 const kickoffLabelSx = {
@@ -74,6 +72,42 @@ const LUX = {
   text: 'rgba(255,255,255,0.92)',
   sub: 'rgba(255,255,255,0.70)',
   muted: 'rgba(255,255,255,0.55)',
+};
+
+const contentPadding = {
+  boxSizing: 'border-box',
+  bgcolor: 'transparent',
+  flex: 1,
+  width: '100%',
+};
+
+/** Same centered loader placement as Standings / History / Teams tabs. */
+const LineupTabLoader = ({ label }) => (
+  <Box
+    sx={{
+      width: '100%',
+      flex: 1,
+      display: 'grid',
+      placeItems: 'center',
+      boxSizing: 'border-box',
+      minHeight: { xs: 'calc(100svh - 250px)', sm: 'calc(100vh - 270px)' },
+    }}
+  >
+    <RugbyBallLoader size={100} color="#10b981" compact label={label} />
+  </Box>
+);
+
+const lineupAlertSx = {
+  borderRadius: 2.5,
+  width: '100%',
+  maxWidth: 720,
+  mx: 'auto',
+  bgcolor: 'rgba(255, 255, 255, 0.04)',
+  border: `1px solid ${LUX.border}`,
+  color: LUX.text,
+  backdropFilter: 'blur(8px)',
+  '& .MuiAlert-icon': { color: LUX.accent },
+  '& .MuiAlert-message': { color: LUX.sub },
 };
 
 /** Same MenuProps as History — prevents layout shift / viewport shrink on open. */
@@ -255,21 +289,27 @@ const RugbyJersey = ({ number, kit, size = 'md' }) => {
 
 const TeamCrest = ({ kit, alt, size = 72, leagueId = null, logoMap = {} }) => {
   const teamName = alt || kit?.name || '';
-  const pickSrc = () =>
-    kit?.logo ||
-    resolveTeamLogoUrl(teamName, { leagueId, logoMap }) ||
-    kit?.logoFallback ||
-    null;
-
-  const [src, setSrc] = useState(pickSrc);
-  const [failed, setFailed] = useState(false);
+  const candidates = useMemo(
+    () => {
+      const list = buildTeamLogoCandidates(teamName, {
+        leagueId,
+        logoMap,
+        explicitLogo: kit?.logo,
+      });
+      if (kit?.logoFallback && !list.includes(kit.logoFallback)) list.push(kit.logoFallback);
+      return list;
+    },
+    [kit?.logo, kit?.logoFallback, teamName, leagueId, logoMap]
+  );
+  const [candidateIndex, setCandidateIndex] = useState(0);
 
   useEffect(() => {
-    setSrc(pickSrc());
-    setFailed(false);
-  }, [kit?.logo, kit?.logoFallback, teamName, leagueId, logoMap]);
+    setCandidateIndex(0);
+  }, [teamName, leagueId, candidates.join('|')]);
 
-  if (!src || failed) {
+  const src = candidates[candidateIndex] || null;
+
+  if (!src || candidateIndex >= candidates.length) {
     return (
       <Box
         sx={{
@@ -297,14 +337,7 @@ const TeamCrest = ({ kit, alt, size = 72, leagueId = null, logoMap = {} }) => {
       alt={alt}
       referrerPolicy="no-referrer"
       onError={() => {
-        const fallback =
-          kit?.logoFallback ||
-          resolveTeamLogoUrl(teamName, { leagueId, logoMap: {} });
-        if (fallback && src !== fallback) {
-          setSrc(fallback);
-          return;
-        }
-        setFailed(true);
+        setCandidateIndex((prev) => (prev + 1 < candidates.length ? prev + 1 : candidates.length));
       }}
       sx={{
         width: size,
@@ -598,57 +631,72 @@ const PhaseSectionHeader = ({ title, subtitle, showTopRule = true }) => (
   </Box>
 );
 
-const LineupScopeNav = ({ scope, onChange }) => (
-  <Box
-    sx={{
-      display: 'flex',
-      gap: 1,
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      justifyContent: 'center',
-      mb: { xs: 1.5, sm: 2 },
-    }}
-  >
-    {[
-      { id: 'upcoming', label: 'Upcoming' },
-      { id: 'historic', label: 'Historic Lineups' },
-    ].map((item) => {
-      const active = scope === item.id;
-      return (
-        <Button
-          key={item.id}
-          variant={active ? 'contained' : 'outlined'}
-          size="small"
-          onClick={() => onChange(item.id)}
-          sx={{
-            textTransform: 'none',
-            fontWeight: 900,
-            borderRadius: 999,
-            px: 2.25,
-            ...(active
-              ? {
-                  backgroundColor: 'rgba(16,185,129,0.18)',
-                  color: LUX.accent,
-                  boxShadow: 'none',
-                  border: '1px solid rgba(16,185,129,0.35)',
-                  '&:hover': { backgroundColor: 'rgba(16,185,129,0.24)' },
-                }
-              : {
-                  borderColor: 'rgba(255,255,255,0.14)',
-                  color: 'rgba(255,255,255,0.82)',
-                  '&:hover': {
-                    borderColor: 'rgba(255,255,255,0.22)',
-                    backgroundColor: 'rgba(255,255,255,0.04)',
-                  },
-                }),
-          }}
-        >
-          {item.label}
-        </Button>
-      );
-    })}
-  </Box>
-);
+const LINEUP_SCOPE_ITEMS = [
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'historic', label: 'Historic Lineups' },
+];
+
+/** Scope tabs — transparent, aligned with other views. */
+const LineupScopeNav = ({ scope, onChange }) => {
+  const tabIndex = scope === 'historic' ? 1 : 0;
+
+  return (
+    <Tabs
+      value={tabIndex}
+      onChange={(_, value) => onChange(value === 0 ? 'upcoming' : 'historic')}
+      variant="fullWidth"
+      aria-label="Lineup scope"
+      sx={{
+        width: '100%',
+        minHeight: { xs: 48, sm: 52 },
+        mb: { xs: 2, sm: 2.5 },
+        bgcolor: 'transparent !important',
+        background: 'none !important',
+        boxShadow: 'none !important',
+        border: 'none !important',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        '& .MuiTabs-scroller': {
+          bgcolor: 'transparent !important',
+          background: 'none !important',
+        },
+        '& .MuiTabs-flexContainer': {
+          bgcolor: 'transparent !important',
+          background: 'none !important',
+        },
+        '& .MuiTab-root': {
+          color: 'rgba(226, 232, 240, 0.55)',
+          fontWeight: 800,
+          textTransform: 'none',
+          fontSize: { xs: '0.88rem', sm: '0.96rem' },
+          letterSpacing: '0.35px',
+          minHeight: { xs: 48, sm: 52 },
+          py: 1.25,
+          bgcolor: 'transparent !important',
+          background: 'none !important',
+          border: 'none !important',
+          boxShadow: 'none !important',
+          transition: 'color 0.2s ease',
+        },
+        '& .Mui-selected': {
+          color: `${LUX.accent} !important`,
+          bgcolor: 'transparent !important',
+          background: 'none !important',
+          border: 'none !important',
+          boxShadow: 'none !important',
+        },
+        '& .MuiTabs-indicator': {
+          backgroundColor: LUX.accent,
+          height: 3,
+          borderRadius: '3px 3px 0 0',
+        },
+      }}
+    >
+      {LINEUP_SCOPE_ITEMS.map((item) => (
+        <Tab key={item.id} label={item.label} disableRipple />
+      ))}
+    </Tabs>
+  );
+};
 
 const MatchSelectBar = ({ matches, selectedEventId, onChange }) => {
   if (!matches.length) return null;
@@ -976,50 +1024,12 @@ const MatchLineups = ({ leagueId, leagueName }) => {
   );
   const featured = lineups?.featured || selectedMatch || {};
 
-  if (matchesLoading || loading) {
-    return <TabLoadingScreen label="Loading lineups..." />;
-  }
-
-  if (matchesError || !matches.length) {
-    return (
-      <Box sx={{ ...LOADER_SX, minHeight: 280, placeItems: 'start', pt: 4, px: 2 }}>
-        <LineupScopeNav scope={lineupScope} onChange={setLineupScope} />
-        <Alert severity="info" sx={{ borderRadius: 2, width: '100%', maxWidth: 720, mx: 'auto' }}>
-          {matchesError || `No lineup matches found for ${leagueName || 'this league'}.`}
-        </Alert>
-      </Box>
-    );
-  }
-
-  if (error || !lineups) {
-    return (
-      <Box
-        sx={{
-          width: '100%',
-          maxWidth: '100%',
-          mx: 0,
-          p: { xs: 1.25, sm: 2.5, md: 3.5 },
-          boxSizing: 'border-box',
-        }}
-      >
-        <LineupScopeNav scope={lineupScope} onChange={setLineupScope} />
-        <MatchSelectBar
-          matches={matches}
-          selectedEventId={selectedEventId}
-          onChange={setSelectedEventId}
-        />
-        <Alert severity="warning" sx={{ borderRadius: 2, width: '100%', maxWidth: 720, mx: 'auto', mt: 2 }}>
-          {error || 'No lineup data for this match — try another fixture from the list.'}
-        </Alert>
-      </Box>
-    );
-  }
-
-  const homeKit = resolveKit(homeTeam);
-  const awayKit = resolveKit(awayTeam);
-  const homeScore = match.home_score ?? selectedMatch?.home_score ?? '—';
-  const awayScore = match.away_score ?? selectedMatch?.away_score ?? '—';
-  const matchStart = match.start_time || featured.start_time;
+  const showLineupDetail = !matchesLoading && matches.length > 0 && !loading && lineups && !error;
+  const homeKit = showLineupDetail ? resolveKit(homeTeam) : null;
+  const awayKit = showLineupDetail ? resolveKit(awayTeam) : null;
+  const homeScore = showLineupDetail ? (match.home_score ?? selectedMatch?.home_score ?? '—') : '—';
+  const awayScore = showLineupDetail ? (match.away_score ?? selectedMatch?.away_score ?? '—') : '—';
+  const matchStart = showLineupDetail ? (match.start_time || featured.start_time) : null;
   const kickoffTimeDisplay =
     matchStart && hasMeaningfulTime(matchStart) ? formatKickoffSAST(matchStart) : '';
 
@@ -1029,19 +1039,39 @@ const MatchLineups = ({ leagueId, leagueName }) => {
         width: '100%',
         maxWidth: '100%',
         mx: 0,
-        p: { xs: 1.25, sm: 2.5, md: 3.5 },
         boxSizing: 'border-box',
         overflowX: 'hidden',
+        bgcolor: 'transparent',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: { xs: 'calc(100svh - 180px)', sm: 'calc(100vh - 200px)' },
       }}
     >
       <LineupScopeNav scope={lineupScope} onChange={setLineupScope} />
-      <MatchSelectBar
-        matches={matches}
-        selectedEventId={selectedEventId}
-        onChange={setSelectedEventId}
-      />
 
-      {/* Match hero — prediction-card style, flush top like History */}
+      {matchesLoading ? (
+        <LineupTabLoader label="Loading matches..." />
+      ) : (
+      <Box sx={{ ...contentPadding, display: 'flex', flexDirection: 'column' }}>
+        {matchesError || !matches.length ? (
+          <Alert severity="info" sx={lineupAlertSx}>
+            {matchesError || `No lineup matches found for ${leagueName || 'this league'}.`}
+          </Alert>
+        ) : (
+          <>
+            <MatchSelectBar
+              matches={matches}
+              selectedEventId={selectedEventId}
+              onChange={setSelectedEventId}
+            />
+            {loading ? (
+              <LineupTabLoader label="Loading lineups..." />
+            ) : error || !lineups ? (
+              <Alert severity="warning" sx={{ ...lineupAlertSx, mt: 2, '& .MuiAlert-icon': { color: '#f59e0b' } }}>
+                {error || 'No lineup data for this match — try another fixture from the list.'}
+              </Alert>
+            ) : (
+              <>
       <Box
         className="prediction-card fade-in-up"
         sx={{
@@ -1306,6 +1336,12 @@ const MatchLineups = ({ leagueId, leagueName }) => {
             </Box>
           </Box>
         </>
+        )}
+              </>
+            )}
+          </>
+        )}
+      </Box>
       )}
     </Box>
   );

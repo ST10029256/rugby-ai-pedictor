@@ -2,6 +2,7 @@ import React, { useState, useEffect, memo } from 'react';
 import { Box } from '@mui/material';
 import RugbyBallLoader from './RugbyBallLoader';
 import { getLeagueMetrics } from '../firebase';
+import { predictionsWidgetSx } from '../utils/predictionsLayout';
 
 const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
   const [metrics, setMetrics] = useState({
@@ -115,14 +116,13 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
   if (metrics.loading) {
     return (
       <Box sx={{ 
-        width: '100%',
+        ...predictionsWidgetSx,
         minHeight: { xs: '200px', sm: '240px' },
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         py: 3,
-        boxSizing: 'border-box',
       }}>
         <RugbyBallLoader size={100} color="#10b981" compact label="Loading metrics..." />
       </Box>
@@ -130,6 +130,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
   }
 
   return (
+    <Box sx={predictionsWidgetSx}>
     <Box className="custom-metrics-container">
       <Box className="custom-metric">
         <Box className="metric-label">Accuracy</Box>
@@ -155,6 +156,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
         </Box>
         <Box className="metric-delta">Avg per Team</Box>
       </Box>
+    </Box>
     </Box>
   );
 });

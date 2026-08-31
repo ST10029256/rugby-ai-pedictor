@@ -127,7 +127,7 @@ def list_league_lineup_matches(
     include_upcoming: bool = False,
     match_scope: str = "historic",
     max_matches: int = 80,
-    max_pages: int = 3,
+    max_pages: int = 1,
     page_size: int = 200,
 ) -> Dict[str, Any]:
     """
@@ -182,6 +182,8 @@ def list_league_lineup_matches(
     for year in years:
         if len(matches) >= max_matches:
             break
+        if getattr(client, "rate_limited", False):
+            break
         tried.append(year)
         season_ids = client.resolve_season_ids_for_year(
             competition_id, year, local_league_id=lid
@@ -198,9 +200,13 @@ def list_league_lineup_matches(
             start = 0
             pages = 0
             while pages < max_pages and len(matches) < max_matches:
+                if getattr(client, "rate_limited", False):
+                    break
                 raw = client.fetch_season_summaries_raw(season_id, start=start, limit=page_size)
                 pages += 1
                 if not raw:
+                    if getattr(client, "rate_limited", False):
+                        break
                     break
                 summaries = raw.get("summaries")
                 if not isinstance(summaries, list) or not summaries:
@@ -257,4 +263,5 @@ def list_league_lineup_matches(
         "season_years_tried": tried,
         "successful_season": successful_season,
         "competition_id": competition_id,
+        "rate_limited": bool(getattr(client, "rate_limited", False)),
     }

@@ -1,4 +1,6 @@
 import { getPrimaryStandingsSeasonYear } from './season';
+import leagueTeamsFallback from './leagueTeamsFallback.json';
+import staticTeamLogos from './staticTeamLogos.json';
 
 /** Local league id → Highlightly league id (same as standings). */
 export const LEAGUE_ID_MAPPING = {
@@ -14,102 +16,78 @@ export const LEAGUE_ID_MAPPING = {
   5480: 124179,
 };
 
+export const INTERNATIONAL_LEAGUE_IDS = new Set([4986, 4574, 4714, 5479, 5480]);
+
 const PREM_LEAGUE_ID = 4414;
+
+/** Generated from rugby-ai-predictor/prediction/config.py — run scripts/export_static_team_logos.py */
+export const STATIC_TEAM_LOGO_FALLBACKS = staticTeamLogos;
 
 export const normTeamLogoKey = (name) =>
   String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
-/** Mirrors backend STATIC_TEAM_LOGOS — last-resort crest URLs. */
-export const STATIC_TEAM_LOGO_FALLBACKS = {
-  leinster: 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a4/LeinsterRugby_logo_2019.svg/500px-LeinsterRugby_logo_2019.svg.png',
-  'leinster rugby': 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a4/LeinsterRugby_logo_2019.svg/500px-LeinsterRugby_logo_2019.svg.png',
-  munster: 'https://upload.wikimedia.org/wikipedia/en/thumb/f/fb/Munster_Rugby_logo.svg/500px-Munster_Rugby_logo.svg.png',
-  'munster rugby': 'https://upload.wikimedia.org/wikipedia/en/thumb/f/fb/Munster_Rugby_logo.svg/500px-Munster_Rugby_logo.svg.png',
-  ulster: 'https://upload.wikimedia.org/wikipedia/en/thumb/c/c0/Ulster_Rugby_logo.svg/500px-Ulster_Rugby_logo.svg.png',
-  'ulster rugby': 'https://upload.wikimedia.org/wikipedia/en/thumb/c/c0/Ulster_Rugby_logo.svg/500px-Ulster_Rugby_logo.svg.png',
-  connacht: 'https://upload.wikimedia.org/wikipedia/en/thumb/6/67/ConnachtRugby_2017logo.svg/500px-ConnachtRugby_2017logo.svg.png',
-  'connacht rugby': 'https://upload.wikimedia.org/wikipedia/en/thumb/6/67/ConnachtRugby_2017logo.svg/500px-ConnachtRugby_2017logo.svg.png',
-  'glasgow warriors': 'https://upload.wikimedia.org/wikipedia/en/thumb/0/06/Glasgow_Warriors_Logo.svg/330px-Glasgow_Warriors_Logo.svg.png',
-  glasgow: 'https://upload.wikimedia.org/wikipedia/en/thumb/0/06/Glasgow_Warriors_Logo.svg/330px-Glasgow_Warriors_Logo.svg.png',
-  edinburgh: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e3/Edinburgh_Rugby_logo_2018.svg/500px-Edinburgh_Rugby_logo_2018.svg.png',
-  'edinburgh rugby': 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e3/Edinburgh_Rugby_logo_2018.svg/500px-Edinburgh_Rugby_logo_2018.svg.png',
-  'cardiff rugby': 'https://upload.wikimedia.org/wikipedia/en/1/1f/Cardiff_Rugby_logo_%282021%29.jpg',
-  cardiff: 'https://upload.wikimedia.org/wikipedia/en/1/1f/Cardiff_Rugby_logo_%282021%29.jpg',
-  ospreys: 'https://upload.wikimedia.org/wikipedia/en/thumb/2/2c/Ospreys_Rugby_logo.svg/500px-Ospreys_Rugby_logo.svg.png',
-  scarlets: 'https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Scarlets_logo.svg/330px-Scarlets_logo.svg.png',
-  dragons: 'https://upload.wikimedia.org/wikipedia/en/9/9b/Dragons_RFC_logo.png',
-  'dragons rfc': 'https://upload.wikimedia.org/wikipedia/en/9/9b/Dragons_RFC_logo.png',
-  benetton: 'https://upload.wikimedia.org/wikipedia/en/thumb/a/ac/Benetton_rugby.svg/500px-Benetton_rugby.svg.png',
-  'benetton rugby': 'https://upload.wikimedia.org/wikipedia/en/thumb/a/ac/Benetton_rugby.svg/500px-Benetton_rugby.svg.png',
-  'benetton treviso': 'https://highlightly.net/rugby/images/teams/334376.png',
-  zebre: 'https://upload.wikimedia.org/wikipedia/en/5/5d/Zebre_parma_logo23.png',
-  'zebre parma': 'https://upload.wikimedia.org/wikipedia/en/5/5d/Zebre_parma_logo23.png',
-  bulls: 'https://highlightly.net/rugby/images/teams/250978.png',
-  'vodacom bulls': 'https://highlightly.net/rugby/images/teams/250978.png',
-  'blue bulls': 'https://highlightly.net/rugby/images/teams/250978.png',
-  stormers: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/StormersRugbyClubLogo2025.svg/500px-StormersRugbyClubLogo2025.svg.png',
-  'dhl stormers': 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/StormersRugbyClubLogo2025.svg/500px-StormersRugbyClubLogo2025.svg.png',
-  sharks: 'https://upload.wikimedia.org/wikipedia/en/9/9f/Sharks_rugby_union_logo.png',
-  'hollywoodbets sharks': 'https://upload.wikimedia.org/wikipedia/en/9/9f/Sharks_rugby_union_logo.png',
-  'the sharks': 'https://highlightly.net/rugby/images/teams/257786.png',
-  lions: 'https://highlightly.net/rugby/images/teams/253531.png',
-  'emirates lions': 'https://highlightly.net/rugby/images/teams/253531.png',
-  'golden lions': 'https://highlightly.net/rugby/images/teams/253531.png',
-  blues: 'https://upload.wikimedia.org/wikipedia/en/c/cd/Auckland_Blues_rugby_logo.webp',
-  'auckland blues': 'https://upload.wikimedia.org/wikipedia/en/c/cd/Auckland_Blues_rugby_logo.webp',
-  chiefs: 'https://upload.wikimedia.org/wikipedia/en/8/87/Chiefs_rugby_union_logo.jpg',
-  crusaders: 'https://upload.wikimedia.org/wikipedia/en/thumb/b/bd/Crusaders_%28rugby_union%29_logo.png/330px-Crusaders_%28rugby_union%29_logo.png',
-  highlanders: 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a7/Highlanders_NZ_rugby_union_team_logo.svg/330px-Highlanders_NZ_rugby_union_team_logo.svg.png',
-  hurricanes: 'https://upload.wikimedia.org/wikipedia/en/thumb/2/28/Wellington_Hurricanes_logo.png/330px-Wellington_Hurricanes_logo.png',
-  brumbies: 'https://upload.wikimedia.org/wikipedia/en/thumb/5/53/Brumbies_Rugby_logo.svg/500px-Brumbies_Rugby_logo.svg.png',
-  reds: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e1/QLD_reds_logo.svg/500px-QLD_reds_logo.svg.png',
-  'queensland reds': 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e1/QLD_reds_logo.svg/500px-QLD_reds_logo.svg.png',
-  waratahs: 'https://upload.wikimedia.org/wikipedia/en/thumb/6/6f/Waratahs_logo.svg/500px-Waratahs_logo.svg.png',
-  rebels: 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a3/Melbourne_Rebels_logo.svg/330px-Melbourne_Rebels_logo.svg.png',
-  'western force': 'https://upload.wikimedia.org/wikipedia/en/0/01/Western_force_rugby_logo.png',
-  'fijian drua': 'https://upload.wikimedia.org/wikipedia/en/thumb/9/9c/FijianDruaLogo.svg/250px-FijianDruaLogo.svg.png',
-  'moana pasifika': 'https://upload.wikimedia.org/wikipedia/en/2/20/Moana_Pasifika_logo.jpg',
-  'northampton saints': 'https://highlightly.net/rugby/images/teams/56099.png',
-  'bath rugby': 'https://highlightly.net/rugby/images/teams/50142.png',
-  bath: 'https://highlightly.net/rugby/images/teams/50142.png',
-  'exeter chiefs': 'https://highlightly.net/rugby/images/teams/51844.png',
-  'leicester tigers': 'https://highlightly.net/rugby/images/teams/54397.png',
-  saracens: 'https://highlightly.net/rugby/images/teams/57801.png',
-  'bristol bears': 'https://highlightly.net/rugby/images/teams/50993.png',
-  'sale sharks': 'https://highlightly.net/rugby/images/teams/56950.png',
-  'gloucester rugby': 'https://highlightly.net/rugby/images/teams/52695.png',
-  harlequins: 'https://highlightly.net/rugby/images/teams/53546.png',
-  'newcastle falcons': 'https://highlightly.net/rugby/images/teams/69715.png',
-  'stade toulousain': 'https://highlightly.net/rugby/images/teams/91841.png',
-  toulouse: 'https://highlightly.net/rugby/images/teams/91841.png',
-  montpellier: 'https://highlightly.net/rugby/images/teams/87586.png',
-  'stade francais': 'https://highlightly.net/rugby/images/teams/90990.png',
-  'racing 92': 'https://highlightly.net/rugby/images/teams/89288.png',
-  'stade rochelais': 'https://highlightly.net/rugby/images/teams/85884.png',
-  'la rochelle': 'https://highlightly.net/rugby/images/teams/85884.png',
-  clermont: 'https://highlightly.net/rugby/images/teams/85033.png',
-  'union bordeaux': 'https://highlightly.net/rugby/images/teams/82480.png',
-  bordeaux: 'https://highlightly.net/rugby/images/teams/82480.png',
-  toulon: 'https://highlightly.net/rugby/images/teams/88437.png',
-  castres: 'https://highlightly.net/rugby/images/teams/84182.png',
-  lyon: 'https://highlightly.net/rugby/images/teams/86735.png',
-  bayonne: 'https://highlightly.net/rugby/images/teams/81629.png',
-  perpignan: 'https://highlightly.net/rugby/images/teams/102904.png',
-  england: 'https://media.api-sports.io/rugby/teams/386.png',
-  france: 'https://media.api-sports.io/rugby/teams/387.png',
-  ireland: 'https://media.api-sports.io/rugby/teams/388.png',
-  italy: 'https://media.api-sports.io/rugby/teams/389.png',
-  scotland: 'https://media.api-sports.io/rugby/teams/390.png',
-  wales: 'https://media.api-sports.io/rugby/teams/391.png',
-  argentina: 'https://media.api-sports.io/rugby/teams/460.png',
-  australia: 'https://media.api-sports.io/rugby/teams/461.png',
-  'new zealand': 'https://media.api-sports.io/rugby/teams/465.png',
-  'south africa': 'https://media.api-sports.io/rugby/teams/467.png',
-  fiji: 'https://media.api-sports.io/rugby/teams/28.png',
-  japan: 'https://media.api-sports.io/rugby/teams/463.png',
+export const stripClubSuffix = (name) =>
+  normTeamLogoKey(name)
+    .replace(/\b(rugby union|rugby|rfc|fc|rc|ps)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+export const compactTeamKey = (name) => stripClubSuffix(name).replace(/\s+/g, '');
+
+/** Canonical key for deduping Portugal vs Portugal Rugby, etc. */
+export const canonicalTeamKey = (name) => compactTeamKey(name);
+
+const INTL_FRANCHISE_TO_NATIONAL = {
+  fijiandrua: 'fiji',
+};
+
+export const pickPreferredTeamName = (names) =>
+  [...names].sort((a, b) => {
+    const aHasRugby = /\brugby\b/i.test(a) ? 1 : 0;
+    const bHasRugby = /\brugby\b/i.test(b) ? 1 : 0;
+    if (aHasRugby !== bHasRugby) return aHasRugby - bHasRugby;
+    return a.length - b.length;
+  })[0];
+
+export const shouldSkipIntlFranchiseDuplicate = (name, leagueId, presentKeys) => {
+  if (!INTERNATIONAL_LEAGUE_IDS.has(Number(leagueId))) return false;
+  const key = compactTeamKey(name);
+  const national = INTL_FRANCHISE_TO_NATIONAL[key];
+  return Boolean(national && presentKeys.has(national));
+};
+
+/** Merge duplicate sides (same canonical key) and prefer clean display names. */
+export const dedupeTeams = (teams, leagueId = null) => {
+  const map = new Map();
+  const presentKeys = new Set();
+
+  for (const team of teams || []) {
+    const key = canonicalTeamKey(team.name);
+    if (!key) continue;
+    if (shouldSkipIntlFranchiseDuplicate(team.name, leagueId, presentKeys)) continue;
+
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        ...team,
+        name: String(team.name).trim(),
+        aliases: [String(team.name).trim()],
+      });
+      presentKeys.add(key);
+      continue;
+    }
+
+    existing.aliases = [...new Set([...existing.aliases, String(team.name).trim()])];
+    if (!existing.logo && team.logo) existing.logo = team.logo;
+    existing.name = pickPreferredTeamName([existing.name, team.name]);
+  }
+
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
 };
 
 const isBrokenPremLogoUrl = (url, leagueId) => {
@@ -122,12 +100,12 @@ const logoKeyVariants = (teamName) => {
   const key = normTeamLogoKey(teamName);
   if (!key) return [];
   const variants = [key];
-  const stripped = key.replace(/\b(rugby|fc|rc|rfc)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  const stripped = stripClubSuffix(teamName);
   if (stripped && stripped !== key) variants.push(stripped);
   const words = stripped.split(/\s+/).filter(Boolean);
   if (words.length >= 2) variants.push(words.slice(0, 2).join(' '));
   if (words.length >= 1) variants.push(words[0]);
-  return [...new Set(variants)];
+  return [...new Set(variants.filter(Boolean))];
 };
 
 export const resolveStaticTeamLogoUrl = (teamName, leagueId = null) => {
@@ -149,8 +127,9 @@ export const buildTeamLogoMapFromStandings = (standings) => {
       const name = team.name || team.team_name || team.strTeam || row.teamName;
       const logo = team.logo || team.badge || team.image || row.logo || row.badge;
       if (!name || !logo) continue;
-      const key = normTeamLogoKey(name);
-      if (key && !map[key]) map[key] = logo;
+      for (const variant of logoKeyVariants(name)) {
+        if (variant && !map[variant]) map[variant] = logo;
+      }
     }
   }
   return map;
@@ -170,16 +149,87 @@ const getLicenseCacheKey = (sportsdbLeagueId, highlightlyLeagueId) => {
   return `standings_cache_v5::${license}::sportsdb_${sportsdbLeagueId}::hl_${highlightlyLeagueId}`;
 };
 
-export const readStandingsLogoCache = (leagueId) => {
+export const readStandingsCache = (leagueId) => {
   try {
     const hlId = LEAGUE_ID_MAPPING[Number(leagueId)];
-    if (!hlId) return {};
+    if (!hlId) return null;
     const raw = localStorage.getItem(getLicenseCacheKey(leagueId, hlId));
-    if (!raw) return {};
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return buildTeamLogoMapFromStandings(parsed?.standings);
+    if (!parsed?.standings) return null;
+    return parsed;
   } catch (e) {
-    return {};
+    return null;
+  }
+};
+
+export const readStandingsLogoCache = (leagueId) => {
+  const cached = readStandingsCache(leagueId);
+  if (!cached?.standings) return {};
+  return buildTeamLogoMapFromStandings(cached.standings);
+};
+
+/** Pull team rows from a standings payload (SportRadar / Highlightly shape). */
+export const extractTeamsFromStandings = (standings, source = 'standings') => {
+  const out = [];
+  const seen = new Set();
+  if (!standings || !Array.isArray(standings.groups)) return out;
+
+  for (const group of standings.groups) {
+    const rows = group?.standings || group?.teams || [];
+    for (const row of rows) {
+      const team = row?.team || row || {};
+      const name = team.name || team.team_name || team.strTeam || row.teamName;
+      if (!name) continue;
+      const key = canonicalTeamKey(name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        name: String(name).trim(),
+        logo:
+          team.logo ||
+          team.badge ||
+          team.image ||
+          team.strTeamBadge ||
+          row.logo ||
+          row.badge ||
+          null,
+        source,
+      });
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+};
+
+/** Offline roster when standings / fixtures APIs are slow or empty. */
+export const getStaticLeagueTeams = (leagueId) => {
+  const names = leagueTeamsFallback[String(Number(leagueId))];
+  if (!Array.isArray(names) || !names.length) return [];
+  return names.map((name) => ({
+    name: String(name).trim(),
+    logo: resolveStaticTeamLogoUrl(name, leagueId),
+    source: 'static',
+  }));
+};
+
+export const mergeTeamsIntoMap = (teamMap, teams, source = null) => {
+  for (const team of teams || []) {
+    const name = team?.name;
+    if (!name) continue;
+    const key = canonicalTeamKey(name);
+    if (!key) continue;
+    const existing = teamMap.get(key);
+    if (existing) {
+      if (!existing.logo && team.logo) {
+        teamMap.set(key, { ...existing, logo: team.logo });
+      }
+      continue;
+    }
+    teamMap.set(key, {
+      name: String(name).trim(),
+      logo: team.logo || null,
+      source: source || team.source || 'unknown',
+    });
   }
 };
 
@@ -196,15 +246,31 @@ export const lookupTeamLogoInMap = (teamName, logoMap = {}) => {
   return null;
 };
 
-/**
- * Resolve crest URL: standings map first, then static fallbacks.
- */
 export const resolveTeamLogoUrl = (teamName, { leagueId = null, logoMap = {} } = {}) => {
   const fromStandings = lookupTeamLogoInMap(teamName, logoMap);
   if (fromStandings && !isBrokenPremLogoUrl(fromStandings, leagueId)) {
     return fromStandings;
   }
   return resolveStaticTeamLogoUrl(teamName, leagueId);
+};
+
+/** Ordered crest URLs — try each in sequence when an image fails to load. */
+export const buildTeamLogoCandidates = (
+  teamName,
+  { leagueId = null, logoMap = {}, explicitLogo = null } = {}
+) => {
+  const candidates = [];
+  const add = (url) => {
+    if (!url || typeof url !== 'string') return;
+    if (isBrokenPremLogoUrl(url, leagueId)) return;
+    if (!candidates.includes(url)) candidates.push(url);
+  };
+
+  add(explicitLogo);
+  add(lookupTeamLogoInMap(teamName, logoMap));
+  add(resolveStaticTeamLogoUrl(teamName, leagueId));
+
+  return candidates;
 };
 
 export const getHighlightlyLeagueId = (leagueId) => LEAGUE_ID_MAPPING[Number(leagueId)] || null;

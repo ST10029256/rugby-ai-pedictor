@@ -21,6 +21,12 @@ service cloud.firestore {
       allow read: if true;
       allow write: if false;
     }
+
+    // Server-written standings cache (client listens for live table updates)
+    match /standings_cache_v1/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
     
     // User-specific data (if you add authentication later)
     match /users/{userId} {

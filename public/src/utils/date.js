@@ -243,6 +243,12 @@ function getPremiershipOverrideKickoff(match, leagueId) {
   return `${datePart}T${hhmm}:00+02:00`;
 }
 
+export function formatKickoffSAST(dateLike) {
+  if (!hasMeaningfulTime(dateLike)) return '';
+  const time = formatSASTTimePM(dateLike);
+  return time ? `${time} SAST` : '';
+}
+
 export function getKickoffAtFromMatch(match, fallbackLeagueId = null) {
   if (!match || typeof match !== 'object') return null;
   const leagueId = Number(fallbackLeagueId ?? match?.league_id ?? 0);

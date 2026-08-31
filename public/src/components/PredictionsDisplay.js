@@ -1,7 +1,8 @@
 import React, { memo, useEffect, useMemo } from 'react';
 import { Box, Typography, Grid } from '@mui/material';
 import { MEDIA_URLS } from '../utils/storageUrls';
-import { hasMeaningfulTime, formatSASTTimePM, formatSASTDateYMD } from '../utils/date';
+import { hasMeaningfulTime, formatKickoffSAST, formatSASTDateYMD } from '../utils/date';
+import { predictionsWidgetSx } from '../utils/predictionsLayout';
 
 const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagueName }) {
   // Log image loading status
@@ -134,19 +135,10 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
 
   return (
     <Box sx={{ 
-      width: '100%', 
-      maxWidth: { xs: 420, sm: '100%', md: 900, lg: '1600px' }, 
-      boxSizing: 'border-box',
+      ...predictionsWidgetSx,
       display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center',
-      mx: 'auto',
-      '@media (min-width: 1440px)': {
-        maxWidth: '1800px',
-      },
-      '@media (min-width: 1920px)': {
-        maxWidth: '2000px',
-      },
+      alignItems: 'stretch',
     }}>
       {/* Predictions grouped by date */}
       {Object.keys(predictionsByDate)
@@ -181,7 +173,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
               else if (intensity.includes('Wide')) intensityClass = 'intensity-decisive';
               const kickoffTimeDisplay =
                 prediction.kickoff_at && hasMeaningfulTime(prediction.kickoff_at)
-                  ? formatSASTTimePM(prediction.kickoff_at)
+                  ? formatKickoffSAST(prediction.kickoff_at)
                   : '';
 
               // Display guard: if shown scores are equal, force Draw in UI.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Container,
@@ -17,7 +17,6 @@ import {
   Paper,
   useMediaQuery,
   useTheme,
-  Fade,
   Slide,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -38,6 +37,7 @@ const SubscriptionPage = ({ onBack }) => {
   const [expiresAt, setExpiresAt] = useState('');
   const [emailError, setEmailError] = useState('');
   const [emailSent, setEmailSent] = useState(true);
+  const scrollLockRef = useRef(0);
 
   const plans = [
     {
@@ -97,8 +97,20 @@ const SubscriptionPage = ({ onBack }) => {
     setName('');
   };
 
-  const handleCloseModal = () => {
-    setOpenModal(false);
+  const unlockScroll = useCallback(() => {
+    const body = document.body;
+    const html = document.documentElement;
+    if (body.style.position !== 'fixed') return;
+    const scrollY = scrollLockRef.current;
+    body.style.position = '';
+    body.style.top = '';
+    body.style.width = '';
+    body.style.overflow = '';
+    html.style.overflow = '';
+    window.scrollTo(0, scrollY);
+  }, []);
+
+  const resetModalState = useCallback(() => {
     setSelectedPlan(null);
     setEmail('');
     setName('');
@@ -108,34 +120,31 @@ const SubscriptionPage = ({ onBack }) => {
     setExpiresAt('');
     setEmailError('');
     setEmailSent(true);
+  }, []);
+
+  const handleCloseModal = () => {
+    setOpenModal(false);
   };
 
-  // Prevent background scrolling when modal is open
+  const handleModalExited = () => {
+    resetModalState();
+    unlockScroll();
+  };
+
+  // Lock background scroll while modal is open; unlock only after exit animation
   useEffect(() => {
-    if (openModal) {
-      // Store original scroll position
-      const scrollY = window.scrollY;
-      const body = document.body;
-      const html = document.documentElement;
-      
-      // Lock scroll
-      body.style.position = 'fixed';
-      body.style.top = `-${scrollY}px`;
-      body.style.width = '100%';
-      body.style.overflow = 'hidden';
-      html.style.overflow = 'hidden';
-      
-      return () => {
-        // Restore scroll when modal closes
-        body.style.position = '';
-        body.style.top = '';
-        body.style.width = '';
-        body.style.overflow = '';
-        html.style.overflow = '';
-        window.scrollTo(0, scrollY);
-      };
-    }
+    if (!openModal) return;
+    scrollLockRef.current = window.scrollY;
+    const body = document.body;
+    const html = document.documentElement;
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollLockRef.current}px`;
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    html.style.overflow = 'hidden';
   }, [openModal]);
+
+  useEffect(() => () => unlockScroll(), [unlockScroll]);
 
   const handlePayment = async (e) => {
     e.preventDefault();
@@ -521,6 +530,7 @@ const SubscriptionPage = ({ onBack }) => {
         TransitionProps={{
           direction: 'down',
           timeout: { enter: 300, exit: 250 },
+          onExited: handleModalExited,
         }}
         PaperProps={{
           sx: {
@@ -532,42 +542,12 @@ const SubscriptionPage = ({ onBack }) => {
             m: { xs: 2, md: 2 },
             width: { xs: 'calc(100% - 32px)', md: 'auto' },
             maxWidth: { xs: 'calc(100% - 32px)', md: '600px' },
-            transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
-            '&.MuiDialog-paper': {
-              '&.MuiDialog-paperEntering': {
-                animation: 'modalEnter 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
-              },
-              '&.MuiDialog-paperExiting': {
-                animation: 'modalExit 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-              },
-            },
-            '@keyframes modalEnter': {
-              '0%': {
-                opacity: 0,
-                transform: 'scale(0.9) translateY(-30px)',
-              },
-              '100%': {
-                opacity: 1,
-                transform: 'scale(1) translateY(0)',
-              },
-            },
-            '@keyframes modalExit': {
-              '0%': {
-                opacity: 1,
-                transform: 'scale(1) translateY(0)',
-              },
-              '100%': {
-                opacity: 0,
-                transform: 'scale(0.95) translateY(-20px)',
-              },
-            },
           },
         }}
         sx={{
           backdropFilter: 'blur(10px)',
           '& .MuiBackdrop-root': {
             backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            transition: 'opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           },
         }}
       >
@@ -607,6 +587,7 @@ const SubscriptionPage = ({ onBack }) => {
           </Box>
           <IconButton
             onClick={handleCloseModal}
+            aria-label="Close"
             sx={{
               position: 'absolute',
               top: { xs: 8, md: 16 },
@@ -617,8 +598,6 @@ const SubscriptionPage = ({ onBack }) => {
               height: { xs: 36, md: 40 },
               borderRadius: '12px',
               border: '1px solid rgba(255, 255, 255, 0.1)',
-              transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-              transform: 'scale(1)',
               flexShrink: 0,
               zIndex: 1,
               WebkitTapHighlightColor: 'transparent',
@@ -626,40 +605,7 @@ const SubscriptionPage = ({ onBack }) => {
               '&:hover': {
                 background: 'rgba(239, 68, 68, 0.2)',
                 borderColor: 'rgba(239, 68, 68, 0.4)',
-                transform: 'rotate(90deg) scale(1.1)',
-                boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
                 color: '#fca5a5',
-              },
-              '&:active': {
-                background: 'rgba(239, 68, 68, 0.3)',
-                borderColor: 'rgba(239, 68, 68, 0.5)',
-                transform: 'rotate(90deg) scale(0.9)',
-                boxShadow: '0 2px 8px rgba(239, 68, 68, 0.4)',
-                color: '#fca5a5',
-              },
-              '&:focus': {
-                background: 'rgba(239, 68, 68, 0.2)',
-                borderColor: 'rgba(239, 68, 68, 0.4)',
-                transform: 'rotate(90deg) scale(1.05)',
-              },
-              '& svg': {
-                transition: 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-              },
-              '&:hover svg, &:active svg, &:focus svg': {
-                transform: 'scale(1.1)',
-              },
-              // Mobile-specific: ensure animation works on touch
-              '@media (hover: none) and (pointer: coarse)': {
-                '&:active': {
-                  background: 'rgba(239, 68, 68, 0.3)',
-                  borderColor: 'rgba(239, 68, 68, 0.5)',
-                  transform: 'rotate(90deg) scale(0.9)',
-                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.4)',
-                  color: '#fca5a5',
-                  '& svg': {
-                    transform: 'scale(1.1)',
-                  },
-                },
               },
             }}
           >

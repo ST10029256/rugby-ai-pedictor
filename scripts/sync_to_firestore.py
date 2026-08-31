@@ -40,6 +40,8 @@ rugby_predictor_root = os.path.join(project_root, "rugby-ai-predictor")
 if rugby_predictor_root not in sys.path:
     sys.path.insert(0, rugby_predictor_root)
 
+from prediction.team_display_names import display_team_name_for_league
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -92,34 +94,44 @@ def get_existing_match_ids(firestore_db: Any, batch_size: int = 1000) -> Set[str
         return set()
 
 
-def get_existing_team_ids(firestore_db: Any) -> Set[int]:
-    """Get all existing team IDs from Firestore"""
-    logger.info("Fetching existing team IDs from Firestore...")
-    existing_ids = set()
-    
+def get_existing_teams(firestore_db: Any) -> Dict[int, Dict[str, Any]]:
+    """Fetch existing team documents, keyed by id."""
+    logger.info("Fetching existing teams from Firestore...")
+    existing: Dict[int, Dict[str, Any]] = {}
+
     try:
         teams_ref = firestore_db.collection('teams')
         for doc in teams_ref.stream():
-            data = doc.to_dict()
+            data = doc.to_dict() or {}
             if 'id' in data:
-                existing_ids.add(data['id'])
-        
-        logger.info(f"Found {len(existing_ids)} existing teams in Firestore")
-        return existing_ids
-        
+                existing[data['id']] = data
+
+        logger.info(f"Found {len(existing)} existing teams in Firestore")
+        return existing
+
     except Exception as e:
-        logger.error(f"Error fetching existing team IDs: {e}")
-        return set()
+        logger.error(f"Error fetching existing teams: {e}")
+        return {}
 
 
-def sync_teams(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_team_ids: Set[int]) -> int:
-    """Sync teams from SQLite to Firestore, skipping existing ones"""
+def sync_teams(
+    sqlite_conn: sqlite3.Connection,
+    firestore_db: Any,
+    existing_teams: Dict[int, Dict[str, Any]],
+) -> int:
+    """Sync teams from SQLite to Firestore.
+
+    Existing documents are refreshed when the source row has changed, so
+    corrections such as Currie Cup "Bulls" becoming "Blue Bulls" reach the app
+    instead of being skipped forever.
+    """
     cursor = sqlite_conn.cursor()
     cursor.execute("SELECT * FROM team")
     teams = cursor.fetchall()
     
     columns = [description[0] for description in cursor.description]
     synced = 0
+    updated = 0
     skipped = 0
     
     batch = firestore_db.batch()
@@ -129,16 +141,24 @@ def sync_teams(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_team
     for row in teams:
         team_data = dict(zip(columns, row))
         team_id = team_data['id']
-        
-        # Skip if already exists
-        if team_id in existing_team_ids:
-            skipped += 1
-            continue
-        
+
+        existing = existing_teams.get(team_id)
+        if existing is not None:
+            changed = any(
+                existing.get(field) != team_data.get(field)
+                for field in ('name', 'league_id', 'alternate_name', 'country')
+                if team_data.get(field) is not None
+            )
+            if not changed:
+                skipped += 1
+                continue
+            updated += 1
+
         team_id_str = str(team_id)
         firestore_data = {
             'id': team_id,
             'name': team_data.get('name', ''),
+            'league_id': team_data.get('league_id'),
             'sport': team_data.get('sport', 'Rugby'),
             'alternate_name': team_data.get('alternate_name'),
             'country': team_data.get('country'),
@@ -164,7 +184,10 @@ def sync_teams(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_team
     if batch_count > 0:
         batch.commit()
     
-    logger.info(f"✅ Teams: {synced} synced, {skipped} already exist")
+    logger.info(
+        f"✅ Teams: {synced} written ({updated} refreshed, {synced - updated} new), "
+        f"{skipped} unchanged"
+    )
     return synced
 
 
@@ -188,6 +211,7 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
             e.id,
             e.league_id,
             e.date_event,
+            e.timestamp,
             e.home_team_id,
             e.away_team_id,
             e.home_score,
@@ -219,6 +243,14 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
     for row in matches:
         match_data = dict(zip(columns, row))
         event_id = str(match_data['id'])
+        hl_match_id = match_data.get('highlightly_match_id')
+        try:
+            hl_match_id_int = int(hl_match_id) if hl_match_id is not None else None
+        except (TypeError, ValueError):
+            hl_match_id_int = None
+        # Prefer Highlightly IDs as document keys to avoid collisions with unrelated
+        # local autoincrement event IDs already present in Firestore.
+        doc_id = str(hl_match_id_int) if hl_match_id_int else event_id
         
         # Parse date
         date_event = match_data.get('date_event')
@@ -232,21 +264,39 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
                     except:
                         date_event = None
         
+        timestamp_raw = match_data.get('timestamp')
+        kickoff_iso = None
+        if timestamp_raw:
+            try:
+                from prediction.kickoff_times import normalize_kickoff_iso, has_meaningful_kickoff_time
+
+                if has_meaningful_kickoff_time(timestamp_raw):
+                    kickoff_iso = normalize_kickoff_iso(timestamp_raw)
+            except Exception:
+                kickoff_iso = str(timestamp_raw) if timestamp_raw else None
+
         firestore_data = {
-            'id': match_data['id'],
+            'id': hl_match_id_int or match_data['id'],
             'league_id': match_data.get('league_id'),
             'home_team_id': match_data.get('home_team_id'),
             'away_team_id': match_data.get('away_team_id'),
-            'home_team_name': match_data.get('home_team_name'),
-            'away_team_name': match_data.get('away_team_name'),
+            'home_team_name': display_team_name_for_league(
+                match_data.get('home_team_name'), match_data.get('league_id')
+            ),
+            'away_team_name': display_team_name_for_league(
+                match_data.get('away_team_name'), match_data.get('league_id')
+            ),
             'date_event': date_event if date_event else match_data.get('date_event'),
+            'timestamp': kickoff_iso or timestamp_raw,
+            'kickoff_at': kickoff_iso,
             'home_score': match_data.get('home_score'),
             'away_score': match_data.get('away_score'),
             'season': match_data.get('season'),
             'round': match_data.get('round'),
             'venue': match_data.get('venue'),
             'status': match_data.get('status'),
-            'highlightly_match_id': match_data.get('highlightly_match_id'),
+            'highlightly_match_id': hl_match_id_int or match_data.get('highlightly_match_id'),
+            'sqlite_event_id': match_data['id'],
             'synced_at': SERVER_TIMESTAMP if SERVER_TIMESTAMP else datetime.now()
         }
         
@@ -254,28 +304,72 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
         firestore_data = {k: v for k, v in firestore_data.items() 
                          if v is not None or k in ['home_score', 'away_score']}
         
-        ref = firestore_db.collection('matches').document(event_id)
+        ref = firestore_db.collection('matches').document(doc_id)
         
         # Check if match already exists
-        if event_id in existing_match_ids:
-            # Check if we need to update scores
+        if doc_id in existing_match_ids:
+            # Check if we need to update scores / kickoffs
             try:
                 existing_doc = ref.get()
                 if existing_doc.exists:
-                    existing_data = existing_doc.to_dict()
+                    existing_data = existing_doc.to_dict() or {}
+                    # Never overwrite an unrelated fixture that happens to share a local id.
+                    existing_league = existing_data.get('league_id')
+                    new_league = firestore_data.get('league_id')
+                    if (
+                        existing_league is not None
+                        and new_league is not None
+                        and int(existing_league) != int(new_league)
+                        and not hl_match_id_int
+                    ):
+                        skipped += 1
+                        continue
+
                     existing_home_score = existing_data.get('home_score')
                     existing_away_score = existing_data.get('away_score')
                     new_home_score = firestore_data.get('home_score')
                     new_away_score = firestore_data.get('away_score')
                     
-                    # Update if we have new scores (game completed)
+                    # Update if we have new scores (game completed) and/or better kickoff times.
+                    patch = {}
                     if (new_home_score is not None and new_away_score is not None and
                         (existing_home_score is None or existing_away_score is None)):
-                        batch.update(ref, {
-                            'home_score': new_home_score,
-                            'away_score': new_away_score,
-                            'synced_at': SERVER_TIMESTAMP if SERVER_TIMESTAMP else datetime.now()
-                        })
+                        patch['home_score'] = new_home_score
+                        patch['away_score'] = new_away_score
+
+                    new_kickoff = firestore_data.get('kickoff_at') or firestore_data.get('timestamp')
+                    existing_kickoff = existing_data.get('kickoff_at') or existing_data.get('timestamp')
+                    try:
+                        from prediction.kickoff_times import has_meaningful_kickoff_time
+                        new_has_time = has_meaningful_kickoff_time(new_kickoff)
+                        existing_has_time = has_meaningful_kickoff_time(existing_kickoff)
+                    except Exception:
+                        new_has_time = bool(new_kickoff)
+                        existing_has_time = bool(existing_kickoff)
+                    if new_has_time and (not existing_has_time or str(new_kickoff) != str(existing_kickoff)):
+                        if firestore_data.get('kickoff_at'):
+                            patch['kickoff_at'] = firestore_data['kickoff_at']
+                        if firestore_data.get('timestamp'):
+                            patch['timestamp'] = firestore_data['timestamp']
+                        if firestore_data.get('date_event') is not None:
+                            patch['date_event'] = firestore_data['date_event']
+
+                    # Keep team/league metadata aligned when this is clearly the same fixture.
+                    for key in (
+                        'home_team_name',
+                        'away_team_name',
+                        'home_team_id',
+                        'away_team_id',
+                        'league_id',
+                        'highlightly_match_id',
+                        'sqlite_event_id',
+                    ):
+                        if firestore_data.get(key) is not None and existing_data.get(key) != firestore_data.get(key):
+                            patch[key] = firestore_data[key]
+
+                    if patch:
+                        patch['synced_at'] = SERVER_TIMESTAMP if SERVER_TIMESTAMP else datetime.now()
+                        batch.update(ref, patch)
                         updated += 1
                         batch_count += 1
                     else:
@@ -286,7 +380,7 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
                     synced += 1
                     batch_count += 1
             except Exception as e:
-                logger.warning(f"Error checking existing match {event_id}: {e}")
+                logger.warning(f"Error checking existing match {doc_id}: {e}")
                 # If check fails, try to add it
                 batch.set(ref, firestore_data)
                 synced += 1
@@ -296,6 +390,34 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
             batch.set(ref, firestore_data)
             synced += 1
             batch_count += 1
+            existing_match_ids.add(doc_id)
+
+        # If we wrote under Highlightly id, remove any leftover sqlite-id clone doc
+        # so nightly sync cannot leave duplicate fixtures in the app.
+        if hl_match_id_int and event_id != doc_id and event_id in existing_match_ids:
+            clone_ref = firestore_db.collection('matches').document(event_id)
+            try:
+                clone_doc = clone_ref.get()
+                if clone_doc.exists:
+                    clone_data = clone_doc.to_dict() or {}
+                    clone_hl = clone_data.get('highlightly_match_id')
+                    same_fixture = (
+                        str(clone_hl) == str(hl_match_id_int)
+                        or (
+                            clone_data.get('league_id') == firestore_data.get('league_id')
+                            and str(clone_data.get('home_team_name') or '').lower()
+                            == str(firestore_data.get('home_team_name') or '').lower()
+                            and str(clone_data.get('away_team_name') or '').lower()
+                            == str(firestore_data.get('away_team_name') or '').lower()
+                        )
+                    )
+                    if same_fixture:
+                        batch.delete(clone_ref)
+                        batch_count += 1
+                        existing_match_ids.discard(event_id)
+                        logger.info(f"Pruned sqlite-id clone match doc {event_id} (canonical {doc_id})")
+            except Exception as prune_err:
+                logger.debug(f"Clone prune skipped for {event_id}: {prune_err}")
         
         # Commit batch if it reaches max size
         if batch_count >= max_batch_size:
@@ -313,6 +435,119 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
         'updated': updated,
         'skipped': skipped
     }
+
+
+def prune_orphaned_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any) -> int:
+    """Delete match docs whose SQLite fixture is gone.
+
+    Deduplication removes fixtures from SQLite, but the documents this script
+    previously wrote for them stay behind and show up as duplicate matches in
+    the app. Only docs carrying a `sqlite_event_id` are considered, so records
+    created by anything other than this sync are left alone.
+    """
+    live_event_ids = {
+        int(r[0]) for r in sqlite_conn.execute("SELECT id FROM event")
+    }
+    if not live_event_ids:
+        logger.warning("SQLite has no events; skipping orphan prune")
+        return 0
+
+    deleted = 0
+    batch = firestore_db.batch()
+    batch_count = 0
+
+    for doc in firestore_db.collection('matches').stream():
+        data = doc.to_dict() or {}
+        raw = data.get('sqlite_event_id')
+        if raw is None:
+            continue
+        try:
+            event_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if event_id in live_event_ids:
+            continue
+
+        batch.delete(doc.reference)
+        batch_count += 1
+        deleted += 1
+        if batch_count >= 400:
+            batch.commit()
+            batch = firestore_db.batch()
+            batch_count = 0
+            logger.info(f"  Pruned {deleted} orphaned match docs...")
+
+    if batch_count > 0:
+        batch.commit()
+
+    logger.info(f"✅ Orphaned matches: {deleted} deleted")
+    return deleted
+
+
+def prune_upcoming_firestore_clones(firestore_db: Any, days_back: int = 2, days_ahead: int = 180) -> int:
+    """Delete upcoming non-canonical match docs (doc id != highlightly_match_id)."""
+    from datetime import timedelta, timezone as tz
+
+    try:
+        from prediction.config import LEAGUE_MAPPINGS
+        league_ids = list(LEAGUE_MAPPINGS.keys())
+    except Exception:
+        league_ids = [4414, 4430, 4446, 4551, 4574, 4714, 4986, 5069, 5479, 5480]
+
+    now = datetime.now(tz.utc)
+    start = now - timedelta(days=days_back)
+    end = now + timedelta(days=days_ahead)
+    deleted = 0
+    batch = firestore_db.batch()
+    batch_count = 0
+
+    for league_id in league_ids:
+        try:
+            docs = list(
+                firestore_db.collection('matches')
+                .where('league_id', '==', int(league_id))
+                .where('date_event', '>=', start)
+                .where('date_event', '<=', end)
+                .stream()
+            )
+        except Exception as exc:
+            logger.warning(f"Clone prune query failed for league {league_id}: {exc}")
+            continue
+
+        by_hl: Dict[str, list] = {}
+        for doc in docs:
+            data = doc.to_dict() or {}
+            hl = data.get('highlightly_match_id')
+            try:
+                hl_s = str(int(hl)) if hl is not None else ''
+            except (TypeError, ValueError):
+                hl_s = ''
+            if not hl_s:
+                continue
+            by_hl.setdefault(hl_s, []).append(doc)
+
+        for hl_s, group in by_hl.items():
+            canonical_exists = any(doc.id == hl_s for doc in group) or firestore_db.collection('matches').document(hl_s).get().exists
+            for doc in group:
+                if doc.id == hl_s:
+                    continue
+                # Always remove non-canonical clones. If no canonical exists yet,
+                # the clone is still unsafe (sqlite-id collision risk) and should go.
+                if canonical_exists or doc.id != hl_s:
+                    batch.delete(doc.reference)
+                    deleted += 1
+                    batch_count += 1
+                    logger.info(
+                        f"Pruned upcoming clone {doc.id} (HL {hl_s}, canonical={'yes' if canonical_exists else 'no'})"
+                    )
+                    if batch_count >= 400:
+                        batch.commit()
+                        batch = firestore_db.batch()
+                        batch_count = 0
+
+    if batch_count:
+        batch.commit()
+    return deleted
 
 
 def sync_leagues(sqlite_conn: sqlite3.Connection, firestore_db: Any) -> int:
@@ -373,6 +608,16 @@ def main():
     parser.add_argument('--skip-teams', action='store_true', help='Skip teams sync')
     parser.add_argument('--skip-matches', action='store_true', help='Skip matches sync')
     parser.add_argument('--skip-leagues', action='store_true', help='Skip leagues sync')
+    parser.add_argument(
+        '--skip-prune-clones',
+        action='store_true',
+        help='Skip pruning upcoming sqlite-id clone docs after match sync',
+    )
+    parser.add_argument(
+        '--skip-prune-orphans',
+        action='store_true',
+        help='Skip deleting match docs whose SQLite fixture no longer exists',
+    )
     
     args = parser.parse_args()
     
@@ -382,7 +627,7 @@ def main():
         return 1
     
     sqlite_conn = sqlite3.connect(args.db)
-    logger.info(f"✅ Connected to SQLite database: {args.db}")
+    logger.info(f"Connected to SQLite database: {args.db}")
     
     # Connect to Firestore
     if args.dry_run:
@@ -394,7 +639,7 @@ def main():
             logger.error("Install it with: pip install google-cloud-firestore")
             return 1
         firestore_db = firestore.Client(project=args.project_id)  # type: ignore
-        logger.info(f"✅ Connected to Firestore project: {args.project_id}")
+        logger.info(f"Connected to Firestore project: {args.project_id}")
     
     logger.info("\n" + "="*60)
     logger.info("Starting Firestore Sync (Duplicate-Aware)")
@@ -409,30 +654,41 @@ def main():
         existing_match_ids = set()
     
     if not args.dry_run and not args.skip_teams:
-        existing_team_ids = get_existing_team_ids(firestore_db)
+        existing_teams = get_existing_teams(firestore_db)
     else:
-        existing_team_ids = set()
+        existing_teams = {}
     
     # Sync data
     total_synced = 0
     total_updated = 0
+    total_pruned = 0
+    total_orphans = 0
     
     if not args.skip_leagues:
-        logger.info("\n📋 Syncing leagues...")
+        logger.info("\nSyncing leagues...")
         synced = sync_leagues(sqlite_conn, firestore_db) if not args.dry_run else 0
         total_synced += synced
     
     if not args.skip_teams:
-        logger.info("\n👥 Syncing teams...")
-        synced = sync_teams(sqlite_conn, firestore_db, existing_team_ids) if not args.dry_run else 0
+        logger.info("\nSyncing teams...")
+        synced = sync_teams(sqlite_conn, firestore_db, existing_teams) if not args.dry_run else 0
         total_synced += synced
     
     if not args.skip_matches:
-        logger.info("\n🏉 Syncing matches...")
+        logger.info("\nSyncing matches...")
         results = sync_matches(sqlite_conn, firestore_db, existing_match_ids) if not args.dry_run else {'synced': 0, 'updated': 0, 'skipped': 0}
         total_synced += results['synced']
         total_updated += results['updated']
-        logger.info(f"✅ Matches: {results['synced']} new, {results['updated']} updated, {results['skipped']} skipped")
+        logger.info(f"Matches: {results['synced']} new, {results['updated']} updated, {results['skipped']} skipped")
+
+        if not args.dry_run and not args.skip_prune_clones:
+            logger.info("\nPruning upcoming duplicate clone docs...")
+            total_pruned = prune_upcoming_firestore_clones(firestore_db)
+            logger.info(f"Pruned {total_pruned} upcoming clone docs")
+
+        if not args.dry_run and not args.skip_prune_orphans:
+            logger.info("\nPruning match docs with no SQLite fixture...")
+            total_orphans = prune_orphaned_matches(sqlite_conn, firestore_db)
     
     sqlite_conn.close()
     
@@ -441,6 +697,8 @@ def main():
     logger.info("Sync Complete!")
     logger.info(f"   Total synced: {total_synced}")
     logger.info(f"   Total updated: {total_updated}")
+    logger.info(f"   Total pruned clones: {total_pruned}")
+    logger.info(f"   Total pruned orphans: {total_orphans}")
     logger.info(f"   Duration: {duration:.1f}s")
     logger.info("="*60)
     

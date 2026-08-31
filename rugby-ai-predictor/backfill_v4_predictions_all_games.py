@@ -213,15 +213,15 @@ def main() -> None:
     if args.league_id is not None:
         sql += " AND e.league_id = ?"
         params.append(args.league_id)
-    if args.only_missing:
-        # Skip matches that already have a snapshot for this exact model version so
-        # daily runs only score newly completed games (full rebuilds omit this flag).
-        sql += """
+        if args.only_missing:
+            # Skip matches that already have ANY snapshot for this model version
+            # (pre_kickoff_live or historical_backfill). Never rewrite frozen live rows.
+            sql += """
           AND e.id NOT IN (
               SELECT match_id FROM prediction_snapshot WHERE model_version = ?
           )
         """
-        params.append(args.model_version)
+            params.append(args.model_version)
     sql += " ORDER BY e.date_event ASC, e.id ASC"
     if args.max_matches and args.max_matches > 0:
         sql += " LIMIT ?"

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple, Any
 from prediction.features import build_feature_table, FeatureConfig
 from prediction.sportdevs_client import SportDevsClient, extract_odds_features
+from prediction.team_identity import resolve_team_id
 from prediction.international_leagues import (
     has_own_or_linked_model,
     resolve_prediction_source_league,
@@ -446,21 +447,18 @@ class HybridPredictor:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Try to find teams by name (case-insensitive)
-            cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (home_team,))
-            home_result = cursor.fetchone()
-            if not home_result:
+            # Resolve within the competition: a bare name like "Bulls" means a
+            # different side in the Currie Cup than it does in the URC.
+            home_team_id = resolve_team_id(conn, home_team, league_id, create=False)
+            if home_team_id is None:
                 conn.close()
                 raise ValueError(f"Home team '{home_team}' not found in database")
-            home_team_id = home_result[0]
-            
-            cursor.execute("SELECT id FROM team WHERE LOWER(name) = LOWER(?) LIMIT 1", (away_team,))
-            away_result = cursor.fetchone()
-            if not away_result:
+
+            away_team_id = resolve_team_id(conn, away_team, league_id, create=False)
+            if away_team_id is None:
                 conn.close()
                 raise ValueError(f"Away team '{away_team}' not found in database")
-            away_team_id = away_result[0]
-            
+
             conn.close()
         
         # Get hybrid prediction

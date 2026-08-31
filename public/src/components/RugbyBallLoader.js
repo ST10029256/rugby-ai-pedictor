@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box } from '@mui/material';
 
-const RugbyBallLoader = ({ size = 120, color = '#10b981' }) => {
+const RugbyBallLoader = ({ size = 120, color = '#10b981', compact = false, label = 'Loading...' }) => {
   // Calculate post positions - ball needs to go through the gap
   const postWidth = 6;
   const gapWidth = size * 0.5; // Gap between posts (wider for better visibility)
@@ -20,8 +20,8 @@ const RugbyBallLoader = ({ size = 120, color = '#10b981' }) => {
         alignItems: 'center',
         justifyContent: 'center',
         width: '100%',
-        height: '100%', // Take full height of parent
-        minHeight: '400px', // Ensure minimum height for proper centering
+        height: compact ? 'auto' : '100%',
+        minHeight: compact ? 0 : '400px',
         position: 'relative',
         // Match HTML container exactly - centers content both horizontally and vertically
         // Global keyframes - Smooth diagonal arc from bottom-left to top-right, going HIGHER through crossbar
@@ -72,8 +72,8 @@ const RugbyBallLoader = ({ size = 120, color = '#10b981' }) => {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '32px',
-          transform: 'translateY(-5%)', // Move up slightly for better centering
+          gap: compact ? '24px' : '32px',
+          transform: compact ? 'none' : 'translateY(-5%)',
         }}
       >
         {/* Goal Posts Container */}
@@ -311,19 +311,21 @@ const RugbyBallLoader = ({ size = 120, color = '#10b981' }) => {
         })}
         </Box>
         
-        {/* Loading Text */}
-        <Box
-          sx={{
-            color: color,
-            fontSize: '0.875rem',
-            fontWeight: 500,
-            letterSpacing: '0.05em',
-            animation: 'pulse 2s ease-in-out infinite',
-            transform: 'translate(10%, 20%)',
-          }}
-        >
-          Loading...
-        </Box>
+        {label ? (
+          <Box
+            sx={{
+              color: color,
+              fontSize: compact ? '0.8125rem' : '0.875rem',
+              fontWeight: 500,
+              letterSpacing: '0.05em',
+              animation: 'pulse 2s ease-in-out infinite',
+              transform: compact ? 'none' : 'translate(10%, 20%)',
+              textAlign: 'center',
+            }}
+          >
+            {label}
+          </Box>
+        ) : null}
       </Box>
     </Box>
   );

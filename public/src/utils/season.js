@@ -5,13 +5,17 @@ export const CROSS_YEAR_LEAGUE_IDS = new Set([4446, 4414, 4430]);
 export const CROSS_YEAR_HIGHLIGHTLY_LEAGUE_IDS = new Set([65460, 11847, 14400]);
 
 /**
- * Return the Highlightly/API start-year for the currently active standings season.
+ * Return the start-year for the currently active (latest) standings season.
+ * Cross-year leagues (Aug–Jun) use the season start year; others use calendar year.
+ * Empty tables fall back to the previous year on the backend.
  */
 export function getPrimaryStandingsSeasonYear(leagueId, now = new Date()) {
+  const id = Number(leagueId);
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
-  if (CROSS_YEAR_LEAGUE_IDS.has(Number(leagueId))) {
-    return month <= 6 ? year - 1 : year;
+  if (CROSS_YEAR_LEAGUE_IDS.has(id)) {
+    // Aug-Jun leagues: Jan-Jul use the previous calendar year as the season start-year.
+    return month <= 7 ? year - 1 : year;
   }
   return year;
 }

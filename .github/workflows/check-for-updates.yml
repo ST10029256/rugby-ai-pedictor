@@ -31,7 +31,9 @@ on:
     paths:
       - 'scripts/detect_completed_matches.py'
       - 'scripts/enhanced_auto_update.py'
+      - 'scripts/fix_team_identity.py'
       - 'rugby-ai-predictor/prediction/highlightly_leagues.py'
+      - 'rugby-ai-predictor/prediction/team_identity.py'
       - 'cleanup_duplicates_post_update.py'
       - 'scripts/sync_to_firestore.py'
       - '.github/workflows/check-for-updates.yml'
@@ -139,8 +141,10 @@ jobs:
             cleanup_duplicates_post_update.py
             scripts/enhanced_auto_update.py
             scripts/detect_completed_matches.py
+            scripts/fix_team_identity.py
             scripts/sync_to_firestore.py
             rugby-ai-predictor/prediction/highlightly_leagues.py
+            rugby-ai-predictor/prediction/team_identity.py
           )
 
           for file in "${required_files[@]}"; do
@@ -205,7 +209,7 @@ jobs:
               --db data.sqlite \
               --verbose \
               --days-ahead 365 \
-              --days-back 90; then
+              --days-back 150; then
               break
             fi
 
@@ -221,6 +225,15 @@ jobs:
         run: |
           set -Eeuo pipefail
           python cleanup_duplicates_post_update.py data.sqlite
+
+      # Idempotent guard. Ingestion resolves teams per competition now, so this
+      # should be a no-op; it exists to catch any team identity that drifts
+      # back into sharing an id across competitions.
+      - name: Enforce canonical team identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/fix_team_identity.py --db data.sqlite --apply
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3

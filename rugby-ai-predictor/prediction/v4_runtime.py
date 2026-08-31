@@ -17,6 +17,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 from prediction.sportdevs_client import SportDevsClient, extract_odds_features
+from prediction.team_identity import resolve_team_id
 
 try:
     import torch  # type: ignore
@@ -378,6 +379,15 @@ class V4RuntimePredictor:
     def _resolve_team_id(self, conn: sqlite3.Connection, team_name: str) -> int:
         target_norm = self._normalize_team_name(team_name)
         cur = conn.cursor()
+
+        # 0) Competition-scoped identity wins. Without it the substring pass
+        #    below happily matches Currie Cup "Blue Bulls" to the URC "Bulls".
+        try:
+            scoped = resolve_team_id(conn, team_name, self.league_id, create=False)
+        except Exception:  # pragma: no cover - never block a prediction
+            scoped = None
+        if scoped is not None:
+            return int(scoped)
 
         # 1) Exact/raw matches first, but prefer IDs present in training mapping.
         cur.execute("SELECT id, name FROM team WHERE LOWER(name)=LOWER(?)", (team_name,))

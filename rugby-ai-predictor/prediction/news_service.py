@@ -288,6 +288,7 @@ class NewsService:
                                 "account": official_league_x_config["x_handle"],
                                 "media_urls": post.get("media_urls", []),
                                 "video_variants": post.get("video_variants", []),
+                                "preview_image_url": post.get("preview_image_url"),
                                 "image_url": post.get("image_url") or post.get("media_url"),
                                 "video_url": post.get("video_url"),
                             },
@@ -346,6 +347,7 @@ class NewsService:
                                     "is_video": bool(post.get("is_video", False)),
                                     "media_urls": post.get("media_urls", []),
                                     "video_variants": post.get("video_variants", []),
+                                    "preview_image_url": post.get("preview_image_url"),
                                     "image_url": post.get("image_url") or post.get("media_url"),
                                     "video_url": post.get("video_url"),
                                 }

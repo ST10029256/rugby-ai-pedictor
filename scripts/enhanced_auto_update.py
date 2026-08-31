@@ -16,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "rugby-ai-predictor"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 try:
     from dotenv import load_dotenv
@@ -43,6 +44,7 @@ def _load_local_env_files() -> None:
             load_dotenv(dotenv_path=p, override=True)
 
 from prediction.db import ensure_configured_leagues
+from prediction.team_identity import resolve_team_id
 from prediction.highlightly_client import HighlightlyRugbyAPI
 from prediction.config import LEAGUE_MAPPINGS as CONFIG_LEAGUE_NAMES
 from prediction.highlightly_leagues import (
@@ -142,22 +144,22 @@ def safe_to_float(value: Any, default: float = 0.0) -> float:
         return default
 
 def get_team_id(conn: sqlite3.Connection, team_name: str, league_id: int) -> Optional[int]:
-    """Get or create team ID for a team name."""
-    cursor = conn.cursor()
-    
-    # Try to find existing team
-    cursor.execute("SELECT id FROM team WHERE name = ?", (team_name,))
-    result = cursor.fetchone()
-    
-    if result:
-        return result[0]
-    
-    # Create new team
-    cursor.execute("INSERT INTO team (name) VALUES (?)", (team_name,))
-    team_id = cursor.lastrowid
-    conn.commit()
-    
-    logger.info(f"Created new team: {team_name} (ID: {team_id})")
+    """Get or create the team id for a name within its competition.
+
+    Matching on name alone merged different sides that share a name: Currie Cup
+    "Bulls" is the Blue Bulls, not the URC franchise. `resolve_team_id` keeps
+    competitions apart and only reuses an id where a side genuinely plays in
+    both.
+    """
+    before = conn.execute("SELECT COUNT(*) FROM team").fetchone()[0]
+    team_id = resolve_team_id(conn, team_name, league_id)
+    after = conn.execute("SELECT COUNT(*) FROM team").fetchone()[0]
+
+    if after > before:
+        conn.commit()
+        logger.info(
+            f"Created new team: {team_name} (ID: {team_id}, league: {league_id})"
+        )
     return team_id
 
 def _ensure_prediction_snapshot_table(conn: sqlite3.Connection) -> None:
@@ -335,13 +337,7 @@ class SnapshotRuntime:
                     predicted_winner, predicted_home_score, predicted_away_score, confidence, home_win_prob, away_win_prob,
                     source_note, updated_at
                 ) VALUES (?, ?, ?, 'pre_kickoff_live', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(match_id, model_version, snapshot_type)
-                DO UPDATE SET
-                    league_id=excluded.league_id, predicted_at=excluded.predicted_at, kickoff_at=excluded.kickoff_at,
-                    home_team=excluded.home_team, away_team=excluded.away_team, predicted_winner=excluded.predicted_winner,
-                    predicted_home_score=excluded.predicted_home_score, predicted_away_score=excluded.predicted_away_score,
-                    confidence=excluded.confidence, home_win_prob=excluded.home_win_prob, away_win_prob=excluded.away_win_prob,
-                    source_note=excluded.source_note, updated_at=CURRENT_TIMESTAMP
+                ON CONFLICT(match_id, model_version, snapshot_type) DO NOTHING
                 """,
                 (
                     int(event_id),
@@ -360,10 +356,125 @@ class SnapshotRuntime:
                     "event_driven_pre_kickoff",
                 ),
             )
-            self.stats["created"] += 1
+            if cur.rowcount:
+                self.stats["created"] += 1
+            else:
+                self.stats["skipped_existing"] += 1
         except Exception as e:
             self.stats["errors"] += 1
             logger.debug(f"SnapshotRuntime error for event {event_id}: {e}")
+
+    def freeze_upcoming(self, conn: sqlite3.Connection, hours_ahead: int = 24, limit: int = 400) -> Dict[str, int]:
+        """Freeze immutable pre-kickoff snapshots for all upcoming fixtures in the horizon.
+
+        Runs during the daily Highlightly sync so today's / tomorrow's games are
+        stored before kickoff. Existing pre_kickoff_live rows are never overwritten.
+        """
+        stats = {"scanned": 0, "created": 0, "skipped_existing": 0, "errors": 0}
+        if not self.enabled:
+            return stats
+
+        _ensure_prediction_snapshot_table(conn)
+        cur = conn.cursor()
+        now = datetime.utcnow()
+        cutoff = now + timedelta(hours=max(1, int(hours_ahead)))
+        cur.execute(
+            """
+            SELECT
+                e.id,
+                e.league_id,
+                e.date_event,
+                e.timestamp,
+                t1.name AS home_team,
+                t2.name AS away_team
+            FROM event e
+            LEFT JOIN team t1 ON t1.id = e.home_team_id
+            LEFT JOIN team t2 ON t2.id = e.away_team_id
+            WHERE e.home_team_id IS NOT NULL
+              AND e.away_team_id IS NOT NULL
+              AND (e.home_score IS NULL OR e.away_score IS NULL)
+            ORDER BY COALESCE(e.timestamp, e.date_event) ASC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        )
+        rows = cur.fetchall()
+        predictor = self._get_predictor()
+        if predictor is None:
+            stats["errors"] += 1
+            return stats
+
+        for match_id, league_id, date_event, kickoff_ts, home_team, away_team in rows:
+            stats["scanned"] += 1
+            if not home_team or not away_team or league_id is None:
+                continue
+            kickoff_dt = self._parse_kickoff(
+                {"timestamp": kickoff_ts, "date_event": date_event}
+            )
+            if kickoff_dt is None:
+                continue
+            if kickoff_dt < now or kickoff_dt > cutoff:
+                continue
+
+            cur.execute(
+                """
+                SELECT 1 FROM prediction_snapshot
+                WHERE match_id = ? AND model_version = ? AND snapshot_type = 'pre_kickoff_live'
+                LIMIT 1
+                """,
+                (int(match_id), self.model_version),
+            )
+            if cur.fetchone() is not None:
+                stats["skipped_existing"] += 1
+                continue
+
+            try:
+                pred = predictor.predict_match(
+                    home_team=str(home_team),
+                    away_team=str(away_team),
+                    league_id=int(league_id),
+                    match_date=str(date_event),
+                    match_id=int(match_id),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO prediction_snapshot (
+                        match_id, league_id, model_version, snapshot_type, predicted_at, kickoff_at,
+                        home_team, away_team, predicted_winner, predicted_home_score, predicted_away_score,
+                        confidence, home_win_prob, away_win_prob, source_note, updated_at
+                    ) VALUES (?, ?, ?, 'pre_kickoff_live', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(match_id, model_version, snapshot_type) DO NOTHING
+                    """,
+                    (
+                        int(match_id),
+                        int(league_id),
+                        self.model_version,
+                        datetime.utcnow().isoformat(),
+                        kickoff_dt.isoformat(),
+                        str(home_team),
+                        str(away_team),
+                        pred.get("predicted_winner"),
+                        float(pred.get("predicted_home_score")) if pred.get("predicted_home_score") is not None else None,
+                        float(pred.get("predicted_away_score")) if pred.get("predicted_away_score") is not None else None,
+                        float(pred.get("confidence")) if pred.get("confidence") is not None else None,
+                        float(pred.get("home_win_prob")) if pred.get("home_win_prob") is not None else None,
+                        float(pred.get("away_win_prob")) if pred.get("away_win_prob") is not None else None,
+                        "daily_upcoming_day_freeze",
+                    ),
+                )
+                if cur.rowcount:
+                    stats["created"] += 1
+                    self.stats["created"] += 1
+                else:
+                    stats["skipped_existing"] += 1
+            except Exception as e:
+                stats["errors"] += 1
+                self.stats["errors"] += 1
+                logger.debug("freeze_upcoming failed for match %s: %s", match_id, e)
+
+        conn.commit()
+        return stats
+
 
 def detect_and_add_missing_games(
     conn: sqlite3.Connection,
@@ -480,11 +591,83 @@ def get_manual_urc_fixtures() -> List[Dict[str, Any]]:
     return games
 
 def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, Any]], snapshot_runtime: Optional[SnapshotRuntime] = None) -> int:
-    """Update database with fetched games."""
+    """Update database with fetched games.
+
+    Identity rules (prevents nightly duplicates):
+      1. Prefer Highlightly match id as the stable event primary key when available.
+      2. Fall back to (league, teams, date) matching for older rows.
+      3. Always refresh kickoff timestamps for upcoming fixtures.
+    """
     ensure_highlightly_match_id_column(conn)
     cursor = conn.cursor()
     updated_count = 0
-    
+
+    def _refresh_existing(event_id: int, existing_home_score, existing_away_score, existing_hl_id, game, hl_match_id) -> None:
+        nonlocal updated_count
+        if (
+            game["home_score"] is not None
+            and game["away_score"] is not None
+            and existing_home_score is None
+        ):
+            cursor.execute(
+                """
+                UPDATE event
+                SET home_score = ?, away_score = ?, season = COALESCE(?, season),
+                    timestamp = COALESCE(?, timestamp), status = COALESCE(?, status),
+                    highlightly_match_id = COALESCE(?, highlightly_match_id)
+                WHERE id = ?
+                """,
+                (
+                    game["home_score"],
+                    game["away_score"],
+                    game.get("season"),
+                    game.get("timestamp"),
+                    game.get("status"),
+                    hl_match_id,
+                    event_id,
+                ),
+            )
+            updated_count += 1
+            logger.info(
+                "Score added: %s %s-%s %s",
+                game["home_team"],
+                game["home_score"],
+                game["away_score"],
+                game["away_team"],
+            )
+            return
+
+        new_ts = game.get("timestamp")
+        sets = []
+        params = []
+        if new_ts:
+            sets.append("timestamp = ?")
+            params.append(new_ts)
+        if game.get("status"):
+            sets.append("status = COALESCE(?, status)")
+            params.append(game.get("status"))
+        if game.get("season") is not None:
+            sets.append("season = COALESCE(?, season)")
+            params.append(game.get("season"))
+        if hl_match_id and (not existing_hl_id or int(existing_hl_id or 0) != int(hl_match_id)):
+            sets.append("highlightly_match_id = ?")
+            params.append(hl_match_id)
+        # Keep date_event aligned with provider when kickoff day is known.
+        if game.get("date_event"):
+            sets.append("date_event = ?")
+            params.append(game["date_event"])
+        if sets:
+            params.append(event_id)
+            cursor.execute(f"UPDATE event SET {', '.join(sets)} WHERE id = ?", params)
+            updated_count += 1
+            logger.info(
+                "Refreshed fixture meta: %s vs %s on %s (ts=%s)",
+                game["home_team"],
+                game["away_team"],
+                game["date_event"],
+                new_ts,
+            )
+
     for game in games:
         try:
             hl_match_id = game.get("highlightly_match_id") or (
@@ -496,104 +679,141 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
                 except (TypeError, ValueError):
                     hl_match_id = None
 
-            # Get team IDs
-            home_team_id = get_team_id(conn, game['home_team'], game['league_id'])
-            away_team_id = get_team_id(conn, game['away_team'], game['league_id'])
-            
+            home_team_id = get_team_id(conn, game["home_team"], game["league_id"])
+            away_team_id = get_team_id(conn, game["away_team"], game["league_id"])
             if not home_team_id or not away_team_id:
                 continue
-            
-            # BULLETPROOF: Check by league, DATE (no time), and teams
-            cursor.execute("""
-                SELECT id, home_score, away_score, date_event, highlightly_match_id
-                FROM event 
-                WHERE league_id = ?
-                AND home_team_id = ? 
-                AND away_team_id = ? 
-                AND DATE(date_event) = DATE(?)
-            """, (game['league_id'], home_team_id, away_team_id, game['date_event']))
-            
-            existing = cursor.fetchone()
-            
+
+            existing = None
+            if hl_match_id:
+                cursor.execute(
+                    """
+                    SELECT id, home_score, away_score, date_event, highlightly_match_id
+                    FROM event
+                    WHERE highlightly_match_id = ? OR id = ?
+                    LIMIT 1
+                    """,
+                    (hl_match_id, hl_match_id),
+                )
+                existing = cursor.fetchone()
+
+            if not existing:
+                cursor.execute(
+                    """
+                    SELECT id, home_score, away_score, date_event, highlightly_match_id
+                    FROM event
+                    WHERE league_id = ?
+                      AND home_team_id = ?
+                      AND away_team_id = ?
+                      AND DATE(date_event) = DATE(?)
+                    LIMIT 1
+                    """,
+                    (game["league_id"], home_team_id, away_team_id, game["date_event"]),
+                )
+                existing = cursor.fetchone()
+
             if existing:
-                event_id, existing_home_score, existing_away_score, existing_date, existing_hl_id = existing
-                
-                # Only update if we have NEW score data (game completed)
-                if (game['home_score'] is not None and game['away_score'] is not None and
-                    existing_home_score is None):  # Only update if previously had no score
-                    
-                    cursor.execute("""
-                        UPDATE event 
-                        SET home_score = ?, away_score = ?, season = COALESCE(?, season),
-                            timestamp = COALESCE(?, timestamp), status = COALESCE(?, status),
-                            highlightly_match_id = COALESCE(?, highlightly_match_id)
-                        WHERE id = ?
-                    """, (
-                        game['home_score'], game['away_score'], game.get('season'),
-                        game.get('timestamp'), game.get('status'), hl_match_id, event_id,
-                    ))
-                    
-                    updated_count += 1
-                    logger.info(f"Score added: {game['home_team']} {game['home_score']}-{game['away_score']} {game['away_team']}")
-                elif hl_match_id and not existing_hl_id:
-                    cursor.execute(
-                        "UPDATE event SET highlightly_match_id = ? WHERE id = ?",
-                        (hl_match_id, event_id),
-                    )
-                    updated_count += 1
-                    logger.debug(
-                        "Linked Highlightly match id %s -> event %s",
-                        hl_match_id,
-                        event_id,
-                    )
-                else:
-                    # Game already exists - skip silently (prevent duplicates)
-                    logger.debug(f"Skipped existing: {game['home_team']} vs {game['away_team']} on {game['date_event']}")
+                event_id, existing_home_score, existing_away_score, _existing_date, existing_hl_id = existing
+                _refresh_existing(
+                    int(event_id),
+                    existing_home_score,
+                    existing_away_score,
+                    existing_hl_id,
+                    game,
+                    hl_match_id,
+                )
                 if snapshot_runtime:
                     snapshot_runtime.process_event(conn, int(event_id), game)
+                continue
+
+            # Insert new fixture. Prefer Highlightly id as primary key so SQLite,
+            # Firestore, and provider IDs stay aligned and never collide.
+            use_hl_pk = False
+            if hl_match_id:
+                cursor.execute(
+                    "SELECT id, home_team_id, away_team_id, league_id FROM event WHERE id = ?",
+                    (hl_match_id,),
+                )
+                conflict = cursor.fetchone()
+                if not conflict:
+                    use_hl_pk = True
+                else:
+                    # ID already used by a different fixture — do not overwrite it.
+                    logger.warning(
+                        "Highlightly id %s already used by event %s (league=%s); inserting with autoincrement",
+                        hl_match_id,
+                        conflict[0],
+                        conflict[3],
+                    )
+
+            if use_hl_pk:
+                cursor.execute(
+                    """
+                    INSERT INTO event (
+                        id, home_team_id, away_team_id, date_event, home_score, away_score,
+                        league_id, season, timestamp, status, highlightly_match_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        hl_match_id,
+                        home_team_id,
+                        away_team_id,
+                        game["date_event"],
+                        game["home_score"],
+                        game["away_score"],
+                        game["league_id"],
+                        game.get("season"),
+                        game.get("timestamp"),
+                        game.get("status"),
+                        hl_match_id,
+                    ),
+                )
+                event_id = hl_match_id
             else:
-                # DOUBLE-CHECK before inserting (extra safety)
-                cursor.execute("""
-                    SELECT COUNT(*) FROM event
-                    WHERE league_id = ?
-                    AND home_team_id = ?
-                    AND away_team_id = ?
-                    AND DATE(date_event) = DATE(?)
-                """, (game['league_id'], home_team_id, away_team_id, game['date_event']))
-                
-                if cursor.fetchone()[0] > 0:
-                    logger.debug(f"Double-check prevented duplicate: {game['home_team']} vs {game['away_team']}")
-                    continue
-                
-                # Safe to insert
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO event (
                         home_team_id, away_team_id, date_event, home_score, away_score,
                         league_id, season, timestamp, status, highlightly_match_id
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    home_team_id,
-                    away_team_id,
-                    game['date_event'],
-                    game['home_score'],
-                    game['away_score'],
-                    game['league_id'],
-                    game.get('season'),
-                    game.get('timestamp'),
-                    game.get('status'),
-                    hl_match_id,
-                ))
+                    """,
+                    (
+                        home_team_id,
+                        away_team_id,
+                        game["date_event"],
+                        game["home_score"],
+                        game["away_score"],
+                        game["league_id"],
+                        game.get("season"),
+                        game.get("timestamp"),
+                        game.get("status"),
+                        hl_match_id,
+                    ),
+                )
                 event_id = cursor.lastrowid
-                
-                updated_count += 1
-                logger.info(f"Added: {game['home_team']} vs {game['away_team']} ({game['date_event']})")
-                if snapshot_runtime and event_id:
-                    snapshot_runtime.process_event(conn, int(event_id), game)
-                
+
+            updated_count += 1
+            logger.info(
+                "Added: %s vs %s (%s) id=%s hl=%s",
+                game["home_team"],
+                game["away_team"],
+                game["date_event"],
+                event_id,
+                hl_match_id,
+            )
+            if snapshot_runtime and event_id:
+                snapshot_runtime.process_event(conn, int(event_id), game)
+
         except Exception as e:
-            logger.error(f"Error updating game {game.get('home_team', 'unknown')} vs {game.get('away_team', 'unknown')}: {e}")
-    
+            logger.error(
+                "Error updating game %s vs %s: %s",
+                game.get("home_team", "unknown"),
+                game.get("away_team", "unknown"),
+                e,
+            )
+
     conn.commit()
     return updated_count
 
@@ -605,7 +825,7 @@ def main():
     parser.add_argument('--include-history', action='store_true', help='Fetch all available Highlightly seasons (slower)')
     parser.add_argument('--api-key', default=None, help='Highlightly API key (or HIGHLIGHTLY_API_KEY env var)')
     parser.add_argument('--days-ahead', type=int, default=180, help='Only keep fixtures up to N days ahead (default: 180)')
-    parser.add_argument('--days-back', type=int, default=14, help='Also keep fixtures up to N days back (default: 14)')
+    parser.add_argument('--days-back', type=int, default=150, help='Also keep fixtures up to N days back (default: 150)')
     parser.add_argument('--sleep', type=float, default=0.35, help='Delay between Highlightly API calls in seconds')
     parser.add_argument('--disable-event-snapshots', action='store_true', help='Disable event-driven pre-kickoff snapshots/finalization')
     parser.add_argument('--snapshot-before-minutes', type=int, default=20, help='Snapshot when kickoff is within this many minutes (default: 20)')
@@ -694,6 +914,32 @@ def main():
                     
         except Exception as e:
             logger.error(f"❌ Error updating {league_name}: {e}")
+
+    if snapshot_runtime and snapshot_runtime.enabled:
+        try:
+            freeze_stats = snapshot_runtime.freeze_upcoming(conn, hours_ahead=24, limit=400)
+            logger.info(
+                "🧊 Upcoming day freeze: scanned=%s created=%s skipped_existing=%s errors=%s",
+                freeze_stats["scanned"],
+                freeze_stats["created"],
+                freeze_stats["skipped_existing"],
+                freeze_stats["errors"],
+            )
+        except Exception as freeze_err:
+            logger.warning("Upcoming day freeze failed: %s", freeze_err)
+
+    try:
+        from killer_v1_rebuilt.freeze import default_live_dir, freeze_is_ready
+        from killer_v1_rebuilt.live import sync_live_ledger
+
+        v2_dir = default_live_dir()
+        if freeze_is_ready(v2_dir):
+            v2_stats = sync_live_ledger(Path(args.db), v2_dir)
+            logger.info("Killer V2 live ledger: %s", v2_stats)
+        else:
+            logger.info("Killer V2 live ledger skipped (freeze weights not present)")
+    except Exception as v2_err:
+        logger.warning("Killer V2 live ledger skipped: %s", v2_err)
     
     conn.close()
 
