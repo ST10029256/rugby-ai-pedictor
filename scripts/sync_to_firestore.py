@@ -8,8 +8,9 @@ Designed to run automatically after daily game updates
 import sqlite3
 import os
 import sys
+import time
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Set
+from typing import Dict, Any, Optional, List, Set, Iterable, Callable, TypeVar
 import logging
 
 # Windows console can default to cp1252, which throws UnicodeEncodeError for emoji log messages.
@@ -52,6 +53,83 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def _configured_league_ids() -> List[int]:
+    try:
+        from prediction.config import LEAGUE_MAPPINGS
+        return list(LEAGUE_MAPPINGS.keys())
+    except Exception:
+        return [4414, 4430, 4446, 4551, 4574, 4714, 4986, 5069, 5479, 5480]
+
+
+def _retry_firestore_call(
+    operation: Callable[[], T],
+    *,
+    description: str,
+    max_attempts: int = 5,
+) -> T:
+    """Retry transient Firestore failures without relying on client retry hooks."""
+    try:
+        from google.api_core import exceptions as gcp_exceptions
+        retryable = (gcp_exceptions.ServiceUnavailable, gcp_exceptions.DeadlineExceeded)
+    except Exception:
+        retryable = (Exception,)
+
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return operation()
+        except retryable as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                break
+            wait = min(60, 2 ** attempt)
+            logger.warning(
+                f"{description} failed (attempt {attempt}/{max_attempts}): {exc}; "
+                f"retrying in {wait}s"
+            )
+            time.sleep(wait)
+
+    assert last_error is not None
+    raise last_error
+
+
+def _stream_query_paginated(query: Any, batch_size: int = 500) -> Iterable[Any]:
+    """Yield Firestore query results in small pages to avoid query timeouts."""
+    last_doc = None
+    while True:
+        page_query = query.limit(batch_size)
+        if last_doc is not None:
+            page_query = page_query.start_after(last_doc)
+
+        docs = _retry_firestore_call(
+            lambda: list(page_query.stream()),
+            description="Firestore paginated query",
+        )
+        if not docs:
+            break
+
+        for doc in docs:
+            yield doc
+
+        if len(docs) < batch_size:
+            break
+        last_doc = docs[-1]
+
+
+def _canonical_match_doc_ids_from_sqlite(sqlite_conn: sqlite3.Connection) -> Set[str]:
+    """Return the canonical Firestore doc ids for every live SQLite fixture."""
+    canonical_doc_ids: Set[str] = set()
+    for event_id, hl_id in sqlite_conn.execute("SELECT id, highlightly_match_id FROM event"):
+        try:
+            hl_int = int(hl_id) if hl_id is not None else None
+        except (TypeError, ValueError):
+            hl_int = None
+        canonical_doc_ids.add(str(hl_int) if hl_int else str(event_id))
+    return canonical_doc_ids
 
 
 def get_existing_match_ids(firestore_db: Any, batch_size: int = 1000) -> Set[str]:
@@ -466,7 +544,11 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
     }
 
 
-def prune_orphaned_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any) -> int:
+def prune_orphaned_matches(
+    sqlite_conn: sqlite3.Connection,
+    firestore_db: Any,
+    existing_match_ids: Optional[Set[str]] = None,
+) -> int:
     """Delete match docs whose SQLite fixture is gone.
 
     Deduplication removes fixtures from SQLite, but the documents this script
@@ -481,21 +563,23 @@ def prune_orphaned_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any) -
         logger.warning("SQLite has no events; skipping orphan prune")
         return 0
 
+    canonical_doc_ids = _canonical_match_doc_ids_from_sqlite(sqlite_conn)
     deleted = 0
     batch = firestore_db.batch()
     batch_count = 0
 
-    for doc in firestore_db.collection('matches').stream():
+    def maybe_delete_orphan(doc: Any) -> None:
+        nonlocal deleted, batch, batch_count
         data = doc.to_dict() or {}
         raw = data.get('sqlite_event_id')
         if raw is None:
-            continue
+            return
         try:
             event_id = int(raw)
         except (TypeError, ValueError):
-            continue
+            return
         if event_id in live_event_ids:
-            continue
+            return
 
         batch.delete(doc.reference)
         batch_count += 1
@@ -505,6 +589,34 @@ def prune_orphaned_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any) -
             batch = firestore_db.batch()
             batch_count = 0
             logger.info(f"  Pruned {deleted} orphaned match docs...")
+
+    if existing_match_ids is not None:
+        # Fast path: only inspect Firestore docs that are no longer canonical.
+        # This avoids streaming the entire 200k+ match collection in one query.
+        candidates = sorted(doc_id for doc_id in existing_match_ids if doc_id not in canonical_doc_ids)
+        logger.info(f"Checking {len(candidates)} non-canonical Firestore match docs for orphans...")
+
+        matches_ref = firestore_db.collection('matches')
+        for start in range(0, len(candidates), 500):
+            refs = [matches_ref.document(doc_id) for doc_id in candidates[start:start + 500]]
+            docs = _retry_firestore_call(
+                lambda refs=refs: list(firestore_db.get_all(refs)),
+                description="Firestore orphan candidate lookup",
+            )
+            for doc in docs:
+                if doc.exists:
+                    maybe_delete_orphan(doc)
+    else:
+        # Fallback when we do not already have the Firestore id set in memory.
+        logger.info("No cached Firestore match ids; scanning configured leagues in pages...")
+        for league_id in _configured_league_ids():
+            query = firestore_db.collection('matches').where('league_id', '==', int(league_id))
+            scanned = 0
+            for doc in _stream_query_paginated(query):
+                scanned += 1
+                maybe_delete_orphan(doc)
+            if scanned:
+                logger.info(f"  Scanned {scanned} match docs for league {league_id}")
 
     if batch_count > 0:
         batch.commit()
@@ -717,7 +829,7 @@ def main():
 
         if not args.dry_run and not args.skip_prune_orphans:
             logger.info("\nPruning match docs with no SQLite fixture...")
-            total_orphans = prune_orphaned_matches(sqlite_conn, firestore_db)
+            total_orphans = prune_orphaned_matches(sqlite_conn, firestore_db, existing_match_ids)
     
     sqlite_conn.close()
     
