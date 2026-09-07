@@ -1,1085 +1,120 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="description" content="Rugby AI Predictor - Advanced AI-powered rugby match predictions. One immersive scroll story through the ultimate rugby prediction lounge.">
-    <meta name="theme-color" content="#0b3d2e">
-    <title>Rugby AI Predictor — The Scroll Story</title>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#10b981" />
+    <meta name="description" content="Rugby AI Predictions - Advanced AI-powered rugby match predictions" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Rugby AI" />
+    <link rel="apple-touch-icon" href="/icon-192.png?v=3" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png?v=3" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png?v=3" />
+    <link rel="manifest" href="/manifest.json?v=3" />
+    <title>Rugby AI Predictions</title>
     <style>
-        :root {
-            --green-1: #16a34a; --green-2: #22c55e; --green-3: #4ade80; --glow: #34f29a; --mint: #86efac;
-            --night: #050807; --ink: #e9fbf1; --muted: #9fb8ab; --beer: #ffc83d;
-            --rail-w: 64px;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { height: 100%; }
-        html { -webkit-text-size-adjust: 100%; scrollbar-width: none; -ms-overflow-style: none; }
-        html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; display: none; }
-        body {
-            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            color: var(--ink); background: var(--night); line-height: 1.6; overflow-x: hidden; cursor: none;
-        }
-        @media (hover: none), (pointer: coarse) { body { cursor: auto; } .cursor-dot, .cursor-ring { display: none !important; } }
-        ::selection { background: var(--green-2); color: #04160d; }
-        a { color: inherit; }
-        h1, h2, h3, .display { font-family: 'Anton', sans-serif; font-weight: 400; line-height: .92; text-transform: uppercase; }
-
-        /* cursor */
-        .cursor-dot, .cursor-ring { position: fixed; top: 0; left: 0; border-radius: 50%; pointer-events: none; z-index: 100050; transform: translate(-50%,-50%); mix-blend-mode: screen; }
-        .cursor-dot { width: 6px; height: 6px; background: var(--glow); box-shadow: 0 0 14px var(--glow); transition: opacity .3s ease; }
-        .cursor-ring { width: 38px; height: 38px; border: 1.5px solid rgba(52,242,154,.5); transition: width .35s cubic-bezier(.22,1,.36,1), height .35s cubic-bezier(.22,1,.36,1), border-color .35s ease, background .35s ease, opacity .35s ease; }
-        .cursor-ring.hot { width: 58px; height: 58px; border-color: var(--green-3); background: rgba(52,242,154,.1); }
-
-        /* preloader */
-        #preloader { position: fixed; inset: 0; z-index: 100000; background: radial-gradient(circle at 50% 40%, #0c3a28, #050807 70%);
-            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.6rem; transition: opacity .8s, visibility .8s; }
-        #preloader.done { opacity: 0; visibility: hidden; }
-        .pl-ball { width: 84px; height: 54px; border-radius: 50%; background: linear-gradient(145deg,#2f7d52,#0c3a28); border: 2px solid rgba(134,239,172,.5);
-            position: relative; animation: plspin 1.1s cubic-bezier(.6,.05,.3,1) infinite; box-shadow: 0 0 40px rgba(52,242,154,.5), inset 0 0 18px rgba(0,0,0,.5); }
-        .pl-ball::before { content: ''; position: absolute; inset: 0; margin: auto; width: 2px; height: 70%; background: repeating-linear-gradient(transparent 0 4px, rgba(255,255,255,.85) 4px 8px); }
-        @keyframes plspin { 0%{transform:rotate(-18deg) scale(1);} 50%{transform:rotate(18deg) scale(1.08);} 100%{transform:rotate(-18deg) scale(1);} }
-        .pl-text { font-family: 'Bebas Neue'; font-size: 1.3rem; letter-spacing: .35em; color: var(--mint); }
-        .pl-bar { width: 200px; height: 4px; background: rgba(255,255,255,.1); border-radius: 99px; overflow: hidden; }
-        .pl-bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg,var(--green-1),var(--green-3)); box-shadow: 0 0 12px var(--glow); }
-
-        #scrollProgress { position: fixed; top: 0; left: 0; height: 3px; width: 0%; z-index: 10001; background: linear-gradient(90deg,var(--green-1),var(--green-2),var(--green-3)); box-shadow: 0 0 12px var(--glow); }
-        .grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .045; mix-blend-mode: overlay;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
-
-        /* persistent 3D stage */
-        #stage { position: fixed; inset: 0; z-index: 1; }
-        #heroCanvas { width: 100%; height: 100%; display: block; }
-        #stage.webgl-fallback { background: radial-gradient(circle at 50% 40%, #0c3a28, #050807 70%); }
-
-        /* navbar */
-        .navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 10000; padding: 1rem 1.6rem; display: flex; justify-content: space-between; align-items: center;
-            background: linear-gradient(180deg, rgba(5,8,7,.85), rgba(5,8,7,0)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: padding .3s, background .3s; }
-        .navbar.shrink { padding: .5rem 1.6rem; background: rgba(5,8,7,.92); border-bottom: 1px solid rgba(134,239,172,.12); }
-        .nav-brand { font-family: 'Anton'; font-size: 1.4rem; text-decoration: none; display: inline-flex; align-items: center; gap: .55rem; color: #fff; }
-        .nav-brand b { background: linear-gradient(135deg,#fff,var(--mint)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-        .nav-brand img { width: 28px; height: 28px; filter: drop-shadow(0 0 8px rgba(52,242,154,.6)); animation: wob 4s ease-in-out infinite; }
-        @keyframes wob { 0%,100%{transform:rotate(-8deg);} 50%{transform:rotate(8deg);} }
-        .nav-links { display: flex; gap: 1.4rem; list-style: none; align-items: center; }
-        .nav-links a { text-decoration: none; color: var(--muted); font-weight: 600; font-size: .9rem; position: relative; transition: color .25s; }
-        .nav-links a:not(.btn-nav)::after { content: ''; position: absolute; left: 0; bottom: -6px; width: 0; height: 2px; background: var(--green-3); transition: width .25s; box-shadow: 0 0 8px var(--glow); }
-        .nav-links a:not(.btn-nav):hover, .nav-links a.active { color: var(--ink); }
-        .nav-links a.active::after, .nav-links a:not(.btn-nav):hover::after { width: 100%; }
-        .btn-nav { padding: .5rem 1.3rem; background: linear-gradient(135deg,var(--green-1),var(--green-2)); color: #fff !important; border-radius: 10px; font-weight: 700; box-shadow: 0 6px 20px rgba(34,197,94,.35); transition: transform .25s, box-shadow .25s; }
-        .btn-nav:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(34,197,94,.6); }
-        .nav-toggle { display: none; position: relative; width: 44px; height: 44px; border: 1px solid rgba(134,239,172,.18); background: rgba(255,255,255,.05); border-radius: 12px; cursor: pointer; padding: 0; z-index: 10001; -webkit-tap-highlight-color: transparent; }
-        .nav-toggle span { position: absolute; left: 12px; right: 12px; height: 2px; border-radius: 2px; background: var(--ink); transition: transform .3s cubic-bezier(.4,0,.2,1), opacity .2s ease, top .3s cubic-bezier(.4,0,.2,1); }
-        .nav-toggle span:nth-child(1) { top: 15px; }
-        .nav-toggle span:nth-child(2) { top: 21px; }
-        .nav-toggle span:nth-child(3) { top: 27px; }
-        .nav-toggle.open span:nth-child(1) { top: 21px; transform: rotate(45deg); }
-        .nav-toggle.open span:nth-child(2) { opacity: 0; transform: scaleX(.3); }
-        .nav-toggle.open span:nth-child(3) { top: 21px; transform: rotate(-45deg); }
-        .nav-backdrop { position: fixed; inset: 0; z-index: 9998; background: rgba(2,6,4,.55); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); opacity: 0; visibility: hidden; transition: opacity .35s ease, visibility .35s ease; }
-        .nav-backdrop.open { opacity: 1; visibility: visible; }
-
-        /* chapter rail */
-        .rail { position: fixed; top: 50%; right: 18px; transform: translateY(-50%); z-index: 9000; display: flex; flex-direction: column; gap: .9rem; }
-        .rail button { all: unset; cursor: pointer; display: flex; align-items: center; gap: .6rem; justify-content: flex-end; }
-        .rail .tick { width: 10px; height: 10px; border-radius: 50%; border: 2px solid rgba(159,184,171,.5); transition: all .25s; }
-        .rail .name { font-size: .68rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); opacity: 0; transform: translateX(8px); transition: all .25s; white-space: nowrap; }
-        .rail button:hover .name { opacity: 1; transform: none; }
-        .rail button.active .tick { background: var(--green-3); border-color: var(--green-3); box-shadow: 0 0 12px var(--glow); transform: scale(1.25); }
-        .rail button.active .name { opacity: 1; transform: none; color: var(--ink); }
-
-        /* story sections */
-        #scroller { position: relative; z-index: 2; }
-        .chapter { position: relative; min-height: 100svh; display: flex; align-items: center; padding: 6rem clamp(1rem, 3vw, 2.6rem); }
-        .chapter .inner { width: 100%; max-width: 100%; margin: 0; }
-        .tint-l::before, .tint-r::before, .tint-c::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-        .tint-l::before { background: linear-gradient(90deg, rgba(5,8,7,.92) 0%, rgba(5,8,7,.55) 45%, rgba(5,8,7,0) 80%); }
-        .tint-r::before { background: linear-gradient(270deg, rgba(5,8,7,.92) 0%, rgba(5,8,7,.55) 45%, rgba(5,8,7,0) 80%); }
-        .tint-c::before { background: radial-gradient(circle at 50% 55%, rgba(5,8,7,.2), rgba(5,8,7,.85) 75%); }
-        .col { max-width: 820px; }
-        .col.right { margin-left: auto; }
-        .eyebrow { color: var(--green-3); font-weight: 800; letter-spacing: .3em; text-transform: uppercase; font-size: .76rem; margin-bottom: 1rem; }
-        .ttl { font-size: clamp(2.6rem, 7vw, 6rem); color: #fff; }
-        .ttl em { font-style: normal; background: linear-gradient(135deg,var(--green-2),var(--mint)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-        .ttl .stroke { -webkit-text-fill-color: transparent; -webkit-text-stroke: 2px rgba(134,239,172,.7); }
-        .lead { color: #cfe9dc; font-size: clamp(1rem, 2vw, 1.25rem); font-weight: 300; margin-top: 1.2rem; }
-        .muted { color: var(--muted); }
-
-        .kicker { display: inline-flex; align-items: center; gap: .6rem; padding: .42rem 1rem; border-radius: 99px; border: 1px solid rgba(134,239,172,.35);
-            background: rgba(12,58,40,.5); color: var(--mint); font-weight: 700; font-size: .72rem; letter-spacing: .22em; text-transform: uppercase; margin-bottom: 1.4rem; backdrop-filter: blur(6px); }
-        .kicker .live { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4d; box-shadow: 0 0 0 0 rgba(255,77,77,.7); animation: pulse 1.6s infinite; }
-        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(255,77,77,.7);} 70%{box-shadow:0 0 0 12px rgba(255,77,77,0);} 100%{box-shadow:0 0 0 0 rgba(255,77,77,0);} }
-
-        .cta-buttons { display: flex; gap: .9rem; flex-wrap: wrap; margin-top: 2rem; }
-        .btn { padding: 1rem 2rem; font-size: 1.02rem; font-weight: 700; border-radius: 14px; text-decoration: none; display: inline-flex; align-items: center; gap: .55rem;
-            transition: transform .25s, box-shadow .25s, background .25s, border-color .25s; position: relative; overflow: hidden; }
-        .btn-primary { background: linear-gradient(135deg,var(--green-1),var(--green-2)); color: #fff; box-shadow: 0 10px 30px rgba(34,197,94,.45); }
-        .btn-primary::before { content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%; transform: skewX(-20deg); background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent); transition: left .6s; }
-        .btn-primary:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 18px 46px rgba(34,197,94,.65); }
-        .btn-primary:hover::before { left: 140%; }
-        .btn-secondary { background: rgba(255,255,255,.06); color: #fff; border: 1.5px solid rgba(134,239,172,.3); backdrop-filter: blur(8px); }
-        .btn-secondary:hover { background: rgba(134,239,172,.12); border-color: var(--green-3); transform: translateY(-3px); }
-
-        .scroll-cue { position: fixed; bottom: 1.3rem; left: 50%; transform: translateX(-50%); z-index: 50; color: var(--muted); font-size: .68rem; letter-spacing: .3em; text-transform: uppercase; display: flex; flex-direction: column; align-items: center; gap: .45rem; transition: opacity .4s; }
-        .scroll-cue .mouse { width: 22px; height: 36px; border: 2px solid rgba(159,184,171,.6); border-radius: 14px; position: relative; }
-        .scroll-cue .mouse::after { content: ''; position: absolute; top: 6px; left: 50%; transform: translateX(-50%); width: 4px; height: 8px; background: var(--green-3); border-radius: 99px; animation: wheel 1.6s infinite; }
-        @keyframes wheel { 0%{opacity:0;transform:translate(-50%,0);} 40%{opacity:1;} 100%{opacity:0;transform:translate(-50%,12px);} }
-
-        /* ticker */
-        .ticker { position: relative; z-index: 2; background: linear-gradient(180deg,#07120d,#050807); border-top: 1px solid rgba(134,239,172,.15); border-bottom: 1px solid rgba(134,239,172,.15); overflow: hidden; white-space: nowrap; }
-        .ticker::before, .ticker::after { content: ''; position: absolute; top: 0; bottom: 0; width: 70px; z-index: 2; }
-        .ticker::before { left: 0; background: linear-gradient(90deg,#050807,transparent); }
-        .ticker::after { right: 0; background: linear-gradient(270deg,#050807,transparent); }
-        .ticker-track { display: inline-flex; gap: 3rem; padding: .7rem 0; animation: tick 34s linear infinite; }
-        .ticker:hover .ticker-track { animation-play-state: paused; }
-        @keyframes tick { from{transform:translateX(0);} to{transform:translateX(-50%);} }
-        .tk { display: inline-flex; align-items: center; gap: .6rem; font-family: 'Bebas Neue'; font-size: 1.02rem; letter-spacing: .04em; color: #d7efe3; }
-        .tk b { color: var(--green-3); }
-        .tk .ft { font-size: .62rem; padding: .1rem .45rem; border-radius: 5px; background: rgba(255,77,77,.16); color: #ff8a8a; letter-spacing: .12em; font-family: 'Outfit'; }
-        .tk .ai { font-size: .62rem; padding: .1rem .45rem; border-radius: 5px; background: rgba(52,242,154,.16); color: var(--green-3); letter-spacing: .12em; font-family: 'Outfit'; }
-
-        /* stats row */
-        .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 1rem; margin-top: 2.4rem; }
-        .stat { text-align: center; padding: 1.3rem 1rem; border-radius: 16px; background: rgba(255,255,255,.03); border: 1px solid rgba(134,239,172,.12); backdrop-filter: blur(4px); }
-        .stat .num { font-family: 'Anton'; font-size: clamp(2rem,4.5vw,3.2rem); background: linear-gradient(135deg,#fff,var(--green-3)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-        .stat .lbl { color: var(--muted); text-transform: uppercase; letter-spacing: .14em; font-size: .72rem; margin-top: .4rem; }
-
-        /* how steps */
-        .steps { display: grid; gap: 1rem; margin-top: 2rem; }
-        .step { display: flex; gap: 1.1rem; padding: 1.2rem 1.3rem; border-radius: 16px; background: linear-gradient(160deg, rgba(20,40,30,.55), rgba(8,14,11,.55)); border: 1px solid rgba(134,239,172,.14); }
-        .step .n { font-family: 'Anton'; font-size: 1.8rem; color: var(--green-3); line-height: 1; min-width: 1.4em; }
-        .step h3 { font-family: 'Bebas Neue'; font-size: 1.35rem; letter-spacing: .03em; color: #fff; }
-        .step p { color: var(--muted); font-size: .95rem; margin-top: .2rem; }
-
-        /* features mini grid (in How chapter alt) */
-        .feat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; margin-top: 2rem; }
-        .feat { position: relative; padding: 1.6rem; border-radius: 18px; background: linear-gradient(160deg, rgba(20,40,30,.6), rgba(8,14,11,.6)); border: 1px solid rgba(134,239,172,.14); overflow: hidden; transition: transform .3s, border-color .3s; }
-        .feat::before { content: ''; position: absolute; inset: 0; background: radial-gradient(200px circle at var(--mx,50%) var(--my,50%), rgba(52,242,154,.16), transparent 60%); opacity: 0; transition: opacity .3s; }
-        .feat:hover { transform: translateY(-5px); border-color: rgba(52,242,154,.4); }
-        .feat:hover::before { opacity: 1; }
-        .feat .ico { font-size: 1.6rem; margin-bottom: .7rem; }
-        .feat h3 { font-family: 'Bebas Neue'; font-size: 1.3rem; letter-spacing: .03em; color: #fff; }
-        .feat p { color: var(--muted); font-size: .9rem; margin-top: .25rem; }
-
-        /* lounge */
-        #lounge { overflow: hidden; }
-        .bar-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; opacity: .4; }
-        #lounge::before { z-index: -1; background: linear-gradient(90deg, rgba(5,8,7,.92), rgba(5,8,7,.5) 55%, rgba(5,8,7,.85)); }
-        .neon { font-family: 'Bebas Neue'; font-size: clamp(2.6rem,7vw,6rem); color: #fff; text-shadow: 0 0 6px #fff, 0 0 18px var(--glow), 0 0 40px var(--green-2), 0 0 80px var(--green-1); animation: flick 5s infinite; }
-        @keyframes flick { 0%,19%,21%,23%,25%,54%,56%,100%{opacity:1;} 20%,24%,55%{opacity:.55;} }
-        .on-tap { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .8rem; margin-top: 1.8rem; max-width: 540px; }
-        .tap { display: flex; align-items: center; gap: .75rem; padding: .9rem 1.1rem; border-radius: 14px; background: rgba(8,14,11,.6); border: 1px solid rgba(134,239,172,.16); }
-        .tap .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green-3); box-shadow: 0 0 10px var(--glow); }
-        .tap span { color: #d7efe3; font-weight: 600; }
-
-        /* leagues */
-        .leagues-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: .9rem; margin-top: 2.2rem; }
-        .league { padding: 1.4rem 1rem; text-align: center; border-radius: 16px; background: rgba(255,255,255,.03); border: 1px solid rgba(134,239,172,.12); transition: transform .25s, background .25s, border-color .25s; backdrop-filter: blur(4px); }
-        .league:hover { transform: translateY(-5px) scale(1.03); background: rgba(34,197,94,.08); border-color: rgba(52,242,154,.4); }
-        .league .lg-emoji { font-size: 1.9rem; }
-        .league .lg-logo { width: 100%; max-width: 150px; aspect-ratio: 1 / 1; height: auto; object-fit: contain; padding: clamp(12px, 1.6vw, 20px); border-radius: 20px; background: #fff;
-            box-shadow: 0 8px 20px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.5); display: block; margin: 0 auto;
-            image-rendering: -webkit-optimize-contrast; transition: transform .3s cubic-bezier(.22,1,.36,1), box-shadow .3s ease; }
-        .league:hover .lg-logo { transform: scale(1.05) rotate(-2deg); box-shadow: 0 12px 28px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.6); }
-        .league .lg-emoji { display: flex; align-items: center; justify-content: center; width: 100%; max-width: 150px; aspect-ratio: 1 / 1; margin: 0 auto; font-size: clamp(2.4rem, 5vw, 3.4rem); border-radius: 20px; background: rgba(255,255,255,.05); }
-        .league .lg-name { font-family: 'Bebas Neue'; font-size: 1.2rem; letter-spacing: .04em; margin-top: .7rem; color: #fff; }
-        .league .lg-meta { color: var(--muted); font-size: .76rem; }
-
-        /* plans */
-        .plans-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 1.2rem; margin-top: 2.4rem; }
-        .plan { position: relative; padding: 2rem 1.6rem; border-radius: 20px; background: linear-gradient(160deg, rgba(15,23,42,.85), rgba(2,6,23,.92)); border: 1.5px solid rgba(148,163,184,.3); transition: transform .3s, border-color .3s, box-shadow .3s; }
-        .plan.featured { border-color: rgba(34,197,94,.6); box-shadow: 0 0 34px rgba(34,197,94,.25); }
-        .plan:hover { transform: translateY(-8px); border-color: rgba(34,197,94,.6); box-shadow: 0 24px 50px rgba(0,0,0,.5); }
-        .plan .badge { position: absolute; top: 1rem; right: 1rem; background: linear-gradient(135deg,var(--green-1),var(--green-2)); color: #fff; padding: .3rem .8rem; border-radius: 99px; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
-        .plan .p-name { font-family: 'Bebas Neue'; font-size: 1.5rem; color: #fff; letter-spacing: .03em; }
-        .plan .p-dur { color: var(--muted); font-size: .88rem; }
-        .plan .p-price { font-family: 'Anton'; font-size: 3rem; color: var(--green-2); line-height: 1; margin: .6rem 0 .1rem; }
-        .plan .p-sub { color: var(--muted); font-size: .86rem; margin-bottom: 1.2rem; }
-        .plan ul { list-style: none; margin-bottom: 1.4rem; }
-        .plan li { display: flex; gap: .6rem; align-items: center; color: #d1d5db; padding: .45rem 0; border-bottom: 1px solid rgba(255,255,255,.07); font-size: .92rem; }
-        .plan li:last-child { border-bottom: 0; }
-        .plan li::before { content: '✓'; color: var(--green-2); font-weight: 700; }
-        .plan .p-btn { display: block; width: 100%; border: 0; cursor: pointer; font-family: inherit; font-size: 1rem; text-align: center; padding: .9rem; border-radius: 12px; background: linear-gradient(135deg,var(--green-1),var(--green-2)); color: #fff; text-decoration: none; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; transition: transform .25s, box-shadow .25s; }
-        .plan .p-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(34,197,94,.45); }
-
-        /* footer */
-        .footer { position: relative; z-index: 2; background: linear-gradient(180deg,#050807,#02120b); padding: 3.4rem 2rem 2.4rem; text-align: center; border-top: 1px solid rgba(134,239,172,.14); }
-        .footer-brand { font-family: 'Anton'; font-size: 1.7rem; color: #fff; display: inline-flex; align-items: center; gap: .5rem; margin-bottom: 1.3rem; }
-        .footer-brand img { width: 26px; height: 26px; }
-        .footer-links { display: flex; justify-content: center; gap: 1.6rem; flex-wrap: wrap; margin-bottom: 1.6rem; }
-        .footer-link { color: var(--muted); text-decoration: none; transition: color .25s; font-weight: 500; }
-        .footer-link:hover { color: var(--green-3); }
-        .footer-copyright { color: #6f8a7d; font-size: .84rem; }
-        .footer-copyright p + p { margin-top: .5rem; }
-
-        /* reveal */
-        .reveal { opacity: 0; transform: translateY(36px); }
-        .reveal.in { opacity: 1; transform: none; transition: opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); }
-
-        /* responsive */
-        @media (max-width: 1024px) {
-            .feat-grid, .plans-grid { grid-template-columns: repeat(2,1fr); }
-            .leagues-grid { grid-template-columns: repeat(4,1fr); }
-            .plan.featured { order: -1; }
-        }
-        @media (max-width: 920px) {
-            .rail { display: none; }
-            .stats-grid { grid-template-columns: repeat(2,1fr); }
-            .leagues-grid { grid-template-columns: repeat(3,1fr); }
-            .tint-l::before, .tint-r::before { background: linear-gradient(180deg, rgba(5,8,7,.65), rgba(5,8,7,.9)); }
-        }
-
-        /* mobile full-screen menu + tablet burger */
-        @media (max-width: 860px) {
-            .nav-toggle { display: block; }
-            .navbar { padding: .85rem 1.1rem; }
-            .nav-backdrop { display: none; }
-            .nav-links { position: fixed; inset: 0; z-index: 9999; width: 100vw; height: 100dvh;
-                flex-direction: column; align-items: center; justify-content: center; gap: .45rem; padding: 5.5rem 1.4rem 2.4rem;
-                background-color: #04120b;
-                background-image: radial-gradient(circle at 50% 30%, rgba(16,74,50,.85), rgba(4,9,7,1) 72%);
-                opacity: 0; visibility: hidden; transform: scale(1.05); transition: opacity .4s ease, transform .5s cubic-bezier(.22,1,.36,1), visibility .4s; overflow-y: auto; }
-            .nav-links.open { opacity: 1; visibility: visible; transform: none; }
-            .nav-links li { width: 100%; max-width: 360px; text-align: center; opacity: 0; transform: translateY(18px); transition: opacity .4s ease, transform .45s cubic-bezier(.22,1,.36,1); }
-            .nav-links.open li { opacity: 1; transform: none; }
-            .nav-links.open li:nth-child(1) { transition-delay: .08s; }
-            .nav-links.open li:nth-child(2) { transition-delay: .13s; }
-            .nav-links.open li:nth-child(3) { transition-delay: .18s; }
-            .nav-links.open li:nth-child(4) { transition-delay: .23s; }
-            .nav-links.open li:nth-child(5) { transition-delay: .28s; }
-            .nav-links.open li:nth-child(6) { transition-delay: .33s; }
-            .nav-links.open li:nth-child(7) { transition-delay: .38s; }
-            .nav-links.open li:nth-child(8) { transition-delay: .43s; }
-            .nav-links a:not(.btn-nav) { display: block; width: 100%; padding: 1rem; border-radius: 14px; font-size: 1.35rem; font-weight: 700; letter-spacing: .02em; color: #dff3e8; }
-            .nav-links a:not(.btn-nav)::after { display: none; }
-            .nav-links a:not(.btn-nav):hover, .nav-links a:not(.btn-nav).active { background: rgba(34,197,94,.14); color: #fff; }
-            .nav-links .btn-nav { display: block; width: 100%; text-align: center; margin-top: .8rem; padding: 1.1rem; font-size: 1.2rem; }
-        }
-
-        @media (max-width: 680px) {
-            .feat-grid, .plans-grid { grid-template-columns: 1fr; justify-items: center; }
-            .plan { width: 100%; max-width: 420px; }
-            .leagues-grid { grid-template-columns: repeat(2,1fr); }
-            .on-tap { grid-template-columns: 1fr; max-width: 100%; }
-            .chapter { min-height: auto; padding: 4.5rem 1.1rem; }
-            #hero { min-height: 100svh; padding-top: 6rem; }
-            .ttl { font-size: clamp(2.7rem, 13vw, 4.2rem); }
-            .lead { font-size: 1.02rem; }
-            .cta-buttons { flex-direction: column; align-items: stretch; }
-            .cta-buttons .btn { justify-content: center; width: 100%; }
-            .stat { padding: 1rem .7rem; }
-            .scroll-cue { display: none; }
-            .neon { font-size: clamp(2.4rem, 12vw, 4rem); }
-            .plan { padding: 1.7rem 1.3rem; }
-            .legal-acc summary { font-size: 1.05rem; }
-        }
-
-        @media (max-width: 420px) {
-            .leagues-grid { gap: .6rem; }
-            .league { padding: 1rem .6rem; }
-            .league .lg-name { font-size: 1.05rem; }
-            .nav-brand { font-size: 1.2rem; }
-            .ttl { font-size: clamp(2.4rem, 13vw, 3.4rem); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
-            .reveal { opacity: 1; transform: none; }
-        }
+      html, body, #root {
+        margin: 0;
+        min-height: 100%;
+        height: 100%;
+        background: #020617;
+      }
+      .boot-loader {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 32px;
+        background: #020617;
+        z-index: 9999;
+      }
+      .boot-posts {
+        position: relative;
+        width: 180px;
+        height: 120px;
+      }
+      .boot-post {
+        position: absolute;
+        top: 0;
+        width: 6px;
+        height: 100%;
+        border-radius: 3px;
+        background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 20%, #ffffff 40%, #f0f0f0 60%, #ffffff 80%, #e8e8e8 100%);
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+      }
+      .boot-post-left { left: calc(50% - 30px); }
+      .boot-post-right { left: calc(50% + 30px); }
+      .boot-crossbar {
+        position: absolute;
+        top: 50%;
+        left: calc(50% - 30px);
+        width: 66px;
+        height: 6px;
+        border-radius: 3px;
+        background: linear-gradient(90deg, #ffffff 0%, #f8f9fa 20%, #ffffff 40%, #f0f0f0 60%, #ffffff 80%, #e8e8e8 100%);
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+        z-index: 6;
+      }
+      .boot-ball {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 30px;
+        height: 19.5px;
+        margin: -9.75px 0 0 -15px;
+        z-index: 6;
+        animation: bootKick 2s linear infinite;
+      }
+      .boot-ball-shape {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        background: radial-gradient(ellipse at 30% 30%, #ffffff 0%, #f8f9fa 15%, #e5e7eb 30%, #d1d5db 50%, #9ca3af 70%, #6b7280 100%);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+      }
+      .boot-label {
+        color: #10b981;
+        font-size: 0.875rem;
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        animation: bootPulse 2s ease-in-out infinite;
+      }
+      @keyframes bootKick {
+        0% { transform: translate(-250%, 150%) rotate(0deg) scale(0.8); opacity: 0.7; }
+        20% { transform: translate(-150%, 20%) rotate(-216deg) scale(0.95); opacity: 0.85; }
+        40% { transform: translate(-50%, -60%) rotate(-432deg) scale(1.05); opacity: 1; }
+        50% { transform: translate(0%, -130%) rotate(-540deg) scale(1.1); opacity: 1; }
+        60% { transform: translate(50%, -150%) rotate(-648deg) scale(1.1); opacity: 1; }
+        80% { transform: translate(100%, -180%) rotate(-864deg) scale(1.0); opacity: 0.9; }
+        100% { transform: translate(150%, -200%) rotate(-1080deg) scale(0.8); opacity: 0.7; }
+      }
+      @keyframes bootPulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+      }
     </style>
-</head>
-<body>
-    <div class="cursor-dot" id="cursorDot"></div>
-    <div class="cursor-ring" id="cursorRing"></div>
-
-    <div id="preloader">
-        <div class="pl-ball"></div>
-        <div class="pl-text">RUGBY&nbsp;AI</div>
-        <div class="pl-bar"><i id="plFill"></i></div>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root">
+      <div class="boot-loader" role="status" aria-live="polite" aria-label="Loading...">
+        <div class="boot-posts">
+          <div class="boot-post boot-post-left"></div>
+          <div class="boot-post boot-post-right"></div>
+          <div class="boot-crossbar"></div>
+          <div class="boot-ball"><div class="boot-ball-shape"></div></div>
+        </div>
+        <div class="boot-label">Loading...</div>
+      </div>
     </div>
-
-    <div class="grain"></div>
-    <div id="scrollProgress"></div>
-
-    <!-- Persistent 3D stage (fixed behind the whole story) -->
-    <div id="stage"><canvas id="heroCanvas"></canvas></div>
-
-    <!-- Nav -->
-    <nav class="navbar" id="navbar">
-        <a href="#hero" class="nav-brand" data-jump><img src="public/rugby_emoji.png" alt="Rugby Ball" /> Rugby<b>AI</b></a>
-        <button class="nav-toggle" id="navToggle" aria-label="Menu" aria-expanded="false"><span></span><span></span><span></span></button>
-        <ul class="nav-links" id="navLinks">
-            <li><a href="#hero" data-jump>Home</a></li>
-            <li><a href="#about" data-jump>About</a></li>
-            <li><a href="#how" data-jump>How</a></li>
-            <li><a href="#lounge" data-jump>Lounge</a></li>
-            <li><a href="#leagues" data-jump>Leagues</a></li>
-            <li><a href="#plans" data-jump>Plans</a></li>
-            <li><a href="#legal" data-jump>Legal</a></li>
-            <li><a href="https://rugby-ai-predictor-app.web.app/" class="btn-nav">Launch App</a></li>
-        </ul>
-    </nav>
-    <div class="nav-backdrop" id="navBackdrop"></div>
-
-    <!-- Chapter rail -->
-    <div class="rail" id="rail"></div>
-
-    <!-- Scroll cue -->
-    <div class="scroll-cue" id="scrollCue"><div class="mouse"></div>Scroll the story</div>
-
-    <!-- THE STORY -->
-    <main id="scroller">
-        <!-- 1 / HERO -->
-        <section class="chapter tint-c" id="hero" data-chapter="Kickoff">
-            <div class="inner" style="text-align:center;">
-                <span class="kicker"><span class="live"></span> Live AI Predictions • Match Night</span>
-                <h1 class="ttl"><em data-split>Rugby</em><br><span class="stroke" data-split>AI Predictor</span></h1>
-                <p class="lead" style="margin-left:auto;margin-right:auto;max-width:640px;">Pull up a stool. Grab a pint. Scroll through the ultimate rugby prediction lounge — where AI calls the match before the whistle blows.</p>
-                <div class="cta-buttons" style="justify-content:center;">
-                    <a href="https://rugby-ai-predictor-app.web.app/" class="btn btn-primary" data-hot>🏉 Launch App</a>
-                    <a href="#plans" class="btn btn-secondary" data-hot data-jump>View Plans</a>
-                </div>
-            </div>
-        </section>
-
-        <!-- ticker breaks the story -->
-        <div class="ticker" aria-hidden="true"><div class="ticker-track" id="tickerTrack"></div></div>
-
-        <!-- 2 / ABOUT -->
-        <section class="chapter tint-r" id="about" data-chapter="The Story">
-            <div class="inner">
-                <div class="col right">
-                    <p class="eyebrow reveal">The Story</p>
-                    <h2 class="ttl reveal">Rugby meets <em>real intelligence</em></h2>
-                    <p class="lead reveal">Rugby AI Predictor blends seasons of match data, form, injuries and momentum into a single, calibrated prediction engine — so every fan gets a coach's-eye view.</p>
-                    <p class="muted reveal" style="margin-top:1rem;">No spreadsheets. No guesswork. Just clean, confident insight delivered with the buzz of a packed sportsbar on a big match night.</p>
-                    <div class="stats-grid">
-                        <div class="stat reveal"><div class="num" data-count="92" data-suffix="%">0</div><div class="lbl">Model Confidence</div></div>
-                        <div class="stat reveal"><div class="num" data-count="48" data-suffix="K+">0</div><div class="lbl">Matches Analysed</div></div>
-                        <div class="stat reveal"><div class="num" data-count="15" data-suffix="">0</div><div class="lbl">Leagues</div></div>
-                        <div class="stat reveal"><div class="num" data-count="24" data-suffix="/7">0</div><div class="lbl">Live Updates</div></div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- 3 / HOW -->
-        <section class="chapter tint-l" id="how" data-chapter="How It Works">
-            <div class="inner">
-                <div class="col">
-                    <p class="eyebrow reveal">How it works</p>
-                    <h2 class="ttl reveal">Three steps to <em>match night</em></h2>
-                    <div class="steps">
-                        <div class="step reveal"><div class="n">1</div><div><h3>Pick the fixture</h3><p>Choose any match across the leagues we cover — from Six Nations to Super Rugby.</p></div></div>
-                        <div class="step reveal"><div class="n">2</div><div><h3>Let the AI read the game</h3><p>Our engine weighs form, injuries, weather and momentum into a calibrated call.</p></div></div>
-                        <div class="step reveal"><div class="n">3</div><div><h3>Watch it live</h3><p>Win probabilities and score lines update in real time as the action unfolds.</p></div></div>
-                    </div>
-                    <div class="feat-grid">
-                        <div class="feat reveal" data-tilt><div class="ico">🧠</div><h3>AI Engine</h3><p>Calibrated confidence, not hunches.</p></div>
-                        <div class="feat reveal" data-tilt><div class="ico">📊</div><h3>Live Analytics</h3><p>Probabilities that move with the match.</p></div>
-                        <div class="feat reveal" data-tilt><div class="ico">🎯</div><h3>Edge Finder</h3><p>Where AI disagrees with the crowd.</p></div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- 4 / LOUNGE -->
-        <section class="chapter" id="lounge" data-chapter="The Lounge">
-            <video class="bar-video" autoplay muted loop playsinline poster="public/image_rugby.jpeg"><source src="public/video_rugby.mp4" type="video/mp4"></video>
-            <div class="inner">
-                <div class="col">
-                    <p class="eyebrow reveal">The Rugby AI Lounge</p>
-                    <div class="neon reveal">Match Night,<br>On Tap.</div>
-                    <p class="lead reveal">Dim the lights, fire up the big screen and let the data flow like a cold one. This is where rugby fans and AI meet.</p>
-                    <div class="on-tap">
-                        <div class="tap reveal"><span class="dot"></span><span>Live win probability</span></div>
-                        <div class="tap reveal"><span class="dot"></span><span>Score predictions</span></div>
-                        <div class="tap reveal"><span class="dot"></span><span>Momentum tracker</span></div>
-                        <div class="tap reveal"><span class="dot"></span><span>Player impact ratings</span></div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- 5 / LEAGUES -->
-        <section class="chapter tint-c" id="leagues" data-chapter="Leagues">
-            <div class="inner" style="text-align:center;">
-                <p class="eyebrow reveal">Always something playing</p>
-                <h2 class="ttl reveal">Leagues <em>on the screens</em></h2>
-                <div class="leagues-grid">
-                    <div class="league reveal"><img class="lg-logo" alt="Six Nations" loading="lazy" data-emoji="🏴" data-domain="sixnationsrugby.com" src="https://highlightly.net/rugby/images/leagues/44185.png"><div class="lg-name">Six Nations</div><div class="lg-meta">Europe</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="The Rugby Championship" loading="lazy" data-emoji="🌍" data-domain="sanzaarrugby.com" src="https://highlightly.net/rugby/images/leagues/73119.png"><div class="lg-name">Rugby Champ.</div><div class="lg-meta">South</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="United Rugby Championship" loading="lazy" data-emoji="🛡️" data-domain="unitedrugby.com" src="https://highlightly.net/rugby/images/leagues/65460.png"><div class="lg-name">United Rugby C.</div><div class="lg-meta">URC</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="Currie Cup" loading="lazy" data-emoji="🇿🇦" data-domain="springboks.rugby" src="https://highlightly.net/rugby/images/leagues/32271.png"><div class="lg-name">Currie Cup</div><div class="lg-meta">South Africa</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="Rugby World Cup" loading="lazy" data-emoji="🏆" data-domain="rugbyworldcup.com" src="https://highlightly.net/rugby/images/leagues/59503.png"><div class="lg-name">World Cup</div><div class="lg-meta">Global</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="Super Rugby" loading="lazy" data-emoji="🌏" data-domain="super.rugby" src="https://highlightly.net/rugby/images/leagues/61205.png"><div class="lg-name">Super Rugby</div><div class="lg-meta">Pacific</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="Top 14" loading="lazy" data-emoji="🇫🇷" data-domain="lnr.fr" src="https://highlightly.net/rugby/images/leagues/14400.png"><div class="lg-name">Top 14</div><div class="lg-meta">France</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="Premiership Rugby" loading="lazy" data-emoji="🦁" data-domain="premiershiprugby.com" src="https://highlightly.net/rugby/images/leagues/11847.png"><div class="lg-name">Premiership</div><div class="lg-meta">England</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="International Friendlies" loading="lazy" data-emoji="🌐" data-domain="world.rugby" src="https://r2.thesportsdb.com/images/media/league/badge/wvurc21720171967.png"><div class="lg-name">Internationals</div><div class="lg-meta">Test Matches</div></div>
-                    <div class="league reveal"><img class="lg-logo" alt="Nations Championship" loading="lazy" data-emoji="🌟" data-domain="world.rugby" src="https://r2.thesportsdb.com/images/media/league/badge/8wdikp1738946921.png"><div class="lg-name">Nations Champ.</div><div class="lg-meta">Global</div></div>
-                </div>
-            </div>
-        </section>
-
-        <!-- 6 / PLANS -->
-        <section class="chapter tint-c" id="plans" data-chapter="Plans">
-            <div class="inner" style="text-align:center;">
-                <p class="eyebrow reveal">Choose your seat</p>
-                <h2 class="ttl reveal">Predictions, <em>poured fresh</em></h2>
-                <p class="lead reveal" style="margin-left:auto;margin-right:auto;max-width:560px;">Unlock the full lounge. Cancel anytime. Your license key is emailed the moment you join.</p>
-                <div class="plans-grid">
-                    <div class="plan reveal">
-                        <div class="p-name">Monthly</div><div class="p-dur">1 Month Access</div>
-                        <div class="p-price">$29</div><div class="p-sub">per month</div>
-                        <ul><li>Full access to all predictions</li><li>AI-powered match analysis</li><li>Real-time updates</li><li>All leagues included</li><li>Email support</li></ul>
-                        <button type="button" class="p-btn" data-hot data-plan="monthly" data-price="29" data-months="1">Choose Monthly</button>
-                    </div>
-                    <div class="plan featured reveal">
-                        <div class="badge">Popular</div>
-                        <div class="p-name">6 Months</div><div class="p-dur">6 Months Access</div>
-                        <div class="p-price">$149</div><div class="p-sub">Save $25</div>
-                        <ul><li>Everything in Monthly</li><li>6 months of predictions</li><li>Priority support</li><li>Advanced analytics</li><li>Best value option</li></ul>
-                        <button type="button" class="p-btn" data-hot data-plan="6months" data-price="149" data-months="6">Choose 6 Months</button>
-                    </div>
-                    <div class="plan reveal">
-                        <div class="p-name">Annual</div><div class="p-dur">1 Year Access</div>
-                        <div class="p-price">$249</div><div class="p-sub">Save $99</div>
-                        <ul><li>Everything in 6 Months</li><li>Full year of access</li><li>Premium support</li><li>Early access to features</li><li>Maximum savings</li></ul>
-                        <button type="button" class="p-btn" data-hot data-plan="yearly" data-price="249" data-months="12">Choose Annual</button>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- 7 / JOIN -->
-        <section class="chapter tint-c" id="join" data-chapter="Last Call">
-            <div class="inner" style="text-align:center;">
-                <h2 class="ttl reveal" style="font-size:clamp(2.8rem,9vw,7rem);">Last call.<br><em>Your seat is ready.</em></h2>
-                <p class="lead reveal" style="margin-left:auto;margin-right:auto;max-width:540px;">Join the lounge, unlock the AI and never watch a match the same way again.</p>
-                <div class="cta-buttons reveal" style="justify-content:center;">
-                    <a href="#plans" class="btn btn-primary" data-hot data-jump>🍻 Get Started</a>
-                    <a href="https://rugby-ai-predictor-app.web.app/" class="btn btn-secondary" data-hot>Launch App</a>
-                </div>
-            </div>
-        </section>
-
-        <!-- 8 / LEGAL -->
-        <section class="chapter chapter-solid" id="legal" data-chapter="Legal">
-            <style>
-                /* match the rest of the story: keep the 3D ball visible behind a translucent tint */
-                .chapter-solid { align-items: flex-start; padding-left: clamp(1rem, 2.5vw, 2rem); padding-right: clamp(1rem, 2.5vw, 2rem);
-                    background: radial-gradient(circle at 80% 0%, rgba(22,163,74,.14), transparent 45%),
-                                radial-gradient(circle at 12% 90%, rgba(52,242,154,.1), transparent 45%),
-                                radial-gradient(circle at 50% 55%, rgba(5,8,7,.45), rgba(5,8,7,.8) 80%); }
-                .chapter-solid .inner { max-width: 100%; }
-                .legal-stack { max-width: 100%; margin: 0 auto; display: grid; gap: 1.1rem; width: 100%; }
-                .legal-acc { position: relative; border: 1px solid rgba(134,239,172,.14); border-radius: 20px; overflow: hidden;
-                    background: linear-gradient(160deg, rgba(20,40,30,.6), rgba(8,14,11,.6));
-                    transition: transform .3s, border-color .3s, box-shadow .3s; }
-                .legal-acc:hover { transform: translateY(-4px); border-color: rgba(52,242,154,.35); box-shadow: 0 22px 50px rgba(0,0,0,.45); }
-                .legal-acc[open] { border-color: rgba(52,242,154,.45); box-shadow: 0 0 30px rgba(34,197,94,.12); }
-                .legal-acc summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center;
-                    padding: 1.2rem 1.5rem 1.2rem 1.7rem; font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem; letter-spacing: .04em; color: #fff; position: relative; }
-                .legal-acc summary::-webkit-details-marker { display: none; }
-                .legal-acc summary::before { content: ''; position: absolute; left: 0; top: .85rem; bottom: .85rem; width: 4px; border-radius: 4px;
-                    background: linear-gradient(180deg, var(--green-2), var(--green-3)); box-shadow: 0 0 12px var(--glow); }
-                .legal-acc summary i { font-style: normal; color: var(--green-3); font-size: 1.9rem; line-height: 1; transition: transform .35s cubic-bezier(.2,.7,.2,1); }
-                .legal-acc[open] summary i { transform: rotate(135deg); }
-                .legal-body { padding: 0 1.7rem 1.5rem; }
-                .legal-updated { display: inline-block; color: var(--mint); font-size: .72rem; text-transform: uppercase; letter-spacing: .14em; margin-bottom: 1rem;
-                    padding: .3rem .8rem; border: 1px solid rgba(134,239,172,.18); border-radius: 99px; background: rgba(12,58,40,.4); }
-                .legal-body h4 { color: var(--mint); font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 1.02rem; margin: 1.3rem 0 .4rem; }
-                .legal-body h5 { color: #cfe9dc; font-weight: 600; font-size: .92rem; margin: .8rem 0 .3rem; }
-                .legal-body p { color: #b9d3c7; margin-bottom: .7rem; font-size: .94rem; line-height: 1.7; }
-                .legal-body ul, .legal-body ol { color: #b9d3c7; margin: .3rem 0 .9rem 1.3rem; }
-                .legal-body li { margin-bottom: .4rem; line-height: 1.7; }
-                .legal-body li::marker { color: var(--green-3); }
-                .legal-body strong { color: var(--ink); }
-                .legal-highlight { background: linear-gradient(135deg, rgba(34,197,94,.14), rgba(12,58,40,.4)); border: 1.5px solid rgba(52,242,154,.45);
-                    border-radius: 12px; padding: 1rem 1.2rem; margin: 1rem 0; box-shadow: 0 0 24px rgba(34,197,94,.12); }
-                .legal-highlight p { color: #d7f7e6; font-weight: 500; margin: 0; }
-                @media (max-width: 680px) {
-                    .legal-acc { transition: none; }
-                    .legal-acc:hover { transform: none; border-color: rgba(134,239,172,.14); box-shadow: none; }
-                    .legal-acc[open] { border-color: rgba(134,239,172,.14); box-shadow: none; }
-                    .legal-acc summary { justify-content: center; text-align: center; font-size: 1.3rem; padding: 1.15rem 2.6rem; }
-                    .legal-acc summary::before { display: none; }
-                    .legal-acc summary i { position: absolute; right: 1.2rem; top: 50%; transform: translateY(-50%); }
-                    .legal-acc[open] summary i { transform: translateY(-50%) rotate(135deg); }
-                    .legal-body { padding: 0 1.3rem 1.4rem; }
-                }
-            </style>
-            <div class="inner">
-                <p class="eyebrow reveal" style="text-align:center;">The fine print</p>
-                <h2 class="ttl reveal" style="text-align:center;">Legal <em>&amp; policies</em></h2>
-                <p class="lead reveal" style="margin:.6rem auto 2rem;max-width:560px;text-align:center;">Terms, privacy and refunds — all in one place. Tap a section to expand.</p>
-
-                <div class="legal-stack">
-                    <!-- TERMS -->
-                    <details class="legal-acc reveal" id="terms" open>
-                        <summary><span>Terms of Service</span><i>+</i></summary>
-                        <div class="legal-body">
-                            <div class="legal-updated">Last Updated: December 2024</div>
-                            <h4>1. Acceptance of Terms</h4>
-                            <p>By accessing and using the Rugby AI Predictor service ("Service"), you accept and agree to be bound by the terms and provision of this agreement. If you do not agree to abide by the above, please do not use this service.</p>
-                            <h4>2. Description of Service</h4>
-                            <p>Rugby AI Predictor provides AI-powered match predictions, analytics, and statistical insights for rugby matches. The Service uses machine learning algorithms to analyze historical data and generate predictions. All predictions are for informational and entertainment purposes only.</p>
-                            <h4>3. Subscription and License Keys</h4>
-                            <h5>3.1 Subscription Plans</h5>
-                            <p>We offer various subscription plans (monthly, 6-month, and yearly). Subscription fees are charged in advance and are non-refundable except as required by law or as specified in our Refund Policy.</p>
-                            <h5>3.2 License Keys</h5>
-                            <p>Upon successful payment, you will receive a unique license key via email. This license key grants you access to premium features for the duration of your subscription. License keys are:</p>
-                            <ul><li>Non-transferable and may not be shared with others</li><li>Valid only for the subscription period purchased</li><li>Bound to your registered browser/device profile — if your device, browser, or system settings change significantly, re-approval may be required</li><li>Subject to revocation if terms are violated</li></ul>
-                            <h4>4. Use of Service</h4>
-                            <h5>4.1 Permitted Use</h5><p>You may use the Service for:</p>
-                            <ul><li>Personal analysis and entertainment</li><li>Research and educational purposes</li><li>Non-commercial information gathering</li></ul>
-                            <h5>4.2 Prohibited Use</h5><p>You agree NOT to:</p>
-                            <ul><li>Share, sell, or distribute your license key</li><li>Use the Service for illegal gambling or betting operations</li><li>Reverse engineer, decompile, or attempt to extract the source code</li><li>Use automated systems to access the Service (scraping, bots, etc.)</li><li>Interfere with or disrupt the Service or servers</li><li>Use the Service to violate any applicable laws or regulations</li></ul>
-                            <h4>5. Predictions and Accuracy</h4>
-                            <p>All predictions provided by the Service are generated using AI algorithms and historical data analysis. We make no guarantees regarding the accuracy of predictions. Predictions are:</p>
-                            <ul><li>For informational and entertainment purposes only</li><li>Not financial, legal, or betting advice</li><li>Subject to the inherent uncertainty of sports outcomes</li><li>Not a guarantee of future results</li></ul>
-                            <p>You acknowledge that sports outcomes are unpredictable and that past performance does not guarantee future results. You use predictions at your own risk.</p>
-                            <h4>6. Intellectual Property</h4>
-                            <p>All content, features, and functionality of the Service, including but not limited to text, graphics, logos, algorithms, and software, are the property of Rugby AI Predictor and are protected by international copyright, trademark, and other intellectual property laws.</p>
-                            <p>You may not reproduce, distribute, modify, or create derivative works of any content from the Service without express written permission.</p>
-                            <h4>7. Account Termination</h4>
-                            <p>We reserve the right to terminate or suspend your access to the Service immediately, without prior notice, for any breach of these Terms of Service. Upon termination:</p>
-                            <ul><li>Your license key will be deactivated</li><li>You will lose access to premium features</li><li>No refund will be provided for the remaining subscription period</li></ul>
-                            <h4>8. Limitation of Liability</h4>
-                            <p>To the maximum extent permitted by law, Rugby AI Predictor shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible losses resulting from your use of the Service, any predictions provided, decisions made based on the Service, or unauthorized access to your data.</p>
-                            <h4>9. Disclaimer of Warranties</h4>
-                            <p>The Service is provided "as is" and "as available" without warranties of any kind, either express or implied, including but not limited to implied warranties of merchantability, fitness for a particular purpose, or non-infringement.</p>
-                            <h4>10. Changes to Terms</h4>
-                            <p>We reserve the right to modify these Terms of Service at any time. We will notify users of any material changes via email or through the Service. Your continued use of the Service after such modifications constitutes acceptance of the updated terms.</p>
-                            <h4>11. Governing Law</h4>
-                            <p>These Terms of Service shall be governed by and construed in accordance with the laws of the jurisdiction in which Rugby AI Predictor operates, without regard to its conflict of law provisions.</p>
-                            <h4>12. Contact Information</h4>
-                            <p>If you have any questions about these Terms of Service, please contact us through the Service or via the contact information provided in your subscription confirmation email.</p>
-                        </div>
-                    </details>
-
-                    <!-- PRIVACY -->
-                    <details class="legal-acc reveal" id="privacy" open>
-                        <summary><span>Privacy Policy</span><i>+</i></summary>
-                        <div class="legal-body">
-                            <div class="legal-updated">Last Updated: December 2024</div>
-                            <h4>1. Introduction</h4>
-                            <p>Rugby AI Predictor ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our Service.</p>
-                            <h4>2. Information We Collect</h4>
-                            <h5>2.1 Information You Provide</h5><p>We collect information that you provide directly to us, including:</p>
-                            <ul><li><strong>Email Address:</strong> Used for account creation, license key delivery, and communication</li><li><strong>Name:</strong> Used for personalization and account management</li><li><strong>Payment Information:</strong> Processed securely through third-party payment processors (we do not store full payment card details)</li><li><strong>License Key:</strong> Generated and stored to manage your subscription access</li></ul>
-                            <h5>2.2 Automatically Collected Information</h5><p>When you use our Service, we may automatically collect device information, usage data, IP address, and cookies or similar tracking technologies.</p>
-                            <h4>3. How We Use Your Information</h4>
-                            <p>We use the collected information to provide and improve our Service, process your subscription, deliver license keys, respond to inquiries, prevent security threats, analyze usage, and comply with legal obligations.</p>
-                            <h4>4. Data Storage and Security</h4>
-                            <p>Your data is stored securely using industry-standard cloud infrastructure (Firebase/Google Cloud Platform). We use encryption in transit (HTTPS/TLS), secure authentication, regular audits and access controls. However, no method of transmission or storage is 100% secure and we cannot guarantee absolute security.</p>
-                            <h4>5. Information Sharing and Disclosure</h4>
-                            <p>We do not sell, trade, or rent your personal information. We may share information only with trusted service providers, when required by law, to protect rights, or in connection with a business transfer.</p>
-                            <h4>6. Cookies and Tracking</h4>
-                            <p>We use cookies to remember preferences, analyze usage and provide personalized content. You can instruct your browser to refuse cookies, though some features may not work as a result.</p>
-                            <h4>7. Your Rights and Choices</h4>
-                            <p>Depending on your location, you may have rights to access, correct, delete, or port your personal information, and to opt out of marketing communications. Contact us to exercise these rights.</p>
-                            <h4>8. Data Retention</h4>
-                            <p>We retain your personal information for as long as necessary to provide the Service and fulfill the purposes outlined here, unless a longer retention period is required by law.</p>
-                            <h4>9. Children's Privacy</h4>
-                            <p>Our Service is not intended for individuals under the age of 18. We do not knowingly collect personal information from children.</p>
-                            <h4>10. International Data Transfers</h4>
-                            <p>Your information may be transferred to and processed in countries other than your country of residence. By using our Service, you consent to these transfers.</p>
-                            <h4>11. Changes to This Privacy Policy</h4>
-                            <p>We may update this Privacy Policy from time to time and will post the new version with an updated date. Please review it periodically.</p>
-                            <h4>12. Contact Us</h4>
-                            <p>If you have questions about this Privacy Policy or our data practices, please contact us through the Service or via your subscription confirmation email.</p>
-                        </div>
-                    </details>
-
-                    <!-- REFUND -->
-                    <details class="legal-acc reveal" id="refund" open>
-                        <summary><span>Refund Policy</span><i>+</i></summary>
-                        <div class="legal-body">
-                            <div class="legal-updated">Last Updated: December 2024</div>
-                            <h4>1. Overview</h4>
-                            <p>This Refund Policy outlines the terms and conditions under which refunds may be issued for subscriptions to Rugby AI Predictor. Please read this policy carefully before making a purchase.</p>
-                            <h4>2. Subscription Refund Eligibility</h4>
-                            <div class="legal-highlight"><p><strong>7-Day Money-Back Guarantee:</strong> We offer a 7-day money-back guarantee for all new subscriptions. If you are not satisfied within 7 days of your initial purchase, you may request a full refund.</p></div>
-                            <h5>2.1 Eligible Refund Requests</h5>
-                            <ul><li><strong>Within 7 Days of Purchase:</strong> Full refund available for any reason</li><li><strong>Service Failure:</strong> If the Service is unavailable for more than 48 hours due to issues on our end</li><li><strong>Duplicate Charges:</strong> If you were charged multiple times for the same subscription</li><li><strong>Unauthorized Purchase:</strong> If your payment method was used without authorization</li></ul>
-                            <h5>2.2 Non-Refundable Situations</h5>
-                            <ul><li>After the 7-day guarantee period has expired</li><li>If you have violated our Terms of Service</li><li>If you have shared or transferred your license key</li><li>For partial subscription periods</li><li>If you simply changed your mind after the 7-day period</li><li>For subscription renewals (only initial purchases qualify)</li></ul>
-                            <h4>3. How to Request a Refund</h4>
-                            <p>Contact us using the email associated with your subscription and include your email, license key (if available), date of purchase, reason, and transaction ID. We will review and respond within 5-7 business days.</p>
-                            <h4>4. Refund Processing</h4>
-                            <p>Once approved, refunds are processed within 5-10 business days to the original payment method. Upon approval, your license key is deactivated immediately and cannot be reactivated.</p>
-                            <h4>5. Subscription Cancellation</h4>
-                            <p><strong>Cancellation</strong> stops future renewals but does not refund the current period. <strong>Refund</strong> returns your payment and deactivates your key. Cancellation takes effect at the end of your current billing period.</p>
-                            <h4>6. Chargebacks and Disputes</h4>
-                            <p>If you initiate a chargeback instead of contacting us, we may deactivate your license key, ban your account from future subscriptions, and challenge the chargeback. Please contact us first to resolve any issues.</p>
-                            <h4>7. Special Circumstances</h4>
-                            <p>For persistent technical issues we may consider a refund on a case-by-case basis even outside the guarantee period. If we discontinue the Service, we will provide prorated refunds for the unused portion.</p>
-                            <h4>8. Currency and Payment Methods</h4>
-                            <p>Refunds are issued in the same currency and to the same payment method used for the original purchase.</p>
-                            <h4>9. Changes to Refund Policy</h4>
-                            <p>We reserve the right to modify this Refund Policy at any time. For existing subscribers, the policy in effect at the time of purchase applies.</p>
-                            <h4>10. Contact Information</h4>
-                            <p>For any questions or to request a refund, contact us through the Service or via your subscription confirmation email.</p>
-                        </div>
-                    </details>
-                </div>
-
-                <p class="lead reveal" style="text-align:center;margin-top:2rem;">
-                    <a href="#plans" data-jump class="btn btn-secondary" data-hot>Back to Plans</a>
-                </p>
-            </div>
-        </section>
-    </main>
-
-    <!-- Purchase Modal -->
-    <div class="pay-modal" id="payModal" aria-hidden="true">
-        <style>
-            .pay-modal { position: fixed; inset: 0; z-index: 100001; display: none; align-items: center; justify-content: center; padding: 1.2rem;
-                background: rgba(2,6,4,.74); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-            .pay-modal.active { display: flex; }
-            .pay-card { position: relative; width: 100%; max-width: 470px; max-height: 92vh; overflow-y: auto; padding: 2rem;
-                border-radius: 20px; border: 1.5px solid rgba(134,239,172,.32); background: linear-gradient(160deg, rgba(15,23,42,.98), rgba(2,6,23,1));
-                box-shadow: 0 30px 70px rgba(0,0,0,.7); animation: payIn .35s cubic-bezier(.2,.8,.2,1); }
-            @keyframes payIn { from { opacity: 0; transform: translateY(20px) scale(.97); } to { opacity: 1; transform: none; } }
-            .pay-close { position: absolute; top: .9rem; right: .9rem; width: 38px; height: 38px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12);
-                background: rgba(255,255,255,.06); color: #f9fafb; font-size: 1.4rem; cursor: pointer; line-height: 1; transition: all .25s; }
-            .pay-close:hover { background: rgba(239,68,68,.2); border-color: rgba(239,68,68,.4); color: #fca5a5; }
-            .pay-title { font-family: 'Bebas Neue', sans-serif; font-size: 2rem; letter-spacing: .03em; color: #fff; }
-            .pay-sub { color: #9ca3af; margin-bottom: 1.3rem; font-size: .92rem; }
-            .pay-label { display: block; color: #d1d5db; font-weight: 600; font-size: .88rem; margin: 1rem 0 .4rem; }
-            .pay-input { width: 100%; padding: .8rem 1rem; border-radius: 12px; background: rgba(2,6,23,.8); border: 1.5px solid rgba(75,85,99,.5);
-                color: #f9fafb; font-size: 1rem; font-family: inherit; transition: border-color .25s, box-shadow .25s; }
-            .pay-input:focus { outline: none; border-color: var(--green-2); box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
-            .pay-input::placeholder { color: #6b7280; }
-            .pay-summary { margin: 1.3rem 0; padding: 1rem 1.1rem; border-radius: 12px; background: rgba(2,6,23,.6); border: 1px solid rgba(75,85,99,.3); }
-            .pay-summary > div { display: flex; justify-content: space-between; color: #d1d5db; margin-bottom: .5rem; font-size: .94rem; }
-            .pay-summary .total { margin-bottom: 0; padding-top: .6rem; margin-top: .2rem; border-top: 1px solid rgba(255,255,255,.1); font-weight: 700; font-size: 1.15rem; color: var(--green-2); }
-            .pay-error { display: none; color: #fca5a5; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); border-radius: 10px; padding: .7rem 1rem; margin-bottom: 1rem; font-size: .9rem; }
-            .pay-error.active { display: block; }
-            .pay-btn { width: 100%; padding: 1rem; border: 0; border-radius: 12px; background: linear-gradient(135deg, var(--green-1), var(--green-2)); color: #fff;
-                font-weight: 700; font-size: 1.05rem; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; font-family: inherit; transition: transform .25s, box-shadow .25s; }
-            .pay-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(34,197,94,.45); }
-            .pay-btn:disabled { opacity: .6; cursor: not-allowed; }
-            .pay-spin { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: payspin .8s linear infinite; vertical-align: -2px; margin-right: .5rem; }
-            @keyframes payspin { to { transform: rotate(360deg); } }
-            .pay-success { display: none; text-align: center; }
-            .pay-success.active { display: block; }
-            .pay-success h3 { color: var(--green-2); font-family: 'Bebas Neue', sans-serif; font-size: 1.9rem; margin-bottom: .6rem; }
-            .pay-success p { color: #d1d5db; font-size: .94rem; margin-bottom: .6rem; }
-            .pay-success strong { color: #fff; }
-        </style>
-        <div class="pay-card">
-            <button class="pay-close" id="payClose" aria-label="Close">&times;</button>
-            <h3 class="pay-title">Complete Your Purchase</h3>
-            <p class="pay-sub">Enter your details to receive your license key</p>
-            <form id="payForm">
-                <label class="pay-label" for="payEmail">Email Address *</label>
-                <input id="payEmail" type="email" class="pay-input" placeholder="your.email@example.com" required>
-                <label class="pay-label" for="payName">Full Name *</label>
-                <input id="payName" type="text" class="pay-input" placeholder="John Doe" required>
-                <div class="pay-summary">
-                    <div><span>Plan:</span><span id="sumPlan">-</span></div>
-                    <div><span>Duration:</span><span id="sumDur">-</span></div>
-                    <div class="total"><span>Total:</span><span id="sumTotal">$0</span></div>
-                </div>
-                <div class="pay-error" id="payError"></div>
-                <button type="submit" class="pay-btn" id="payBtn">Complete Purchase</button>
-            </form>
-            <div class="pay-success" id="paySuccess">
-                <h3>✅ Payment Successful!</h3>
-                <p>Your subscription has been activated!</p>
-                <p><strong>Your license key has been sent to your email address.</strong></p>
-                <p>Please check your inbox (and spam folder) for your license key and activation instructions.</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="footer-brand"><img src="public/rugby_emoji.png" alt="Rugby Ball" /> Rugby AI Predictor</div>
-        <div class="footer-links">
-            <a href="#hero" data-jump class="footer-link">Home</a>
-            <a href="#about" data-jump class="footer-link">About</a>
-            <a href="#plans" data-jump class="footer-link">Plans</a>
-            <a href="#terms" data-jump class="footer-link">Terms of Service</a>
-            <a href="#privacy" data-jump class="footer-link">Privacy Policy</a>
-            <a href="#refund" data-jump class="footer-link">Refund Policy</a>
-            <a href="#plans" data-jump class="footer-link">Subscribe / Buy</a>
-        </div>
-        <div class="footer-copyright">
-            <p>&copy; 2024 Rugby AI Predictor. All rights reserved.</p>
-            <p>Advanced rugby analytics and match prediction platform. For entertainment and analytical purposes only.</p>
-        </div>
-    </footer>
-
-    <!-- libs -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
-    <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
-
-    <script type="importmap">
-    { "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-    } }
-    </script>
-
-    <script type="module">
-        const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-        const isTouch = matchMedia('(hover: none), (pointer: coarse)').matches;
-
-        /* ---- preloader ---- */
-        (function () {
-            const fill = document.getElementById('plFill'), pre = document.getElementById('preloader');
-            let p = 0; const t = setInterval(() => { p = Math.min(100, p + Math.random()*18); if (fill) fill.style.width = p+'%'; if (p>=100){ clearInterval(t); setTimeout(()=>pre.classList.add('done'),350);} }, 130);
-            addEventListener('load', () => { if (fill) fill.style.width='100%'; setTimeout(()=>pre.classList.add('done'),500); });
-        })();
-
-        /* ---- cursor ---- */
-        if (!isTouch) {
-            const dot = document.getElementById('cursorDot'), ring = document.getElementById('cursorRing');
-            let mx = innerWidth/2, my = innerHeight/2, rx = mx, ry = my, dx = mx, dy = my;
-            addEventListener('mousemove', e => { mx=e.clientX; my=e.clientY; });
-            (function l(){
-                dx+=(mx-dx)*.5; dy+=(my-dy)*.5; dot.style.left=dx+'px'; dot.style.top=dy+'px';
-                rx+=(mx-rx)*.16; ry+=(my-ry)*.16; ring.style.left=rx+'px'; ring.style.top=ry+'px';
-                requestAnimationFrame(l);
-            })();
-            document.querySelectorAll('a,button,[data-hot],summary,input,.plan,.feat,.league,.tap').forEach(el=>{
-                el.addEventListener('mouseenter',()=>ring.classList.add('hot'));
-                el.addEventListener('mouseleave',()=>ring.classList.remove('hot'));
-            });
-            document.addEventListener('mouseleave',()=>{ dot.style.opacity='0'; ring.style.opacity='0'; });
-            document.addEventListener('mouseenter',()=>{ dot.style.opacity=''; ring.style.opacity=''; });
-        }
-
-        /* ---- league logos: clearbit -> favicon -> emoji ---- */
-        document.querySelectorAll('.lg-logo').forEach(img => {
-            let stage = 0;
-            img.addEventListener('error', () => {
-                stage++;
-                if (stage === 1) {
-                    img.src = 'https://icons.duckduckgo.com/ip3/' + img.dataset.domain + '.ico';
-                } else {
-                    const span = document.createElement('div');
-                    span.className = 'lg-emoji';
-                    span.textContent = img.dataset.emoji || '🏉';
-                    img.replaceWith(span);
-                }
-            });
-        });
-
-        /* ---- nav ---- */
-        const navbar = document.getElementById('navbar');
-        addEventListener('scroll', () => navbar.classList.toggle('shrink', scrollY > 40));
-        const navToggle = document.getElementById('navToggle'), navLinks = document.getElementById('navLinks'), navBackdrop = document.getElementById('navBackdrop');
-        function setMenu(open) {
-            navLinks.classList.toggle('open', open);
-            navToggle.classList.toggle('open', open);
-            navBackdrop.classList.toggle('open', open);
-            navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-            document.body.style.overflow = open ? 'hidden' : '';
-            if (lenis) { open ? lenis.stop() : lenis.start(); }
-        }
-        navToggle.addEventListener('click', () => setMenu(!navLinks.classList.contains('open')));
-        navBackdrop.addEventListener('click', () => setMenu(false));
-        navLinks.querySelectorAll('a').forEach(a => a.addEventListener('click', () => setMenu(false)));
-        addEventListener('keydown', e => { if (e.key === 'Escape' && navLinks.classList.contains('open')) setMenu(false); });
-
-        /* ---- ticker ---- */
-        (function () {
-            const teams = [['Springboks','All Blacks'],['Ireland','France'],['England','Wales'],['Leinster','Stormers'],['Crusaders','Brumbies'],['Toulouse','La Rochelle'],['Scotland','Italy'],['Argentina','Australia'],['Saracens','Bath']];
-            const track = document.getElementById('tickerTrack');
-            const make = () => teams.map(([a,b])=>{ const sa=Math.floor(Math.random()*35), sb=Math.floor(Math.random()*35), ai=50+Math.floor(Math.random()*45);
-                return `<span class="tk"><span class="ft">LIVE</span> ${a} <b>${sa}</b> – <b>${sb}</b> ${b} <span class="ai">AI ${ai}%</span></span>`; }).join('');
-            track.innerHTML = make()+make();
-        })();
-
-        /* ---- chapter rail ---- */
-        const chapters = [...document.querySelectorAll('.chapter')];
-        const rail = document.getElementById('rail');
-        chapters.forEach((sec, i) => {
-            const b = document.createElement('button');
-            b.innerHTML = `<span class="name">${sec.dataset.chapter}</span><span class="tick"></span>`;
-            b.addEventListener('click', () => jumpTo('#'+sec.id));
-            rail.appendChild(b);
-        });
-        const railBtns = [...rail.children];
-
-        /* ---- Lenis smooth scroll ---- */
-        let lenis = null;
-        if (!reduceMotion && window.Lenis) {
-            lenis = new Lenis({ lerp: 0.075, wheelMultiplier: 1.05, smoothWheel: true, syncTouch: false });
-            if (window.gsap && window.gsap.ticker) {
-                window.gsap.ticker.add(t => lenis.raf(t * 1000));
-                window.gsap.ticker.lagSmoothing(0);
-            } else {
-                const raf = t => { lenis.raf(t); requestAnimationFrame(raf); };
-                requestAnimationFrame(raf);
-            }
-        }
-        function jumpTo(sel) {
-            const el = document.querySelector(sel); if (!el) return;
-            setMenu(false);
-            // open the matching policy accordion if we're jumping to one
-            const det = (el.tagName === 'DETAILS') ? el : (el.closest ? el.closest('details') : null);
-            if (det) det.open = true;
-            const off = 72;
-            if (lenis) lenis.scrollTo(el, { offset: -off, duration: 1.1 });
-            else { const y = el.getBoundingClientRect().top + scrollY - off; scrollTo({ top: y, behavior: 'smooth' }); }
-        }
-        document.querySelectorAll('[data-jump]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); jumpTo(a.getAttribute('href')); }));
-        // deep links like index.html#terms / #privacy / #refund
-        addEventListener('load', () => { const h = location.hash; if (h && h.length > 1 && document.querySelector(h)) setTimeout(() => jumpTo(h), 350); });
-
-        // expanding/collapsing a legal accordion changes page height — tell the scroll engines
-        function refreshScroll() {
-            if (lenis && lenis.resize) lenis.resize();
-            if (window.ScrollTrigger) window.ScrollTrigger.refresh();
-        }
-        // on mobile, start the legal accordions collapsed
-        if (matchMedia('(max-width: 680px)').matches) {
-            document.querySelectorAll('.legal-acc[open]').forEach(d => d.removeAttribute('open'));
-        }
-        document.querySelectorAll('.legal-acc').forEach(d => d.addEventListener('toggle', () => {
-            refreshScroll();
-            // run again after the open/close transition settles
-            setTimeout(refreshScroll, 60);
-        }));
-
-        /* ---- in-page purchase (Firebase license key) ---- */
-        (function () {
-            let fbFunctions = null;
-            try {
-                if (window.firebase) {
-                    if (!firebase.apps || !firebase.apps.length) {
-                        firebase.initializeApp({
-                            apiKey: "AIzaSyAMZ0md0_DADjaI7Z4QujftjMp6e2P6gaw",
-                            authDomain: "rugby-ai-61fd0.firebaseapp.com",
-                            projectId: "rugby-ai-61fd0"
-                        });
-                    }
-                    fbFunctions = firebase.functions();
-                }
-            } catch (e) { console.warn('Firebase init failed', e); }
-
-            const modal = document.getElementById('payModal');
-            const form = document.getElementById('payForm');
-            const success = document.getElementById('paySuccess');
-            const errBox = document.getElementById('payError');
-            const btn = document.getElementById('payBtn');
-            let plan = { type: 'monthly', price: 29, months: 1 };
-
-            function openModal(type, price, months) {
-                plan = { type, price, months };
-                document.getElementById('sumPlan').textContent =
-                    type === 'monthly' ? 'Monthly Plan' : type === '6months' ? '6 Months Plan' : 'Annual Plan';
-                document.getElementById('sumDur').textContent =
-                    months === 1 ? '1 Month' : months === 6 ? '6 Months' : '12 Months';
-                document.getElementById('sumTotal').textContent = '$' + price;
-                form.reset(); form.style.display = ''; success.classList.remove('active'); errBox.classList.remove('active');
-                btn.disabled = false; btn.textContent = 'Complete Purchase';
-                modal.classList.add('active'); modal.setAttribute('aria-hidden', 'false');
-                if (lenis) lenis.stop(); document.body.style.overflow = 'hidden';
-            }
-            function closeModal() {
-                modal.classList.remove('active'); modal.setAttribute('aria-hidden', 'true');
-                if (lenis) lenis.start(); document.body.style.overflow = '';
-            }
-
-            document.querySelectorAll('[data-plan]').forEach(b => b.addEventListener('click', e => {
-                e.preventDefault();
-                openModal(b.dataset.plan, +b.dataset.price, +b.dataset.months);
-            }));
-            document.getElementById('payClose').addEventListener('click', closeModal);
-            modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
-            addEventListener('keydown', e => { if (e.key === 'Escape' && modal.classList.contains('active')) closeModal(); });
-
-            form.addEventListener('submit', async e => {
-                e.preventDefault();
-                const email = document.getElementById('payEmail').value.trim();
-                const name = document.getElementById('payName').value.trim();
-                if (!email || !email.includes('@')) {
-                    errBox.textContent = 'Please enter a valid email address'; errBox.classList.add('active'); return;
-                }
-                if (!fbFunctions) {
-                    errBox.textContent = 'Payment service is unavailable right now. Please try again shortly.';
-                    errBox.classList.add('active'); return;
-                }
-                btn.disabled = true; btn.innerHTML = '<span class="pay-spin"></span>Processing Payment...';
-                errBox.classList.remove('active');
-                try {
-                    const durationDays = plan.type === '6months' ? 180 : plan.type === 'yearly' ? 365 : 30;
-                    const generateLicenseKey = fbFunctions.httpsCallable('generate_license_key_with_email');
-                    const result = await generateLicenseKey({
-                        email, name, subscription_type: plan.type, duration_days: durationDays, amount: plan.price
-                    });
-                    if (result.data && result.data.error) throw new Error(result.data.error);
-                    form.style.display = 'none'; success.classList.add('active');
-                    if (result.data && result.data.email_sent === false) {
-                        const w = document.createElement('p');
-                        w.style.color = '#fbbf24'; w.style.marginTop = '1rem';
-                        w.textContent = '⚠️ Email sending failed. Please contact support with your license key.';
-                        success.appendChild(w);
-                    }
-                    setTimeout(closeModal, 9000);
-                } catch (err) {
-                    console.error('Payment error', err);
-                    errBox.textContent = err.message || 'Payment failed. Please try again.';
-                    errBox.classList.add('active');
-                    btn.disabled = false; btn.textContent = 'Complete Purchase';
-                }
-            });
-        })();
-
-        /* ---- scroll progress + active chapter + scroll cue ---- */
-        const sp = document.getElementById('scrollProgress'), cue = document.getElementById('scrollCue');
-        function onScroll() {
-            const h = document.documentElement.scrollHeight - innerHeight;
-            sp.style.width = (h>0 ? (scrollY/h)*100 : 0) + '%';
-            cue.style.opacity = scrollY > 120 ? '0' : '.9';
-        }
-        addEventListener('scroll', onScroll); onScroll();
-
-        const io = new IntersectionObserver(entries => {
-            entries.forEach(en => {
-                if (en.isIntersecting) {
-                    const idx = chapters.indexOf(en.target);
-                    railBtns.forEach((b,i)=>b.classList.toggle('active', i===idx));
-                    const id = en.target.id;
-                    document.querySelectorAll('.nav-links a[data-jump]').forEach(a=>a.classList.toggle('active', a.getAttribute('href')==='#'+id));
-                }
-            });
-        }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
-        chapters.forEach(c => io.observe(c));
-
-        /* ---- reveals + counters + GSAP ---- */
-        if (window.gsap && window.ScrollTrigger) {
-            gsap.registerPlugin(ScrollTrigger);
-            if (lenis) { lenis.on('scroll', ScrollTrigger.update); }
-
-            document.querySelectorAll('.reveal').forEach(el => ScrollTrigger.create({ trigger: el, start: 'top 88%', onEnter: () => el.classList.add('in') }));
-            gsap.from('[data-split]', { yPercent: 120, opacity: 0, duration: 1.1, ease: 'power4.out', stagger: .12, delay: .5 });
-            gsap.from('.kicker, #hero .lead, #hero .cta-buttons', { y: 28, opacity: 0, duration: 1, ease: 'power3.out', stagger: .12, delay: 1 });
-
-            document.querySelectorAll('[data-count]').forEach(el => {
-                const end = +el.dataset.count, suf = el.dataset.suffix || '';
-                ScrollTrigger.create({ trigger: el, start: 'top 92%', once: true, onEnter: () => gsap.to({v:0}, { v:end, duration:1.7, ease:'power2.out', onUpdate(){ el.textContent = Math.round(this.targets()[0].v)+suf; } }) });
-            });
-        } else {
-            document.querySelectorAll('.reveal').forEach(el => el.classList.add('in'));
-            document.querySelectorAll('[data-count]').forEach(el => el.textContent = el.dataset.count + (el.dataset.suffix||''));
-        }
-
-        /* ---- feature tilt/glow ---- */
-        if (!isTouch) {
-            document.querySelectorAll('[data-tilt]').forEach(card => {
-                card.addEventListener('mousemove', e => { const r=card.getBoundingClientRect(); const px=(e.clientX-r.left)/r.width, py=(e.clientY-r.top)/r.height;
-                    card.style.setProperty('--mx',px*100+'%'); card.style.setProperty('--my',py*100+'%'); card.style.transform=`translateY(-5px) rotateX(${(py-.5)*-7}deg) rotateY(${(px-.5)*9}deg)`; });
-                card.addEventListener('mouseleave', () => card.style.transform = '');
-            });
-        }
-
-        /* ============ THREE.JS — persistent ball travelling the story ============ */
-        (async function () {
-            const canvas = document.getElementById('heroCanvas');
-            let THREE, renderer;
-            try { THREE = await import('three'); renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true, powerPreference:'high-performance' }); }
-            catch (err) { console.warn('WebGL unavailable', err); document.getElementById('stage').classList.add('webgl-fallback'); canvas.style.display='none'; return; }
-
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, .1, 100);
-            camera.position.set(0,0,9);
-            renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-            renderer.setSize(innerWidth, innerHeight);
-            renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.12;
-
-            function makeBallTexture() {
-                const c = document.createElement('canvas'); c.width=1024; c.height=512; const x=c.getContext('2d');
-                const g=x.createLinearGradient(0,0,0,512); g.addColorStop(0,'#1f7a4d'); g.addColorStop(.5,'#0e5733'); g.addColorStop(1,'#0a3d24');
-                x.fillStyle=g; x.fillRect(0,0,1024,512);
-                for (let i=0;i<8000;i++){ x.fillStyle=`rgba(255,255,255,${Math.random()*.05})`; x.beginPath(); x.arc(Math.random()*1024,Math.random()*512,Math.random()*1.6,0,7); x.fill(); }
-                [.25,.5,.75,1].forEach(f=>{ const px=f*1024; x.strokeStyle='rgba(0,0,0,.55)'; x.lineWidth=6; x.beginPath(); x.moveTo(px,0); x.lineTo(px,512); x.stroke();
-                    x.strokeStyle='rgba(230,255,240,.8)'; x.lineWidth=2; for(let y=8;y<512;y+=22){ x.beginPath(); x.moveTo(px-8,y); x.lineTo(px+8,y); x.stroke(); } });
-                const tex=new THREE.CanvasTexture(c); tex.anisotropy=renderer.capabilities.getMaxAnisotropy(); tex.wrapS=tex.wrapT=THREE.RepeatWrapping; return tex;
-            }
-
-            const geo = new THREE.SphereGeometry(1.5, isTouch?64:96, isTouch?40:64); geo.scale(1,1.75,1);
-            const mat = new THREE.MeshStandardMaterial({ map: makeBallTexture(), roughness:.42, metalness:.15, emissive:new THREE.Color('#0a3d24'), emissiveIntensity:.25 });
-            const ball = new THREE.Mesh(geo, mat);
-            const ballGroup = new THREE.Group(); ballGroup.add(ball); ballGroup.rotation.z = .7; ballGroup.rotation.x = .15; scene.add(ballGroup);
-
-            const gc=document.createElement('canvas'); gc.width=gc.height=256; const gx=gc.getContext('2d');
-            const rg=gx.createRadialGradient(128,128,0,128,128,128); rg.addColorStop(0,'rgba(52,242,154,.55)'); rg.addColorStop(1,'rgba(52,242,154,0)'); gx.fillStyle=rg; gx.fillRect(0,0,256,256);
-            const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(gc), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false }));
-            glow.scale.set(11,11,1); glow.position.set(0,0,-2.5); scene.add(glow);
-
-            scene.add(new THREE.AmbientLight(0x335544, .7));
-            const key=new THREE.SpotLight(0xffffff,90,40,Math.PI/5,.4,1.4); key.position.set(6,9,8); scene.add(key);
-            const rimG=new THREE.PointLight(0x34f29a,70,30); rimG.position.set(-8,-2,4); scene.add(rimG);
-            const rimW=new THREE.PointLight(0x2dd4bf,45,30); rimW.position.set(8,-4,-4); scene.add(rimW);
-            const top=new THREE.DirectionalLight(0xffffff,.6); top.position.set(0,10,2); scene.add(top);
-
-            const pCount = isTouch?100:300; const pGeo=new THREE.BufferGeometry(); const pos=new Float32Array(pCount*3);
-            for (let i=0;i<pCount;i++){ pos[i*3]=(Math.random()-.5)*26; pos[i*3+1]=(Math.random()-.5)*16; pos[i*3+2]=(Math.random()-.5)*14-3; }
-            pGeo.setAttribute('position', new THREE.BufferAttribute(pos,3));
-            const particles=new THREE.Points(pGeo, new THREE.PointsMaterial({ color:0x86efac, size:.06, transparent:true, opacity:.7, blending:THREE.AdditiveBlending, depthWrite:false })); scene.add(particles);
-
-            let composer=null;
-            if (!isTouch && !reduceMotion) {
-                try {
-                    const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js');
-                    const { RenderPass } = await import('three/addons/postprocessing/RenderPass.js');
-                    const { UnrealBloomPass } = await import('three/addons/postprocessing/UnrealBloomPass.js');
-                    composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene,camera));
-                    composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .6, .8, .85));
-                } catch (e) { composer=null; }
-            }
-
-            // ball travels through chapters (scrubbed to whole-page scroll)
-            const bs = { x:0, y:0, z:0, scale:1 };
-            if (window.gsap && window.ScrollTrigger && !reduceMotion) {
-                gsap.timeline({ defaults:{ ease:'sine.inOut' }, scrollTrigger:{ trigger:'#scroller', start:'top top', end:'bottom bottom', scrub:1.4 } })
-                    .to(bs,{ x:-3.0, y:.2,  scale:.95, z:0,  duration:1 })   // -> about (right text)
-                    .to(bs,{ x:3.0,  y:-.2, scale:.9,  z:0,  duration:1 })   // -> how (left text)
-                    .to(bs,{ x:2.6,  y:1.4, scale:.5,  z:-3, duration:1 })   // -> lounge (recede)
-                    .to(bs,{ x:0,    y:.0,  scale:.85, z:-1, duration:1 })   // -> leagues (center back)
-                    .to(bs,{ x:-2.8, y:-.3, scale:.5,  z:-2, duration:1 })   // -> plans (corner)
-                    .to(bs,{ x:0,    y:0,   scale:1.15,z:1,  duration:1 });  // -> join (front center)
-            }
-
-            let mouseX=0, mouseY=0;
-            if (!isTouch) addEventListener('mousemove', e => { mouseX=(e.clientX/innerWidth-.5); mouseY=(e.clientY/innerHeight-.5); });
-            addEventListener('resize', () => { camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); if (composer) composer.setSize(innerWidth,innerHeight); });
-
-            const clock=new THREE.Clock();
-            function animate(){
-                requestAnimationFrame(animate);
-                const t=clock.getElapsedTime();
-                ballGroup.position.x = bs.x; ballGroup.position.z = bs.z;
-                ball.scale.setScalar(bs.scale);
-                if (!reduceMotion) {
-                    ball.rotation.y += 0.02;
-                    ballGroup.position.y = bs.y + Math.sin(t*1.1)*0.18;
-                    ballGroup.rotation.x = .15 + mouseY*.35 + Math.sin(t*.6)*.04;
-                    ballGroup.rotation.z = .7 + mouseX*.25;
-                    particles.rotation.y = t*0.02; particles.position.y = Math.sin(t*.4)*.4;
-                    glow.position.x = bs.x; glow.position.y = bs.y; glow.scale.setScalar(11*bs.scale);
-                    glow.material.opacity = .6 + Math.sin(t*1.5)*.12;
-                }
-                camera.position.x += (mouseX*1.0 - camera.position.x)*.04;
-                camera.position.y += (-mouseY*.7 - camera.position.y)*.04;
-                camera.lookAt(0,0,0);
-                composer ? composer.render() : renderer.render(scene,camera);
-            }
-            animate();
-        })();
-    </script>
-</body>
+  </body>
 </html>

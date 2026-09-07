@@ -14,6 +14,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import RugbyBallLoader from './RugbyBallLoader';
 
 const SmartMatchCard = ({ matchId, newsItem = null }) => {
   const [expanded, setExpanded] = useState(false);
@@ -56,7 +57,11 @@ const SmartMatchCard = ({ matchId, newsItem = null }) => {
   }, [matchId, newsItem]);
 
   if (loading) {
-    return <Box sx={{ p: 2 }}>Loading match card...</Box>;
+    return (
+      <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 160 }}>
+        <RugbyBallLoader size={80} color="#10b981" compact label="Loading match..." />
+      </Box>
+    );
   }
 
   const homeWinProb = matchData?.win_probability || 0.5;

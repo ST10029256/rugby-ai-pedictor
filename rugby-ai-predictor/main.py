@@ -1202,6 +1202,18 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
         except (ValueError, TypeError) as e:
             logger.error(f"Failed to convert league_id to int: {e}")
             return {'error': 'Invalid league_id'}
+
+        db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+        frozen = _serve_frozen_prediction(
+            db_path,
+            data.get('event_id') or data.get('match_id'),
+            _get_live_model_version(),
+            str(home_team),
+            str(away_team),
+            str(match_date),
+        )
+        if frozen is not None:
+            return frozen
         
         if enhanced:
             logger.info("Using enhanced predictor...")
@@ -1435,6 +1447,19 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
             headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
             return https_fn.Response(json.dumps(response_data), status=400, headers=headers)
         
+        db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+        frozen = _serve_frozen_prediction(
+            db_path,
+            data.get('event_id') or data.get('match_id'),
+            _get_live_model_version(),
+            str(home_team),
+            str(away_team),
+            str(match_date),
+        )
+        if frozen is not None:
+            headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
+            return https_fn.Response(json.dumps(frozen), status=200, headers=headers)
+
         # Get prediction
         if enhanced:
             logger.info("Using enhanced predictor...")
@@ -1614,23 +1639,39 @@ def _load_pre_kickoff_snapshot(
 
         conn = sqlite3.connect(db_path)
         try:
-            row = conn.execute(
-                """
-                SELECT predicted_winner, predicted_home_score, predicted_away_score,
-                       confidence, home_win_prob, away_win_prob
-                FROM prediction_snapshot
-                WHERE match_id = ? AND model_version = ?
-                  AND snapshot_type = 'pre_kickoff_live'
-                LIMIT 1
-                """,
-                (int(match_id), model_version),
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT predicted_winner, predicted_home_score, predicted_away_score,
+                           confidence, home_win_prob, away_win_prob,
+                           actual_home_score, actual_away_score, actual_winner, prediction_correct
+                    FROM prediction_snapshot
+                    WHERE match_id = ? AND model_version = ?
+                      AND snapshot_type = 'pre_kickoff_live'
+                    LIMIT 1
+                    """,
+                    (int(match_id), model_version),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = conn.execute(
+                    """
+                    SELECT predicted_winner, predicted_home_score, predicted_away_score,
+                           confidence, home_win_prob, away_win_prob
+                    FROM prediction_snapshot
+                    WHERE match_id = ? AND model_version = ?
+                      AND snapshot_type = 'pre_kickoff_live'
+                    LIMIT 1
+                    """,
+                    (int(match_id), model_version),
+                ).fetchone()
+                if row:
+                    row = tuple(row) + (None, None, None, None)
         finally:
             conn.close()
         if not row:
             return None
-        winner, hs, as_, conf, hwp, awp = row
-        return {
+        winner, hs, as_, conf, hwp, awp, act_h, act_a, act_w, pred_ok = row
+        out = {
             "predicted_winner": winner,
             "predicted_home_score": hs,
             "predicted_away_score": as_,
@@ -1643,8 +1684,74 @@ def _load_pre_kickoff_snapshot(
             "bookmaker_count": 0,
             "_source": "snapshot",
         }
+        if act_h is not None:
+            out["actual_home_score"] = act_h
+        if act_a is not None:
+            out["actual_away_score"] = act_a
+        if act_w:
+            out["actual_winner"] = act_w
+        if pred_ok is not None:
+            out["prediction_correct"] = bool(int(pred_ok))
+        return out
     except Exception:
         return None
+
+
+def _serve_frozen_prediction(
+    db_path: str,
+    event_id: Any,
+    model_version: str,
+    home_team: str,
+    away_team: str,
+    match_date: str,
+) -> Optional[Dict[str, Any]]:
+    """Return the midnight-locked snapshot, or a refusal once kickoff has passed."""
+    snap = _load_pre_kickoff_snapshot(db_path, event_id, model_version)
+    if snap is not None:
+        snap["event_id"] = event_id
+        snap["home_team"] = home_team
+        snap["away_team"] = away_team
+        snap["match_date"] = match_date
+        return snap
+    if event_id is None or not os.path.exists(db_path):
+        return None
+    try:
+        import sqlite3
+
+        from prediction.prediction_integrity import refuse_reason
+
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT timestamp, date_event, home_score, away_score
+                FROM event WHERE id = ? LIMIT 1
+                """,
+                (int(event_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        kickoff_at, date_event, home_score, away_score = row
+        refusal = refuse_reason(
+            kickoff_at=kickoff_at or date_event or match_date,
+            has_actual_score=home_score is not None and away_score is not None,
+            date_event=date_event or match_date,
+        )
+        if refusal:
+            return {
+                "event_id": event_id,
+                "home_team": home_team,
+                "away_team": away_team,
+                "match_date": match_date,
+                "prediction_unavailable": True,
+                "unavailable_reason": refusal,
+                "_source": "not_recorded",
+            }
+    except Exception:
+        return None
+    return None
 
 
 @https_fn.on_request(timeout_sec=300, memory=1024, secrets=["HIGHLIGHTLY_API_KEY"])
@@ -1823,18 +1930,17 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
             pred: Optional[Dict[str, Any]] = None
             source = "computed"
 
-            cached = cached_by_key.get(key)
-            if cached is not None:
-                pred = cached
-                source = "cache"
-                counts["cache"] += 1
-
-            if pred is None:
-                snap_pred = _load_pre_kickoff_snapshot(db_path, event_id, model_version)
-                if snap_pred is not None:
-                    pred = snap_pred
-                    source = "snapshot"
-                    counts["snapshot"] += 1
+            snap_pred = _load_pre_kickoff_snapshot(db_path, event_id, model_version)
+            if snap_pred is not None:
+                pred = snap_pred
+                source = "snapshot"
+                counts["snapshot"] += 1
+            else:
+                cached = cached_by_key.get(key)
+                if cached is not None:
+                    pred = cached
+                    source = "cache"
+                    counts["cache"] += 1
 
             if pred is None:
                 state = fixture_state.get(event_id) if event_id is not None else None
@@ -1958,6 +2064,92 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
         )
 
 
+def _attach_midnight_snapshots(matches: List[Dict[str, Any]], db_path: str) -> None:
+    """Attach the workflow-frozen AI so the app never has to compute a prediction."""
+    if not matches or not db_path or not os.path.exists(db_path):
+        return
+    ids: List[int] = []
+    seen = set()
+    for match in matches:
+        for raw in (match.get("sqlite_event_id"), match.get("event_id"), match.get("id")):
+            try:
+                if raw is None or str(raw).strip() == "":
+                    continue
+                match_id = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if match_id not in seen:
+                seen.add(match_id)
+                ids.append(match_id)
+            break
+    if not ids:
+        return
+    model_version = _get_live_model_version()
+    by_id: Dict[int, Dict[str, Any]] = {}
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            placeholders = ",".join("?" * len(ids))
+            rows = conn.execute(
+                f"""
+                SELECT match_id, predicted_winner, predicted_home_score, predicted_away_score,
+                       confidence, home_win_prob, away_win_prob, prediction_correct
+                FROM prediction_snapshot
+                WHERE snapshot_type = 'pre_kickoff_live'
+                  AND model_version = ?
+                  AND match_id IN ({placeholders})
+                """,
+                [model_version, *ids],
+            ).fetchall()
+            if not rows:
+                rows = conn.execute(
+                    f"""
+                    SELECT match_id, predicted_winner, predicted_home_score, predicted_away_score,
+                           confidence, home_win_prob, away_win_prob, prediction_correct
+                    FROM prediction_snapshot
+                    WHERE snapshot_type = 'pre_kickoff_live'
+                      AND match_id IN ({placeholders})
+                    """,
+                    ids,
+                ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return
+    for row in rows:
+        by_id[int(row[0])] = {
+            "predicted_winner": row[1],
+            "predicted_home_score": row[2],
+            "predicted_away_score": row[3],
+            "predicted_confidence": row[4],
+            "home_win_prob": row[5],
+            "away_win_prob": row[6],
+            "prediction_correct": None if row[7] is None else bool(int(row[7])),
+        }
+    for match in matches:
+        snap = None
+        for raw in (match.get("sqlite_event_id"), match.get("event_id"), match.get("id")):
+            try:
+                snap = by_id.get(int(raw))
+            except (TypeError, ValueError):
+                snap = None
+            if snap:
+                break
+        if not snap:
+            continue
+        if match.get("predicted_home_score") is None and snap.get("predicted_home_score") is not None:
+            match["predicted_winner"] = snap.get("predicted_winner")
+            match["predicted_home_score"] = snap.get("predicted_home_score")
+            match["predicted_away_score"] = snap.get("predicted_away_score")
+            match["predicted_confidence"] = snap.get("predicted_confidence")
+            match["home_win_prob"] = snap.get("home_win_prob")
+            match["away_win_prob"] = snap.get("away_win_prob")
+        if match.get("prediction_correct") is None and snap.get("prediction_correct") is not None:
+            match["prediction_correct"] = snap.get("prediction_correct")
+
+
 @https_fn.on_call(secrets=["HIGHLIGHTLY_API_KEY"])
 def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
@@ -2003,6 +2195,9 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             today_local = now_local.date()
             today_start_local = datetime.combine(today_local, time.min).replace(tzinfo=local_tz)
             today_start_utc = today_start_local.astimezone(timezone.utc)
+            # Yesterday stays after midnight so finished games can show AI vs actual.
+            upcoming_floor_local = today_local - timedelta(days=1)
+            upcoming_floor_utc = datetime.combine(upcoming_floor_local, time.min).replace(tzinfo=local_tz).astimezone(timezone.utc)
 
             fetch_limit = max(int(limit) * 4, 200)
             base_ref = db.collection('matches')
@@ -2016,13 +2211,13 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             try:
                 matches_ref = (
                     base_ref
-                    .where('date_event', '>=', today_start_utc)
+                    .where('date_event', '>=', upcoming_floor_utc)
                     .order_by('date_event')
                     .limit(fetch_limit)
                 )
                 logger.info(
                     "Using indexed upcoming query: date_event >= %s (limit=%s)",
-                    today_start_utc.isoformat(),
+                    upcoming_floor_utc.isoformat(),
                     fetch_limit,
                 )
             except Exception as query_error:
@@ -2125,7 +2320,7 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                                 match_local_date = match_date.date()
                             else:
                                 match_local_date = match_date.astimezone(local_tz).date()
-                            should_include = match_local_date >= today_local
+                            should_include = match_local_date >= upcoming_floor_local
                         except Exception:
                             # Fallback: if timezone conversion fails, use UTC date
                             should_include = match_date.date() >= now_utc.date()
@@ -2286,6 +2481,8 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             matches.sort(key=get_sort_key)
             matches = matches[:limit]
             logger.info(f"Returning {len(matches)} matches (limited to {limit})")
+            db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+            _attach_midnight_snapshots(matches, db_path)
             
             # Include debug info
             debug_info = {
@@ -2963,22 +3160,22 @@ def _expires_datetime(expires_at):
     return None
 
 
+# Device binding is disabled — a valid license key works on any browser/device.
+DEVICE_BINDING_ENABLED = False
+
 DEVICE_BINDING_DISCLAIMER = (
-    'Your license is bound to your registered browser/device profile. '
-    'If your device changes, browser changes, or system settings change significantly, '
-    're-approval may be required.'
+    'Your license can be used on any browser or device. '
+    'Enter the same license key wherever you sign in.'
 )
 
 ERROR_DEVICE_PROFILE_REGISTERED = (
-    'This license is already registered to another browser/device profile. '
-    'If you changed browser, reset your device, or cleared your app data, '
-    'request approval to rebind this license.'
+    'This license could not be verified on this device. '
+    'Refresh and try again, or contact support.'
 )
 
 ERROR_DEVICE_REBIND_PENDING = (
-    'Your device profile changed and a re-registration request is pending. '
-    f'{DEVICE_BINDING_DISCLAIMER} '
-    'Contact support with your license key to approve access on this profile.'
+    'Login is temporarily unavailable for this license. '
+    'Refresh and try again, or contact support.'
 )
 
 _DEVICE_PROFILE_FIELDS = (
@@ -3390,7 +3587,7 @@ def _verify_subscription_record(
     request_context: dict,
     logger,
 ) -> Dict[str, Any]:
-    """Validate subscription expiry/usage and enforce browser/device profile binding."""
+    """Validate subscription expiry/usage. Device binding is off — keys work anywhere."""
     now = datetime.utcnow()
     expires_at = subscription.get('expires_at')
     expires_datetime = _expires_datetime(expires_at)
@@ -3411,146 +3608,126 @@ def _verify_subscription_record(
         device_fingerprint_profile_json,
         request_context.get('user_agent', ''),
     )
-    if not device_id or len(device_id) < 8:
-        return {
-            'valid': False,
-            'error': 'Device identification required. Refresh the page and try again.',
-        }
-    if not device_fingerprint or len(device_fingerprint) < 16:
-        return {
-            'valid': False,
-            'error': 'Device verification failed. Refresh the page and try again.',
-        }
 
-    bound_device_id = (subscription.get('bound_device_id') or '').strip()
-    bound_fingerprint = (subscription.get('bound_device_fingerprint') or '').strip()
-    bound_profile = _normalize_fingerprint_profile(
-        subscription.get('bound_device_fingerprint_profile') or {}
-    )
-    has_stored_bound_profile = bool(subscription.get('bound_device_fingerprint_profile'))
-    legacy_rebind_used = bool(subscription.get('legacy_rebind_used', False))
-    request_context = request_context or {}
     update_fields: Dict[str, Any] = {
         'last_used': firestore.SERVER_TIMESTAMP,
         'last_device_seen_at': firestore.SERVER_TIMESTAMP,
+        # Clear any old pending rebind so stuck keys can sign in again.
+        'device_rebind_pending': False,
+        'device_transfer_approved': False,
     }
+    _clear_pending_fields(update_fields)
+
+    # Optional telemetry only — never blocks login.
+    if device_id:
+        update_fields['last_device_id'] = device_id
+    if device_fingerprint:
+        update_fields['last_device_fingerprint'] = device_fingerprint
+    if current_profile:
+        update_fields['last_device_fingerprint_profile'] = current_profile
+    if device_label:
+        update_fields['last_device_label'] = str(device_label)[:200]
+    if request_context.get('ip_hash'):
+        update_fields['last_device_ip_hash'] = request_context['ip_hash']
+    if request_context.get('user_agent'):
+        update_fields['last_device_user_agent'] = str(request_context['user_agent'])[:500]
+
     device_newly_bound = False
     device_rebound = False
 
-    # Admin approved a pending transfer — confirm pending device + fingerprint match.
-    pending_device_id = (subscription.get('pending_device_id') or '').strip()
-    pending_fingerprint = (subscription.get('pending_device_fingerprint') or '').strip()
-    if subscription.get('device_transfer_approved') and pending_device_id == device_id:
-        if pending_fingerprint and pending_fingerprint != device_fingerprint:
-            logger.warning(
-                f"Approved rebind fingerprint mismatch for subscription {subscription_id}"
-            )
+    if DEVICE_BINDING_ENABLED:
+        # Legacy path kept behind flag; default is unbound multi-device login.
+        if not device_id or len(device_id) < 8:
             return {
                 'valid': False,
-                'device_rebind_pending': True,
-                'error': ERROR_DEVICE_REBIND_PENDING,
+                'error': 'Device identification required. Refresh the page and try again.',
             }
-        update_fields['bound_device_id'] = device_id
-        update_fields['bound_device_fingerprint'] = device_fingerprint
-        update_fields['bound_device_fingerprint_profile'] = current_profile
-        if device_label:
-            update_fields['device_label'] = str(device_label)[:200]
-        update_fields['device_bound_at'] = firestore.SERVER_TIMESTAMP
-        update_fields['device_rebind_pending'] = False
-        update_fields['device_transfer_approved'] = False
-        _clear_pending_fields(update_fields)
-        device_rebound = True
-        logger.info(
-            f"Admin-approved device rebind completed for subscription {subscription_id}"
-        )
-    elif bound_device_id:
-        decision, reason, similarity = _classify_device_binding(
-            bound_device_id, device_id, bound_fingerprint, device_fingerprint,
-            bound_profile, current_profile, has_stored_bound_profile, legacy_rebind_used,
-        )
-        logger.info(
-            f"Device binding decision for {subscription_id}: {decision} "
-            f"(similarity={similarity}, reason={reason}, "
-            f"has_core={_profile_has_core_identity(current_profile)})"
-        )
+        if not device_fingerprint or len(device_fingerprint) < 16:
+            return {
+                'valid': False,
+                'error': 'Device verification failed. Refresh the page and try again.',
+            }
 
-        if decision == 'allow':
-            if device_fingerprint and device_fingerprint != bound_fingerprint:
-                update_fields['bound_device_fingerprint'] = device_fingerprint
-            if current_profile and current_profile != bound_profile:
-                update_fields['bound_device_fingerprint_profile'] = current_profile
-        elif decision in ('rebind', 'legacy_rebind'):
+        bound_device_id = (subscription.get('bound_device_id') or '').strip()
+        bound_fingerprint = (subscription.get('bound_device_fingerprint') or '').strip()
+        bound_profile = _normalize_fingerprint_profile(
+            subscription.get('bound_device_fingerprint_profile') or {}
+        )
+        has_stored_bound_profile = bool(subscription.get('bound_device_fingerprint_profile'))
+        legacy_rebind_used = bool(subscription.get('legacy_rebind_used', False))
+        pending_device_id = (subscription.get('pending_device_id') or '').strip()
+        pending_fingerprint = (subscription.get('pending_device_fingerprint') or '').strip()
+
+        if subscription.get('device_transfer_approved') and pending_device_id == device_id:
+            if pending_fingerprint and pending_fingerprint != device_fingerprint:
+                return {
+                    'valid': False,
+                    'device_rebind_pending': True,
+                    'error': ERROR_DEVICE_REBIND_PENDING,
+                }
             update_fields['bound_device_id'] = device_id
             update_fields['bound_device_fingerprint'] = device_fingerprint
             update_fields['bound_device_fingerprint_profile'] = current_profile
-            update_fields['device_rebind_pending'] = False
-            update_fields['device_transfer_approved'] = False
-            _clear_pending_fields(update_fields)
             if device_label:
                 update_fields['device_label'] = str(device_label)[:200]
+            update_fields['device_bound_at'] = firestore.SERVER_TIMESTAMP
             device_rebound = True
-            if decision == 'legacy_rebind':
-                update_fields['legacy_rebind_used'] = True
-                update_fields['legacy_rebind_at'] = firestore.SERVER_TIMESTAMP
-                update_fields['legacy_rebind_reason'] = str(reason)[:200]
-                logger.info(
-                    f"Legacy one-time rebind for subscription {subscription_id} "
-                    f"(reason={reason})"
-                )
+        elif bound_device_id:
+            decision, reason, similarity = _classify_device_binding(
+                bound_device_id, device_id, bound_fingerprint, device_fingerprint,
+                bound_profile, current_profile, has_stored_bound_profile, legacy_rebind_used,
+            )
+            if decision == 'allow':
+                if device_fingerprint and device_fingerprint != bound_fingerprint:
+                    update_fields['bound_device_fingerprint'] = device_fingerprint
+                if current_profile and current_profile != bound_profile:
+                    update_fields['bound_device_fingerprint_profile'] = current_profile
+            elif decision in ('rebind', 'legacy_rebind'):
+                update_fields['bound_device_id'] = device_id
+                update_fields['bound_device_fingerprint'] = device_fingerprint
+                update_fields['bound_device_fingerprint_profile'] = current_profile
+                if device_label:
+                    update_fields['device_label'] = str(device_label)[:200]
+                device_rebound = True
+                if decision == 'legacy_rebind':
+                    update_fields['legacy_rebind_used'] = True
+                    update_fields['legacy_rebind_at'] = firestore.SERVER_TIMESTAMP
+                    update_fields['legacy_rebind_reason'] = str(reason)[:200]
+            elif decision == 'pending':
+                attempt_count = int(subscription.get('device_rebind_attempt_count') or 0) + 1
+                update_fields['device_rebind_pending'] = True
+                update_fields['pending_device_id'] = device_id
+                update_fields['pending_device_fingerprint'] = device_fingerprint
+                update_fields['pending_device_fingerprint_profile'] = current_profile
+                update_fields['device_rebind_requested_at'] = firestore.SERVER_TIMESTAMP
+                update_fields['pending_device_score'] = similarity
+                update_fields['pending_device_reason'] = str(reason)[:200]
+                update_fields['device_rebind_attempt_count'] = attempt_count
+                subscriptions_ref.document(subscription_id).update(update_fields)
+                return {
+                    'valid': False,
+                    'device_rebind_pending': True,
+                    'error': ERROR_DEVICE_REBIND_PENDING,
+                }
             else:
-                logger.info(
-                    f"Controlled rebind for subscription {subscription_id} "
-                    f"(similarity={similarity}, reason={reason})"
-                )
-        elif decision == 'pending':
-            attempt_count = int(subscription.get('device_rebind_attempt_count') or 0) + 1
-            update_fields['device_rebind_pending'] = True
-            update_fields['pending_device_id'] = device_id
-            update_fields['pending_device_fingerprint'] = device_fingerprint
-            update_fields['pending_device_fingerprint_profile'] = current_profile
-            update_fields['device_rebind_requested_at'] = firestore.SERVER_TIMESTAMP
-            update_fields['pending_device_last_seen_at'] = firestore.SERVER_TIMESTAMP
-            update_fields['pending_device_score'] = similarity
-            update_fields['pending_device_reason'] = str(reason)[:200]
-            update_fields['device_rebind_attempt_count'] = attempt_count
-            if request_context.get('ip_hash'):
-                update_fields['pending_device_ip_hash'] = request_context['ip_hash']
-            if request_context.get('user_agent'):
-                update_fields['pending_device_user_agent'] = request_context['user_agent']
-            update_fields['pending_device_browser'] = current_profile.get('browser_family', '')
-            update_fields['pending_device_os'] = current_profile.get('os_family', '')
-            if device_label:
-                update_fields['pending_device_label'] = str(device_label)[:200]
-            logger.warning(
-                f"Device profile change pending approval for subscription {subscription_id} "
-                f"(similarity={similarity}, reason={reason}, attempt={attempt_count})"
-            )
-            subscriptions_ref.document(subscription_id).update(update_fields)
-            return {
-                'valid': False,
-                'device_rebind_pending': True,
-                'error': ERROR_DEVICE_REBIND_PENDING,
-            }
+                return {
+                    'valid': False,
+                    'error': ERROR_DEVICE_PROFILE_REGISTERED,
+                    'device_mismatch': True,
+                }
         else:
-            logger.warning(
-                f"Device profile blocked for subscription {subscription_id}: "
-                f"bound={bound_device_id[:8]}... attempted={device_id[:8]}... "
-                f"(similarity={similarity}, reason={reason})"
-            )
-            return {
-                'valid': False,
-                'error': ERROR_DEVICE_PROFILE_REGISTERED,
-                'device_mismatch': True,
-            }
+            update_fields['bound_device_id'] = device_id
+            update_fields['bound_device_fingerprint'] = device_fingerprint
+            update_fields['bound_device_fingerprint_profile'] = current_profile
+            update_fields['device_bound_at'] = firestore.SERVER_TIMESTAMP
+            if device_label:
+                update_fields['device_label'] = str(device_label)[:200]
+            device_newly_bound = True
     else:
-        update_fields['bound_device_id'] = device_id
-        update_fields['bound_device_fingerprint'] = device_fingerprint
-        update_fields['bound_device_fingerprint_profile'] = current_profile
-        update_fields['device_bound_at'] = firestore.SERVER_TIMESTAMP
-        if device_label:
-            update_fields['device_label'] = str(device_label)[:200]
-        device_newly_bound = True
-        logger.info(f"Bound subscription {subscription_id} to device {device_id[:8]}...")
+        logger.info(
+            f"Device binding disabled — allowing subscription {subscription_id} "
+            f"on device={(device_id[:8] + '...') if device_id else 'unknown'}"
+        )
 
     if not subscription.get('reusable', True) and not subscription.get('used', False):
         update_fields['used'] = True
@@ -3564,7 +3741,7 @@ def _verify_subscription_record(
         'expires_at': expires_ts,
         'subscription_type': subscription.get('subscription_type', 'premium'),
         'email': subscription.get('email', ''),
-        'device_bound': True,
+        'device_bound': False,
         'device_newly_bound': device_newly_bound,
         'device_rebound': device_rebound,
     }
@@ -3724,46 +3901,59 @@ LOGIN_CODE_RATE_LIMIT_SECONDS = 60
 LOGIN_CODE_MAX_ATTEMPTS = 5
 
 
-def _find_subscription_by_email(subscriptions_ref, email: str):
-    """Return the best active subscription doc for an email address."""
+def _subscription_recency(sub: Dict[str, Any]) -> float:
+    for field in ('payment_date', 'created_at', 'last_used', 'expires_at'):
+        val = sub.get(field)
+        if hasattr(val, 'timestamp'):
+            return val.timestamp()
+        if isinstance(val, datetime):
+            return val.timestamp()
+    return 0.0
+
+
+def _classify_email_subscription(subscriptions_ref, email: str):
+    """Classify the purchase tied to an email: active, expired, or not_found."""
     email = (email or '').strip().lower()
     if not email:
-        return None, None
-    docs = list(subscriptions_ref.where('email', '==', email).limit(10).stream())
+        return 'not_found', None, None
+    docs = list(subscriptions_ref.where('email', '==', email).limit(20).stream())
     if not docs:
-        return None, None
+        return 'not_found', None, None
 
     now = datetime.utcnow()
-    candidates = []
+    active = []
+    expired = []
     for doc in docs:
         sub = doc.to_dict() or {}
-        if sub.get('active') is False:
-            continue
         if sub.get('payment_completed') is False:
-            continue
-        expires_dt = _expires_datetime(sub.get('expires_at'))
-        if expires_dt and expires_dt < now:
             continue
         if not sub.get('license_key'):
             continue
-        candidates.append((doc, sub))
+        expires_dt = _expires_datetime(sub.get('expires_at'))
+        is_expired = bool(expires_dt and expires_dt < now)
+        is_inactive = sub.get('active') is False
+        if is_expired or is_inactive:
+            expired.append((doc, sub))
+            continue
+        active.append((doc, sub))
 
-    if not candidates:
-        return None, None
+    if active:
+        active.sort(key=lambda item: _subscription_recency(item[1]), reverse=True)
+        doc, sub = active[0]
+        return 'active', doc.id, sub
+    if expired:
+        expired.sort(key=lambda item: _subscription_recency(item[1]), reverse=True)
+        doc, sub = expired[0]
+        return 'expired', doc.id, sub
+    return 'not_found', None, None
 
-    def _sort_key(item):
-        sub = item[1]
-        for field in ('payment_date', 'created_at', 'last_used'):
-            val = sub.get(field)
-            if hasattr(val, 'timestamp'):
-                return val.timestamp()
-            if isinstance(val, datetime):
-                return val.timestamp()
-        return 0.0
 
-    candidates.sort(key=_sort_key, reverse=True)
-    doc, sub = candidates[0]
-    return doc.id, sub
+def _find_subscription_by_email(subscriptions_ref, email: str):
+    """Return the best active subscription doc for an email address."""
+    status, subscription_id, subscription = _classify_email_subscription(subscriptions_ref, email)
+    if status == 'active':
+        return subscription_id, subscription
+    return None, None
 
 
 def _hash_login_code(email: str, subscription_id: str, code: str) -> str:
@@ -3834,30 +4024,48 @@ def send_login_code_email(email: str, code: str) -> bool:
 
 
 def _request_email_login_code(email: str, logger) -> Dict[str, Any]:
-    """Generate and email a login code for an active subscription."""
+    """Generate and email a login code only when the purchase email has a valid key."""
     email = (email or '').strip().lower()
     if not email or '@' not in email:
-        return {'success': True, 'message': 'If an account exists for this email, a sign-in code was sent.'}
+        return {
+            'success': False,
+            'status': 'invalid_email',
+            'error': 'Enter the email address used when you bought your license.',
+        }
 
     db = get_firestore_client()
     subscriptions_ref = db.collection('subscriptions')
-    subscription_id, subscription = _find_subscription_by_email(subscriptions_ref, email)
+    status, subscription_id, subscription = _classify_email_subscription(subscriptions_ref, email)
 
-    # Uniform response — do not reveal whether the email exists.
-    uniform = {
-        'success': True,
-        'message': 'If an account exists for this email, a sign-in code was sent.',
-    }
-    if not subscription_id:
-        logger.info(f'Login code requested for unknown email: {email[:3]}...')
-        return uniform
+    if status == 'not_found':
+        logger.info(f'Login code requested for email with no purchase: {email[:3]}...')
+        return {
+            'success': False,
+            'status': 'not_found',
+            'error': 'No license found for this email.',
+            'message': 'No license found for this email. Purchase a subscription to get a key.',
+        }
+
+    if status == 'expired':
+        logger.info(f'Login code requested for expired license: {email[:3]}...')
+        return {
+            'success': False,
+            'status': 'expired',
+            'error': 'Your license key has expired.',
+            'message': 'Your license key has expired. Renew your subscription to sign in.',
+        }
 
     now = datetime.utcnow()
     sent_at = subscription.get('login_code_sent_at')
     if sent_at and hasattr(sent_at, 'timestamp'):
         elapsed = now.timestamp() - sent_at.timestamp()
         if elapsed < LOGIN_CODE_RATE_LIMIT_SECONDS:
-            return uniform
+            wait = max(1, int(LOGIN_CODE_RATE_LIMIT_SECONDS - elapsed))
+            return {
+                'success': False,
+                'status': 'rate_limited',
+                'error': f'Please wait {wait}s before requesting another code.',
+            }
 
     code = _generate_login_code()
     code_hash = _hash_login_code(email, subscription_id, code)
@@ -3872,9 +4080,18 @@ def _request_email_login_code(email: str, logger) -> Dict[str, Any]:
 
     if send_login_code_email(email, code):
         logger.info(f'Login code sent for subscription {subscription_id}')
-    else:
-        logger.warning(f'Login code email failed for subscription {subscription_id}')
-    return uniform
+        return {
+            'success': True,
+            'status': 'sent',
+            'message': f'We sent a 6-digit code to {email}.',
+        }
+
+    logger.warning(f'Login code email failed for subscription {subscription_id}')
+    return {
+        'success': False,
+        'status': 'send_failed',
+        'error': 'Could not send the sign-in code. Try again in a moment.',
+    }
 
 
 def _verify_email_login_code(
@@ -3898,9 +4115,11 @@ def _verify_email_login_code(
 
     db = get_firestore_client()
     subscriptions_ref = db.collection('subscriptions')
-    subscription_id, subscription = _find_subscription_by_email(subscriptions_ref, email)
-    if not subscription_id:
-        return {'valid': False, 'error': 'Invalid email or code'}
+    status, subscription_id, subscription = _classify_email_subscription(subscriptions_ref, email)
+    if status == 'not_found' or not subscription_id:
+        return {'valid': False, 'status': 'not_found', 'error': 'No license found for this email.'}
+    if status == 'expired':
+        return {'valid': False, 'status': 'expired', 'error': 'Your license key has expired.'}
 
     attempts = int(subscription.get('login_code_attempts') or 0)
     if attempts >= LOGIN_CODE_MAX_ATTEMPTS:

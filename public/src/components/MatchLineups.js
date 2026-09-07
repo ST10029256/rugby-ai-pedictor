@@ -14,7 +14,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import RugbyBallLoader from './RugbyBallLoader';
+import { TabLoadingScreen } from '../utils/viewLoader';
 import { getLeagueLineupMatches, getLeagueStandings, getMatchLineups } from '../firebase';
 import { getPrimaryStandingsSeasonYear } from '../utils/season';
 import {
@@ -82,20 +82,7 @@ const contentPadding = {
 };
 
 /** Same centered loader placement as Standings / History / Teams tabs. */
-const LineupTabLoader = ({ label }) => (
-  <Box
-    sx={{
-      width: '100%',
-      flex: 1,
-      display: 'grid',
-      placeItems: 'center',
-      boxSizing: 'border-box',
-      minHeight: { xs: 'calc(100svh - 250px)', sm: 'calc(100vh - 270px)' },
-    }}
-  >
-    <RugbyBallLoader size={100} color="#10b981" compact label={label} />
-  </Box>
-);
+const LineupTabLoader = ({ label }) => <TabLoadingScreen label={label} />;
 
 const lineupAlertSx = {
   borderRadius: 2.5,
@@ -1044,7 +1031,7 @@ const MatchLineups = ({ leagueId, leagueName }) => {
         bgcolor: 'transparent',
         display: 'flex',
         flexDirection: 'column',
-        minHeight: { xs: 'calc(100svh - 180px)', sm: 'calc(100vh - 200px)' },
+        minHeight: 0,
       }}
     >
       <LineupScopeNav scope={lineupScope} onChange={setLineupScope} />

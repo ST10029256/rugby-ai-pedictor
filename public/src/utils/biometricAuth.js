@@ -4,7 +4,7 @@
  * with the server on every unlock. Expired keys always require renewal.
  */
 
-import { getDeviceId, isLocalDeviceSessionValid, clearLocalAuthState, isLikelyFreshBrowserSession, getDeviceAuthPayload } from './deviceId';
+import { getDeviceId, isLocalDeviceSessionValid, isLikelyFreshBrowserSession, getDeviceAuthPayload } from './deviceId';
 
 const BIOMETRIC_STORAGE_KEY = 'rugby_ai_biometric_v1';
 const DEVICE_SESSION_KEY = 'rugby_ai_device_v1';
@@ -219,15 +219,12 @@ export function clearDeviceSession() {
   localStorage.removeItem(DEVICE_SESSION_KEY);
 }
 
-/** Clear all local login state when server rejects this device. */
+/** Clear local login state when server rejects auth (legacy device mismatch path unused). */
 export function handleDeviceAuthFailure(resultData) {
   if (resultData?.device_rebind_pending) return 'pending';
   if (!resultData?.device_mismatch) return false;
-  clearDeviceSession();
-  clearBiometricRegistration();
-  clearBiometricLoginSetupDismissed();
-  clearLocalAuthState();
-  return 'blocked';
+  // Binding disabled server-side; do not wipe local state on stale mismatch flags.
+  return false;
 }
 
 function readStoredAuth() {
@@ -280,7 +277,7 @@ export async function getDeviceLoginMode() {
       mode: 'license',
       reason: freshBrowser ? 'fresh_browser' : 'no_biometric',
       message: freshBrowser
-        ? 'No saved session on this browser — if you cleared app data, enter your license key once. We\'ll verify your device profile on the server and re-link automatically when it matches.'
+        ? 'No saved session on this browser — enter your license key to sign in.'
         : '',
     };
   }
@@ -320,7 +317,7 @@ export async function getDeviceLoginMode() {
       reason: 'fresh_browser',
       licenseKey: session.licenseKey || getDeviceLicenseKey(),
       message:
-        'App data was cleared on this browser. Enter your license key once — your device profile will be verified and re-linked on the server.',
+        'App data was cleared on this browser. Enter your license key to sign in again.',
       hasBiometricRegistration: true,
     };
   }

@@ -109,7 +109,8 @@ class SocialMediaFetcher:
                 image_url = None
                 preview_image_url = None
                 media_urls: List[str] = []
-                video_variants: List[str] = []
+                video_variants: List[Any] = []
+                seen_video_urls: set = set()
 
                 for media in media_items:
                     m_type = media.get("type")
@@ -123,18 +124,26 @@ class SocialMediaFetcher:
                         variants = media.get("variants", []) if isinstance(media.get("variants"), list) else []
                         mp4_variants = [v for v in variants if isinstance(v, dict) and "video/mp4" in str(v.get("content_type", ""))]
                         if mp4_variants:
-                            # Lowest bitrate first so clients can start with the smallest MP4.
+                            # Highest bitrate first — clients always play max available quality.
                             sorted_variants = sorted(
                                 mp4_variants,
                                 key=lambda v: int(v.get("bit_rate", 0) or 0),
+                                reverse=True,
                             )
                             for variant in sorted_variants:
                                 v_url = variant.get("url")
-                                if v_url and v_url not in video_variants:
-                                    video_variants.append(v_url)
-                                    media_urls.append(v_url)
+                                if not v_url or v_url in seen_video_urls:
+                                    continue
+                                seen_video_urls.add(v_url)
+                                video_variants.append({
+                                    "url": v_url,
+                                    "bit_rate": int(variant.get("bit_rate", 0) or 0),
+                                    "content_type": variant.get("content_type"),
+                                })
+                                media_urls.append(v_url)
                             if video_variants and not video_url:
-                                video_url = video_variants[0]
+                                first = video_variants[0]
+                                video_url = first.get("url") if isinstance(first, dict) else first
                         preview = media.get("preview_image_url")
                         if preview:
                             if not preview_image_url:

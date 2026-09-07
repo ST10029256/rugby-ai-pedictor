@@ -305,6 +305,39 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
         # Table appears the first time the odds refresh runs.
         pass
 
+    snapshot_by_match: Dict[int, Dict[str, Any]] = {}
+    preferred_version = os.getenv("LIVE_MODEL_VERSION") or (
+        f"{os.getenv('LIVE_MODEL_FAMILY', 'champion')}:{os.getenv('LIVE_MODEL_CHANNEL', 'prod_100')}"
+    )
+    try:
+        for row in sqlite_conn.execute(
+            """
+            SELECT match_id, model_version, predicted_winner, predicted_home_score,
+                   predicted_away_score, confidence, home_win_prob, away_win_prob,
+                   actual_home_score, actual_away_score, actual_winner, prediction_correct,
+                   predicted_at
+            FROM prediction_snapshot
+            WHERE snapshot_type = 'pre_kickoff_live'
+            """
+        ):
+            match_id = int(row[0])
+            version = str(row[1] or "")
+            payload = {
+                "predicted_winner": row[2],
+                "predicted_home_score": row[3],
+                "predicted_away_score": row[4],
+                "predicted_confidence": row[5],
+                "home_win_prob": row[6],
+                "away_win_prob": row[7],
+                "prediction_correct": row[11],
+                "prediction_predicted_at": row[12],
+            }
+            existing = snapshot_by_match.get(match_id)
+            if existing is None or version == preferred_version:
+                snapshot_by_match[match_id] = payload
+    except sqlite3.OperationalError:
+        logger.warning("prediction_snapshot table missing; match docs will have no frozen AI")
+
     # Get all matches from SQLite
     cursor.execute("""
         SELECT 
@@ -400,6 +433,9 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
             'synced_at': SERVER_TIMESTAMP if SERVER_TIMESTAMP else datetime.now()
         }
         firestore_data.update(odds_by_match.get(int(match_data['id']), {}))
+        snap = snapshot_by_match.get(int(match_data['id']))
+        if snap:
+            firestore_data.update({k: v for k, v in snap.items() if v is not None})
 
         # Remove None values (except scores which can be None for upcoming matches)
         firestore_data = {k: v for k, v in firestore_data.items() 
@@ -470,9 +506,25 @@ def sync_matches(sqlite_conn: sqlite3.Connection, firestore_db: Any, existing_ma
                         'odds_away',
                         'odds_bookmaker_count',
                         'odds_fetched_at',
+                        'prediction_correct',
                     ):
                         if firestore_data.get(key) is not None and existing_data.get(key) != firestore_data.get(key):
                             patch[key] = firestore_data[key]
+
+                    # Midnight-frozen AI is immutable. Write it once; never replace it.
+                    has_frozen_ai = existing_data.get('predicted_home_score') is not None
+                    if not has_frozen_ai:
+                        for key in (
+                            'predicted_winner',
+                            'predicted_home_score',
+                            'predicted_away_score',
+                            'predicted_confidence',
+                            'home_win_prob',
+                            'away_win_prob',
+                            'prediction_predicted_at',
+                        ):
+                            if firestore_data.get(key) is not None:
+                                patch[key] = firestore_data[key]
 
                     if patch:
                         patch['synced_at'] = SERVER_TIMESTAMP if SERVER_TIMESTAMP else datetime.now()

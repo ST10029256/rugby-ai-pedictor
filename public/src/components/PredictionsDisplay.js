@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useMemo } from 'react';
 import { Box, Typography, Grid } from '@mui/material';
 import { MEDIA_URLS } from '../utils/storageUrls';
-import { hasMeaningfulTime, formatKickoffSAST, formatSASTDateYMD } from '../utils/date';
+import { hasMeaningfulTime, formatKickoffSAST, formatSASTDateYMD, getLocalYYYYMMDD } from '../utils/date';
 import { predictionsWidgetSx } from '../utils/predictionsLayout';
 
 const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagueName }) {
@@ -52,28 +52,60 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
     return grouped;
   }, [predictions]);
 
+  const parseScore = (raw) => {
+    if (raw === null || raw === undefined || raw === '') return null;
+    const n = Number.parseFloat(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+
   const getDisplayScores = (prediction) => {
-    if (prediction.show_scores === false || prediction.model_available === false) {
-      return null;
+    const todayIso = getLocalYYYYMMDD();
+    const fixtureIso =
+      prediction.date ||
+      (prediction.kickoff_at && formatSASTDateYMD(prediction.kickoff_at)) ||
+      '';
+    const isPastFixture = Boolean(fixtureIso) && fixtureIso < todayIso;
+
+    const predictedHome = parseScore(
+      prediction.predicted_home_score ?? prediction.home_score
+    );
+    const predictedAway = parseScore(
+      prediction.predicted_away_score ?? prediction.away_score
+    );
+    const actualHome = parseScore(prediction.actual_home_score);
+    const actualAway = parseScore(prediction.actual_away_score);
+    const hasPredicted =
+      predictedHome !== null &&
+      predictedAway !== null &&
+      prediction.show_scores !== false &&
+      prediction.model_available !== false &&
+      !prediction.prediction_unavailable;
+    const hasActual = actualHome !== null && actualAway !== null;
+
+    if (isPastFixture && hasActual) {
+      return {
+        mode: 'comparison',
+        homeScore: String(Math.round(actualHome)),
+        awayScore: String(Math.round(actualAway)),
+        homeNum: Math.round(actualHome),
+        awayNum: Math.round(actualAway),
+        aiHome: hasPredicted ? String(Math.round(predictedHome)) : null,
+        aiAway: hasPredicted ? String(Math.round(predictedAway)) : null,
+        predictionCorrect: prediction.prediction_correct,
+      };
     }
 
-    let homeScore = prediction.home_score;
-    let awayScore = prediction.away_score;
+    if (!hasPredicted) return null;
 
-    if (!homeScore && prediction.predicted_home_score !== undefined) {
-      homeScore = Math.round(parseFloat(prediction.predicted_home_score)).toString();
-    }
-    if (!awayScore && prediction.predicted_away_score !== undefined) {
-      awayScore = Math.round(parseFloat(prediction.predicted_away_score)).toString();
-    }
-
-    const homeNum = Number.parseInt(homeScore || '0', 10);
-    const awayNum = Number.parseInt(awayScore || '0', 10);
     return {
-      homeScore: homeScore || '0',
-      awayScore: awayScore || '0',
-      homeNum: Number.isNaN(homeNum) ? 0 : homeNum,
-      awayNum: Number.isNaN(awayNum) ? 0 : awayNum,
+      mode: 'ai',
+      homeScore: String(Math.round(predictedHome)),
+      awayScore: String(Math.round(predictedAway)),
+      homeNum: Math.round(predictedHome),
+      awayNum: Math.round(predictedAway),
+      aiHome: null,
+      aiAway: null,
+      predictionCorrect: null,
     };
   };
 
@@ -82,7 +114,9 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
     if (scores) {
       const { homeNum, awayNum } = scores;
       if (homeNum === awayNum) return 'Draw';
+      return homeNum > awayNum ? prediction.home_team : prediction.away_team;
     }
+    if (prediction.prediction_unavailable) return null;
     return prediction.winner || prediction.predicted_winner || prediction.home_team;
   };
 
@@ -147,7 +181,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
           <Box key={date} sx={{ width: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <Box className="date-header" sx={{ textAlign: 'center', width: '100%' }}>
               <Typography variant="h2" component="h2">
-                📅 {date}
+                📅 {date}{date !== 'TBD' && date < getLocalYYYYMMDD() ? ' · AI vs actual' : ''}
               </Typography>
             </Box>
 
@@ -188,8 +222,11 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
 
               const homeScore = scoreDisplay ? scoreDisplay.homeScore : null;
               const awayScore = scoreDisplay ? scoreDisplay.awayScore : null;
-              
-              // Score extraction complete
+              const isComparison = scoreDisplay?.mode === 'comparison';
+              const aiHome = scoreDisplay?.aiHome;
+              const aiAway = scoreDisplay?.aiAway;
+              const predictedWinnerLabel = prediction.winner || prediction.predicted_winner;
+              const predictionHit = scoreDisplay?.predictionCorrect;
 
               return (
               <Box 
@@ -247,7 +284,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                             textShadow: '0 1px 3px rgba(0, 0, 0, 0.4)',
                           }}
                         >
-                          Kickoff
+                          {isComparison ? 'Final' : 'Kickoff'}
                         </Typography>
                         <Typography
                           variant="body2"
@@ -302,6 +339,11 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                           marginBottom: { xs: '0.5rem', sm: '1rem' }
                         }}>{homeTeam}</Typography>
                         <Box component="div" className="team-score" sx={{ textAlign: 'center', width: '100%', fontWeight: 900, fontSize: { xs: '3.5rem', sm: '5rem', md: '7rem' }, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>{homeScore}</Box>
+                        {isComparison && (
+                          <Typography sx={{ mt: 0.75, color: '#94a3b8', fontWeight: 700, fontSize: { xs: '0.78rem', sm: '0.92rem' } }}>
+                            {aiHome != null ? `AI ${aiHome}` : 'No AI lock'}
+                          </Typography>
+                        )}
                       </Grid>
                       <Grid item xs={2} sm={4} md={4} lg={4} xl={4} sx={{ 
                         display: 'flex', 
@@ -351,8 +393,22 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                           marginBottom: { xs: '0.5rem', sm: '1rem' }
                         }}>{awayTeam}</Typography>
                         <Box component="div" className="team-score" sx={{ textAlign: 'center', width: '100%', fontWeight: 900, fontSize: { xs: '3.5rem', sm: '5rem', md: '7rem' }, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>{awayScore}</Box>
+                        {isComparison && (
+                          <Typography sx={{ mt: 0.75, color: '#94a3b8', fontWeight: 700, fontSize: { xs: '0.78rem', sm: '0.92rem' } }}>
+                            {aiAway != null ? `AI ${aiAway}` : 'No AI lock'}
+                          </Typography>
+                        )}
                       </Grid>
                     </Grid>
+                    {isComparison && (
+                      <Typography sx={{ textAlign: 'center', color: '#cbd5e1', fontWeight: 700, fontSize: { xs: '0.78rem', sm: '0.88rem' }, mt: 0.5 }}>
+                        {predictionHit === true
+                          ? 'AI pick was correct'
+                          : predictionHit === false
+                            ? 'AI pick missed'
+                            : 'Actual result vs locked AI forecast'}
+                      </Typography>
+                    )}
                   </Box>
                   )}
 
@@ -363,7 +419,9 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                         {homeTeam} vs {awayTeam}
                       </Typography>
                       <Typography sx={{ color: '#cbd5e1', fontSize: '0.82rem' }}>
-                        AI score predictions appear once this league has enough completed games trained.
+                        {prediction.prediction_unavailable
+                          ? (prediction.unavailable_reason || 'No AI forecast was locked before kickoff, so none can be shown.')
+                          : 'AI score predictions appear once this league has enough completed games trained.'}
                       </Typography>
                     </Box>
                   )}
@@ -420,6 +478,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                     )}
 
                   <Box sx={{ borderTop: '1px solid #4b5563', borderBottom: '1px solid #4b5563', py: 2, my: 2 }}>
+                    {winner && (
                     <Box className="winner-display">
                       <Typography
                         className={`winner-text ${winnerClass}`}
@@ -443,14 +502,24 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                           `🏆 ${winner} Wins`
                         )}
                       </Typography>
+                      {isComparison && predictedWinnerLabel && (
+                        <Typography sx={{ mt: 1, color: '#94a3b8', fontWeight: 700, fontSize: { xs: '0.82rem', sm: '0.92rem' }, textAlign: 'center' }}>
+                          AI predicted {predictedWinnerLabel === 'Draw' ? 'a draw' : predictedWinnerLabel}
+                        </Typography>
+                      )}
                     </Box>
+                    )}
 
+                    {Number.isFinite(confidence) && !prediction.prediction_unavailable && (
                     <Box className="confidence-bar">
                       <Box className={`confidence-fill ${confClass}`} style={{ width: `${confidence}%` }}>
                         <Box className="confidence-text">{confidence.toFixed(1)}% Confidence</Box>
                       </Box>
                     </Box>
+                    )}
 
+                    {!prediction.prediction_unavailable && (
+                    <>
                     <Box
                       className={`intensity-badge ${intensityClass}`}
                       sx={{
@@ -497,6 +566,8 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                     >
                       🔬 Method: {prediction.prediction_type || 'AI Only (No Odds)'}
                     </Typography>
+                    </>
+                    )}
 
                     {/* Hybrid analysis - Clean display */}
                     {(prediction.prediction_type === 'Hybrid AI + Manual Odds' || prediction.prediction_type === 'Hybrid AI + Live Odds') && (

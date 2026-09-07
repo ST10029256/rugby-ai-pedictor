@@ -43,7 +43,7 @@ const TeamLogoImage = ({
           border: '2px solid rgba(16,185,129,0.28)',
           fontWeight: 900,
           color: '#fff',
-          fontSize: { xs: '1.35rem', sm: '1.65rem' },
+          fontSize: typeof size === 'number' ? Math.max(14, Math.round(size * 0.42)) : { xs: '1.35rem', sm: '1.65rem' },
           flexShrink: 0,
         }}
       >
@@ -67,7 +67,9 @@ const TeamLogoImage = ({
         height: h,
         objectFit: 'contain',
         flexShrink: 0,
-        filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.45))',
+        filter: typeof size === 'number' && size <= 48
+          ? 'drop-shadow(0 4px 10px rgba(0,0,0,0.4))'
+          : 'drop-shadow(0 10px 20px rgba(0,0,0,0.45))',
       }}
     />
   );

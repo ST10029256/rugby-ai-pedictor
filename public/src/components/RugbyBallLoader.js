@@ -21,7 +21,7 @@ const RugbyBallLoader = ({ size = 120, color = '#10b981', compact = false, label
         justifyContent: 'center',
         width: '100%',
         height: compact ? 'auto' : '100%',
-        minHeight: compact ? 0 : '400px',
+        minHeight: compact ? 0 : '100%',
         position: 'relative',
         // Match HTML container exactly - centers content both horizontally and vertically
         // Global keyframes - Smooth diagonal arc from bottom-left to top-right, going HIGHER through crossbar
@@ -73,7 +73,6 @@ const RugbyBallLoader = ({ size = 120, color = '#10b981', compact = false, label
           alignItems: 'center',
           justifyContent: 'center',
           gap: compact ? '24px' : '32px',
-          transform: compact ? 'none' : 'translateY(-5%)',
         }}
       >
         {/* Goal Posts Container */}
@@ -319,7 +318,6 @@ const RugbyBallLoader = ({ size = 120, color = '#10b981', compact = false, label
               fontWeight: 500,
               letterSpacing: '0.05em',
               animation: 'pulse 2s ease-in-out infinite',
-              transform: compact ? 'none' : 'translate(10%, 20%)',
               textAlign: 'center',
             }}
           >

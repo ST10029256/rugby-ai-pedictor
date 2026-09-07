@@ -1,17 +1,17 @@
 /* Rugby AI — shared theme for legal / content pages (Terms, Privacy, Refund) */
 :root {
-    --green-1: #16a34a; --green-2: #22c55e; --green-3: #4ade80; --glow: #34f29a; --mint: #86efac;
-    --night: #050807; --ink: #e9fbf1; --muted: #9fb8ab; --beer: #ffc83d;
-    --panel: rgba(255,255,255,.025); --line: rgba(134,239,172,.14);
+    --green-1: #1f7a4a; --green-2: #3dba72; --green-3: #d4af37; --glow: rgba(212,175,55,.35); --mint: #f5e6a8;
+    --night: #041a0e; --ink: #f8f6f0; --muted: #9db0a4; --beer: #d4af37;
+    --panel: rgba(248,246,240,.03); --line: rgba(212,175,55,.18);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 body {
-    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     line-height: 1.7; color: var(--ink); background: var(--night); overflow-x: hidden;
 }
-::selection { background: var(--green-2); color: #04160d; }
-h1, h2, h3, .display { font-family: 'Anton', sans-serif; font-weight: 400; text-transform: uppercase; line-height: 1; }
+::selection { background: var(--green-3); color: #04160d; }
+h1, h2, h3, .display { font-family: 'Barlow Condensed', Impact, sans-serif; font-weight: 700; text-transform: uppercase; line-height: 1; }
 
 /* film grain */
 .grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .04; mix-blend-mode: overlay;
@@ -27,11 +27,10 @@ h1, h2, h3, .display { font-family: 'Anton', sans-serif; font-weight: 400; text-
     background: linear-gradient(180deg, rgba(5,8,7,.85), rgba(5,8,7,0)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     transition: padding .3s, background .3s, border-color .3s; border-bottom: 1px solid transparent; }
 .navbar.shrink { padding: .55rem 1.6rem; background: rgba(5,8,7,.92); border-bottom-color: var(--line); }
-.nav-brand { font-family: 'Anton', sans-serif; font-size: 1.4rem; text-decoration: none; color: #fff;
+.nav-brand { font-family: 'Barlow Condensed', Impact, sans-serif; font-size: 1.4rem; text-decoration: none; color: #fff;
     display: inline-flex; align-items: center; gap: .55rem; background: none; -webkit-text-fill-color: initial; }
 .nav-brand b { background: linear-gradient(135deg,#fff,var(--mint)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.nav-brand img { width: 28px; height: 28px; filter: drop-shadow(0 0 8px rgba(52,242,154,.6)); animation: wob 4s ease-in-out infinite; }
-@keyframes wob { 0%,100%{transform:rotate(-8deg);} 50%{transform:rotate(8deg);} }
+.nav-brand img { width: 28px; height: 28px; }
 .nav-links { display: flex; gap: 1.4rem; list-style: none; align-items: center; flex-wrap: wrap; }
 .nav-links a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: .9rem; position: relative; transition: color .25s; }
 .nav-links a:not(.btn-nav)::after { content: ''; position: absolute; left: 0; bottom: -6px; width: 0; height: 2px; background: var(--green-3); transition: width .25s; box-shadow: 0 0 8px var(--glow); }
@@ -65,7 +64,7 @@ h1, h2, h3, .display { font-family: 'Anton', sans-serif; font-weight: 400; text-
 .section h2 { font-size: clamp(1.5rem, 3.5vw, 2.1rem); color: #fff; margin: 0 0 1rem; padding: 0 0 0 1rem; border-bottom: none; position: relative; letter-spacing: .01em; }
 .section h2::before { content: ''; position: absolute; left: 0; top: .1em; bottom: .1em; width: 4px; border-radius: 4px;
     background: linear-gradient(180deg, var(--green-2), var(--green-3)); box-shadow: 0 0 12px var(--glow); }
-.section h3 { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: .04em; color: var(--mint); margin: 1.4rem 0 .6rem; text-transform: none; }
+.section h3 { font-family: 'Barlow Condensed', Impact, sans-serif; font-size: 1.3rem; letter-spacing: .04em; color: var(--mint); margin: 1.4rem 0 .6rem; text-transform: none; }
 .section p { color: #c2d8cc; margin-bottom: 1rem; font-size: 1rem; }
 .section p:last-child { margin-bottom: 0; }
 .section a { color: var(--green-3); }

@@ -1197,7 +1197,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
 
   return (
     <Box sx={{ width: '100%', mb: 3 }}>
-      <Box sx={{ px: { xs: 0, sm: 0.5, md: 0.75 }, py: { xs: 0, sm: 0.5 } }}>
+      <Box sx={{ px: { xs: 0, sm: 0.5, md: 0.75 }, py: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.2, mb: 1.5 }}>
           <Box
             sx={{

@@ -140,13 +140,20 @@ export const requestEmailLoginCode = async (data) => {
       body: JSON.stringify(payload),
     });
     const json = await response.json().catch(() => ({}));
+    if (json && (json.status || typeof json.success === 'boolean')) {
+      return { data: json };
+    }
     if (!response.ok) {
       throw new Error(json?.error || `HTTP error! status: ${response.status}`);
     }
     return { data: json };
   } catch (httpError) {
-    const callable = httpsCallable(functionsRegion, 'request_email_login_code');
-    return callable(payload);
+    try {
+      const callable = httpsCallable(functionsRegion, 'request_email_login_code');
+      return await callable(payload);
+    } catch (error) {
+      throw httpError;
+    }
   }
 };
 

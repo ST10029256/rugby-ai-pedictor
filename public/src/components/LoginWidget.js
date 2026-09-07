@@ -9,6 +9,8 @@ import {
   Paper,
   Fade,
   Zoom,
+  Snackbar,
+  Slide,
 } from '@mui/material';
 import { verifyLicenseKey, requestEmailLoginCode, verifyEmailLoginCode } from '../firebase';
 import { MEDIA_URLS } from '../utils/storageUrls';
@@ -27,8 +29,12 @@ import {
   shouldPromptBiometricSetupAfterLogin,
 } from '../utils/biometricAuth';
 import { getDeviceId, DEVICE_BINDING_NOTICE } from '../utils/deviceId';
+import RugbyBallLoader from './RugbyBallLoader';
 import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+
+const SlideUp = (props) => <Slide {...props} direction="up" />;
 
 const loginErrorAlertSx = {
   mb: 2,
@@ -105,26 +111,43 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
   const [loginCode, setLoginCode] = useState('');
   const [emailStep, setEmailStep] = useState('email'); // email | code
   const [codeSentMessage, setCodeSentMessage] = useState('');
+  const [toast, setToast] = useState({ open: false, message: '', severity: 'info' });
   const videoRef = useRef(null);
-  const credentialViewportRef = useRef(null);
-  const [credentialViewportWidth, setCredentialViewportWidth] = useState(0);
+  const otpRefs = useRef([]);
 
-  const credentialStageMinHeight =
-    credentialPanel === 'email' && emailStep === 'code' ? 228 : 104;
+  const showToast = (message, severity = 'info') => {
+    setToast({ open: true, message, severity });
+  };
+
+  const closeToast = () => {
+    setToast((prev) => ({ ...prev, open: false }));
+  };
+
+  const maskEmail = (value) => {
+    const trimmed = String(value || '').trim();
+    const at = trimmed.indexOf('@');
+    if (at < 1) return trimmed;
+    const name = trimmed.slice(0, at);
+    const domain = trimmed.slice(at);
+    const visible = name.slice(0, Math.min(2, name.length));
+    return `${visible}${'•'.repeat(Math.max(1, name.length - visible.length))}${domain}`;
+  };
+
+  const openPurchase = () => {
+    if (onShowSubscription) {
+      onShowSubscription();
+      return;
+    }
+    window.open('https://rugby-ai-61fd0.web.app/subscribe.html', '_blank', 'noopener,noreferrer');
+  };
 
   useEffect(() => {
-    const node = credentialViewportRef.current;
-    if (!node || typeof ResizeObserver === 'undefined') return undefined;
-
-    const syncWidth = () => {
-      setCredentialViewportWidth(node.getBoundingClientRect().width);
-    };
-
-    syncWidth();
-    const observer = new ResizeObserver(syncWidth);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [loginCheckDone, loginMode]);
+    if (emailStep === 'code') {
+      const t = setTimeout(() => otpRefs.current[0]?.focus(), 180);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [emailStep]);
 
   const minLoadingMs = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
@@ -472,32 +495,62 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
       }
 
       const authData = await verifyAndBuildAuth(cleanedKey);
+      showToast('License verified. Welcome in.', 'success');
       await finishLoginFlow(authData);
     } catch (err) {
-      setError(err.message || 'Failed to verify license key. Please try again.');
+      const raw = err.message || 'Failed to verify license key. Please try again.';
+      setError(raw);
+      showToast(raw, raw.toLowerCase().includes('expired') ? 'error' : 'warning');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSendLoginCode = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     setError('');
     setCodeSentMessage('');
     setLoading(true);
     try {
       const normalizedEmail = email.trim().toLowerCase();
       if (!normalizedEmail || !normalizedEmail.includes('@')) {
-        setError('Enter the email address used when you subscribed');
+        const message = 'Enter the email address used when you bought your license.';
+        setError(message);
+        showToast(message, 'warning');
         return;
       }
       const result = await requestEmailLoginCode({ email: normalizedEmail });
-      const message = result.data?.message || 'If an account exists for this email, a sign-in code was sent.';
-      setCodeSentMessage(message);
-      setEmailStep('code');
-      setLoginCode('');
+      const status = result.data?.status;
+      const message = result.data?.error || result.data?.message || '';
+
+      if (status === 'sent' || (result.data?.success && !status)) {
+        const sentMessage = result.data?.message || `We sent a 6-digit code to ${normalizedEmail}.`;
+        setCodeSentMessage(sentMessage);
+        showToast(sentMessage, 'success');
+        setEmailStep('code');
+        setLoginCode('');
+        return;
+      }
+
+      if (status === 'not_found') {
+        showToast(message || 'No license found for this email.', 'warning');
+        return;
+      }
+
+      if (status === 'expired') {
+        const expiredMessage = 'Your license key has expired.';
+        setError(expiredMessage);
+        showToast(message || expiredMessage, 'error');
+        return;
+      }
+
+      const fallback = message || 'Could not send sign-in code. Try again.';
+      setError(fallback);
+      showToast(fallback, 'error');
     } catch (err) {
-      setError(err.message || 'Could not send sign-in code. Try again.');
+      const fallback = err.message || 'Could not send sign-in code. Try again.';
+      setError(fallback);
+      showToast(fallback, 'error');
     } finally {
       setLoading(false);
     }
@@ -519,11 +572,53 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
         return;
       }
       const authData = await verifyAndBuildAuthFromEmail(normalizedEmail, code);
+      showToast('Welcome back. Your license is still valid.', 'success');
       await finishLoginFlow(authData);
     } catch (err) {
-      setError(err.message || 'Sign-in failed. Check your code and try again.');
+      const raw = err.message || 'Sign-in failed. Check your code and try again.';
+      const lower = raw.toLowerCase();
+      if (lower.includes('expired')) {
+        setError('Your license key has expired.');
+        showToast('Your license key has expired.', 'error');
+      } else if (lower.includes('no license found')) {
+        showToast(raw, 'warning');
+      } else {
+        setError(raw);
+        showToast(raw, 'error');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOtpChange = (index, rawValue) => {
+    const digits = String(rawValue || '').replace(/\D/g, '');
+    if (!digits) {
+      const next = loginCode.split('');
+      next[index] = '';
+      setLoginCode(next.join('').slice(0, 6));
+      return;
+    }
+    const next = loginCode.split('');
+    while (next.length < 6) next.push('');
+    if (digits.length > 1) {
+      digits.slice(0, 6).split('').forEach((digit, offset) => {
+        next[offset] = digit;
+      });
+      setLoginCode(next.join('').slice(0, 6));
+      const focusAt = Math.min(digits.length, 5);
+      otpRefs.current[focusAt]?.focus();
+      return;
+    }
+    next[index] = digits[0];
+    const joined = next.join('').slice(0, 6);
+    setLoginCode(joined);
+    if (index < 5) otpRefs.current[index + 1]?.focus();
+  };
+
+  const handleOtpKeyDown = (index, event) => {
+    if (event.key === 'Backspace' && !loginCode[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
     }
   };
 
@@ -594,38 +689,61 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
         />
       ) : (
         <>
-          <Typography sx={{ color: '#94a3b8', fontSize: '0.82rem', mb: 1.5, textAlign: 'center' }}>
-            Code sent to <Box component="span" sx={{ color: '#e5e7eb' }}>{email}</Box>
-          </Typography>
-          <TextField
-            fullWidth
-            label="6-digit code"
-            value={loginCode}
-            onChange={(e) => {
-              setLoginCode(e.target.value.replace(/\D/g, '').slice(0, 6));
-              setError('');
-            }}
-            placeholder="000000"
-            disabled={loading}
-            variant="outlined"
-            autoComplete="one-time-code"
-            InputLabelProps={{ shrink: true }}
+          <Box
             sx={{
-              ...credentialInputSx,
-              input: {
-                textAlign: 'center',
-                letterSpacing: '0.45em',
-                fontWeight: 700,
-                fontSize: '1.1rem',
-                fontFamily: 'monospace',
-              },
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 1,
+              mb: 1.5,
+              color: '#94a3b8',
+              fontSize: '0.82rem',
+              textAlign: 'center',
             }}
-            inputProps={{
-              maxLength: 6,
-              inputMode: 'numeric',
-              style: { color: '#f9fafb' },
-            }}
-          />
+          >
+            <CheckCircleOutlineIcon sx={{ fontSize: 18, color: '#86efac' }} />
+            Code sent to {maskEmail(email)}
+          </Box>
+          <Box sx={{ display: 'flex', justifyContent: 'center', gap: { xs: 0.7, sm: 1 }, mb: 1.5 }}>
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Box
+                key={`otp-${index}`}
+                component="input"
+                ref={(node) => {
+                  otpRefs.current[index] = node;
+                }}
+                value={loginCode[index] || ''}
+                onChange={(event) => handleOtpChange(index, event.target.value)}
+                onKeyDown={(event) => handleOtpKeyDown(index, event)}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  handleOtpChange(0, event.clipboardData.getData('text'));
+                }}
+                disabled={loading}
+                inputMode="numeric"
+                maxLength={1}
+                aria-label={`Digit ${index + 1}`}
+                sx={{
+                  width: { xs: 40, sm: 46 },
+                  height: { xs: 52, sm: 56 },
+                  textAlign: 'center',
+                  fontSize: '1.25rem',
+                  fontWeight: 800,
+                  fontFamily: 'monospace',
+                  color: '#f9fafb',
+                  borderRadius: 2,
+                  border: '1.5px solid rgba(75,85,99,0.6)',
+                  background: 'rgba(2,6,23,0.9)',
+                  outline: 'none',
+                  transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                  '&:focus': {
+                    borderColor: '#22c55e',
+                    boxShadow: '0 0 0 3px rgba(34,197,94,0.16)',
+                  },
+                }}
+              />
+            ))}
+          </Box>
           <Button
             fullWidth
             variant="text"
@@ -644,6 +762,27 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
     </Box>
   );
 
+  if (!loginCheckDone) {
+    return (
+      <Box
+        sx={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 40,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+          height: '100dvh',
+          minHeight: '100dvh',
+          backgroundColor: '#020617',
+        }}
+      >
+        <RugbyBallLoader size={120} color="#10b981" label="Loading..." />
+      </Box>
+    );
+  }
+
   return (
     <Box
       sx={{
@@ -651,14 +790,18 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
         width: '100%',
         maxWidth: '100vw',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: { xs: 'flex-start', sm: 'center' },
         justifyContent: 'center',
         p: { xs: 1.5, sm: 3 },
+        py: { xs: 2, sm: 3 },
         position: 'relative',
-        overflow: 'hidden',
+        overflowY: 'auto',
         overflowX: 'clip',
+        WebkitOverflowScrolling: 'touch',
         boxSizing: 'border-box',
         backgroundColor: '#020617',
+        // Keep Kick Off reachable above the mobile keyboard.
+        pb: { xs: 'max(24px, env(safe-area-inset-bottom, 0px))', sm: 3 },
       }}
     >
       {/* Video Background */}
@@ -677,6 +820,7 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
           height: '100%',
           objectFit: 'cover',
           zIndex: 0,
+          pointerEvents: 'none',
         }}
       >
         <source src={MEDIA_URLS.loginVideo} type="video/mp4" />
@@ -716,7 +860,8 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
               '0 0 0 1px rgba(30,41,59,0.8), ' +
               'inset 0 1px 1px rgba(255,255,255,0.1), ' +
               'inset 0 -1px 1px rgba(0,0,0,0.3)',
-            overflow: 'hidden',
+            overflow: 'visible',
+            my: { xs: 'auto', sm: 0 },
         }}
       >
           {/* Premium static top accent bar */}
@@ -776,13 +921,6 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
           </Fade>
 
         <form onSubmit={handleSubmit}>
-            {!loginCheckDone && (
-              <Box sx={{ mb: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4, gap: 2 }}>
-                <CircularProgress size={28} sx={{ color: '#86efac' }} />
-                <Typography sx={{ color: '#94a3b8', fontSize: '0.85rem' }}>Checking your device profile…</Typography>
-              </Box>
-            )}
-
             {loginCheckDone && error && (
               <Alert severity="error" icon={false} sx={{ ...loginErrorAlertSx, position: 'relative', zIndex: 2 }}>
                 {error}
@@ -797,7 +935,7 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
                   </Typography>
                   <Typography sx={{ color: '#9ca3af', mb: 2, fontSize: '0.875rem', lineHeight: 1.6 }}>
                     Use {getBiometricLoginTitle()} on this device for faster sign-in.
-                    Your license is still verified on the server — if it expires, you&apos;ll need a renewed key.
+                    Your license key still works on any other phone or computer.
                   </Typography>
                   <Alert severity="info" sx={{ mb: 2, textAlign: 'left', bgcolor: 'rgba(59,130,246,0.12)' }}>
                     {getBiometricSetupHint()}
@@ -883,75 +1021,33 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
 
             {loginCheckDone && loginMode === 'license' && (
               <>
-            {deviceCheckMessage && (
+            {deviceCheckMessage && credentialPanel === 'license' && (
               <Alert severity="info" sx={{ mb: 2, fontSize: '0.82rem', textAlign: 'left' }}>
                 {deviceCheckMessage}
               </Alert>
             )}
-            {biometricUnavailableReason && (
+            {biometricUnavailableReason && credentialPanel === 'license' && (
               <Alert severity="info" sx={{ mb: 2, fontSize: '0.82rem', textAlign: 'left' }}>
                 {biometricUnavailableReason}
               </Alert>
             )}
-            {codeSentMessage && credentialPanel === 'email' && (
+            {codeSentMessage && credentialPanel === 'email' && emailStep === 'email' && (
               <Alert severity="success" sx={{ mb: 2, fontSize: '0.82rem', textAlign: 'left' }}>
                 {codeSentMessage}
               </Alert>
             )}
 
             <Box
-              ref={credentialViewportRef}
               sx={{
                 width: '100%',
                 position: 'relative',
                 zIndex: 1,
-                pt: 1.5,
+                pt: 0.5,
                 pb: 0.5,
                 overflow: 'hidden',
-                isolation: 'isolate',
-                minHeight: credentialStageMinHeight,
-                transition: 'min-height 0.28s ease',
               }}
             >
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexWrap: 'nowrap',
-                  width: credentialViewportWidth > 0 ? credentialViewportWidth * 2 : '200%',
-                  transform:
-                    credentialPanel === 'email' && credentialViewportWidth > 0
-                      ? `translate3d(-${credentialViewportWidth}px, 0, 0)`
-                      : credentialPanel === 'email'
-                        ? 'translate3d(-50%, 0, 0)'
-                        : 'translate3d(0, 0, 0)',
-                  transition: 'transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
-                  willChange: 'transform',
-                  backfaceVisibility: 'hidden',
-                }}
-              >
-                <Box
-                  sx={{
-                    flex: '0 0 auto',
-                    width: credentialViewportWidth > 0 ? credentialViewportWidth : '50%',
-                    minWidth: 0,
-                    maxWidth: credentialViewportWidth > 0 ? credentialViewportWidth : '50%',
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  {renderLicensePanel()}
-                </Box>
-                <Box
-                  sx={{
-                    flex: '0 0 auto',
-                    width: credentialViewportWidth > 0 ? credentialViewportWidth : '50%',
-                    minWidth: 0,
-                    maxWidth: credentialViewportWidth > 0 ? credentialViewportWidth : '50%',
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  {renderEmailPanel()}
-                </Box>
-              </Box>
+              {credentialPanel === 'email' ? renderEmailPanel() : renderLicensePanel()}
             </Box>
 
             <Fade in timeout={1200}>
@@ -1102,7 +1198,7 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
             )}
         </form>
 
-          {loginMode === 'license' && (
+          {loginMode === 'license' && credentialPanel === 'license' && (
           <Fade in timeout={1400}>
             <Box sx={{ mt: 4, textAlign: 'center', position: 'relative', zIndex: 1 }}>
           <Typography
@@ -1117,14 +1213,7 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
                 No license yet?{' '}
                 <Box
                   component="span"
-                  onClick={() => {
-                    if (onShowSubscription) {
-                      onShowSubscription();
-                    } else {
-                      // Fallback: try to open in new tab
-                      window.open('/subscribe.html', '_blank', 'noopener,noreferrer');
-                    }
-                  }}
+                  onClick={openPurchase}
                   sx={{
                     color: '#86efac',
                     fontWeight: 600,
@@ -1160,6 +1249,42 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
             )}
       </Paper>
       </Zoom>
+      <Snackbar
+        open={toast.open}
+        autoHideDuration={5200}
+        onClose={closeToast}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        TransitionComponent={SlideUp}
+        sx={{ mb: { xs: 2, sm: 3 } }}
+      >
+        <Alert
+          onClose={closeToast}
+          severity={toast.severity}
+          variant="filled"
+          action={
+            (toast.severity === 'warning' || toast.message.toLowerCase().includes('expired')) ? (
+              <Button color="inherit" size="small" onClick={openPurchase} sx={{ fontWeight: 800 }}>
+                Buy license
+              </Button>
+            ) : null
+          }
+          sx={{
+            minWidth: { xs: 280, sm: 360 },
+            borderRadius: 2.5,
+            fontWeight: 600,
+            backgroundColor:
+              toast.severity === 'success'
+                ? '#14532d'
+                : toast.severity === 'warning'
+                  ? '#854d0e'
+                  : toast.severity === 'error'
+                    ? '#7f1d1d'
+                    : '#1e3a2a',
+          }}
+        >
+          {toast.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

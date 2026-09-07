@@ -285,7 +285,7 @@ export function UserProfilePage({ authData, onProfileChange }) {
         mx: 'auto',
         px: { xs: 2, sm: 3, md: 3, lg: 4 },
         py: { xs: 2.5, sm: 3.5, md: 4.5 },
-        minHeight: { xs: 'calc(100svh - 180px)', sm: 'calc(100vh - 100px)' },
+        minHeight: 0,
         boxSizing: 'border-box',
       }}
     >
@@ -566,7 +566,7 @@ export function UserProfilePage({ authData, onProfileChange }) {
 
           <Typography sx={{ color: '#64748b', fontSize: '0.875rem', lineHeight: 1.65, mb: 2, textAlign: 'center', width: '100%' }}>
             {biometricCanUse
-              ? 'Device-only unlock with Face ID, face unlock, or fingerprint. Your license stays tied to this browser/device profile and is verified on each login.'
+              ? 'Device-only unlock with Face ID, face unlock, or fingerprint. Your license key works on any device — biometrics are just a faster unlock on this browser.'
               : biometricUnavailableReason || 'Biometric login is not available in this browser. Use Safari or Chrome on your phone over HTTPS.'}
           </Typography>
 

@@ -10,7 +10,7 @@ let fingerprintCache = null;
 let profileCache = null;
 
 export const DEVICE_BINDING_NOTICE =
-  'Your license is bound to your registered browser/device profile. If your device changes, browser changes, or system settings change significantly, re-approval may be required.';
+  'Use your license key on any phone, tablet, or computer — it is not locked to one device.';
 
 export function getDeviceId() {
   if (typeof window === 'undefined') return '';
@@ -184,9 +184,8 @@ export async function getDeviceAuthPayload() {
 }
 
 export function isLocalDeviceSessionValid(session) {
-  if (!session?.deviceId) return true;
-  const current = getDeviceId();
-  return !current || session.deviceId === current;
+  // License keys are not device-locked; local sessions stay valid across profiles.
+  return true;
 }
 
 export function clearLocalAuthState() {

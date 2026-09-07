@@ -6,7 +6,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import RugbyBallLoader from './RugbyBallLoader';
-import { TabLoadingScreen } from '../utils/viewLoader';
+import { TabLoadingScreen, useViewLoadingScrollLock } from '../utils/viewLoader';
 import { getNewsFeed } from '../firebase';
 
 const LEAGUE_CONFIGS = {
@@ -31,6 +31,71 @@ const VERIFIED_BADGE_URL = 'https://abs.twimg.com/icons/apple-touch-icon-192x192
 const VIDEO_PROXY_ENDPOINT = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/proxy_video_http';
 const REEL_CONTROLS_HIDE_DELAY_MS = 2000;
 const MOBILE_NAV_TOP = 'var(--app-mobile-nav-offset)';
+const REEL_VIDEO_PREFETCH_RADIUS = 3;
+const REEL_IMAGE_PREFETCH_RADIUS = 4;
+const REEL_BOOTSTRAP_PREFETCH_COUNT = 6;
+const REEL_VIDEO_BLOB_CACHE_LIMIT = 16;
+const DESKTOP_VIDEO_PREFETCH_COUNT = 8;
+const MEDIA_PREFETCH_CONCURRENCY = 3;
+// Phone screens rarely benefit past ~720p; smaller files = instant start.
+const REEL_FAST_LONG_EDGE_MAX = 1280;
+const REEL_FAST_BITRATE_MAX = 2_800_000;
+const DESKTOP_FAST_LONG_EDGE_MAX = 1920;
+const DESKTOP_FAST_BITRATE_MAX = 4_500_000;
+
+const videoBlobUrlCache = new Map();
+const videoBlobInflight = new Map();
+
+function rememberVideoBlobUrl(src, blobUrl) {
+  if (!src || !blobUrl) return;
+  if (videoBlobUrlCache.has(src)) {
+    const existing = videoBlobUrlCache.get(src);
+    if (existing && existing !== blobUrl) {
+      try { URL.revokeObjectURL(existing); } catch (_) { /* ignore */ }
+    }
+    videoBlobUrlCache.delete(src);
+  }
+  videoBlobUrlCache.set(src, blobUrl);
+  while (videoBlobUrlCache.size > REEL_VIDEO_BLOB_CACHE_LIMIT) {
+    const oldestKey = videoBlobUrlCache.keys().next().value;
+    const oldestUrl = videoBlobUrlCache.get(oldestKey);
+    videoBlobUrlCache.delete(oldestKey);
+    if (oldestUrl) {
+      try { URL.revokeObjectURL(oldestUrl); } catch (_) { /* ignore */ }
+    }
+  }
+}
+
+function ensureVideoBlob(src) {
+  if (!src || typeof window === 'undefined') return Promise.resolve(null);
+  if (src.startsWith('blob:')) return Promise.resolve(src);
+  if (videoBlobUrlCache.has(src)) return Promise.resolve(videoBlobUrlCache.get(src));
+  if (videoBlobInflight.has(src)) return videoBlobInflight.get(src);
+
+  const promise = fetch(src, {
+    method: 'GET',
+    mode: 'cors',
+    credentials: 'omit',
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Video prefetch failed (${response.status})`);
+      return response.blob();
+    })
+    .then((blob) => {
+      if (!blob || !blob.size) throw new Error('Empty video blob');
+      const blobUrl = URL.createObjectURL(blob);
+      rememberVideoBlobUrl(src, blobUrl);
+      videoBlobInflight.delete(src);
+      return blobUrl;
+    })
+    .catch(() => {
+      videoBlobInflight.delete(src);
+      return null;
+    });
+
+  videoBlobInflight.set(src, promise);
+  return promise;
+}
 
 function RugbyPoleGlyph({ width = 22, height = 36 } = {}) {
   const sideInset = Math.max(1, Math.round(width * 0.08));
@@ -152,32 +217,179 @@ function isLikelyVideoUrl(url) {
   );
 }
 
-function shouldProxyVideoUrl(url) {
+function shouldProxyMediaUrl(url) {
   if (!url) return false;
   const lowered = String(url).toLowerCase();
-  return lowered.includes('video.twimg.com');
+  return (
+    lowered.includes('video.twimg.com') ||
+    lowered.includes('pbs.twimg.com') ||
+    lowered.includes('ton.twimg.com')
+  );
+}
+
+function shouldProxyVideoUrl(url) {
+  if (!url) return false;
+  return String(url).toLowerCase().includes('video.twimg.com');
+}
+
+function buildProxiedMediaSrc(url) {
+  if (!url) return null;
+  if (!shouldProxyMediaUrl(url)) return url;
+  return `${VIDEO_PROXY_ENDPOINT}?url=${encodeURIComponent(String(url))}`;
 }
 
 function buildPlayableVideoSrc(url) {
   if (!url) return null;
   if (!shouldProxyVideoUrl(url)) return url;
-  return `${VIDEO_PROXY_ENDPOINT}?url=${encodeURIComponent(String(url))}`;
+  return buildProxiedMediaSrc(url);
 }
 
-function getPlayableVideoSources(url, options = {}) {
+function getPlayableVideoSources(url) {
   if (!url) return [];
-  const forReels = Boolean(options.forReels);
   const directSrc = String(url);
   const proxySrc = buildPlayableVideoSrc(url);
-  const host = typeof window !== 'undefined'
-    ? String(window.location?.hostname || '').toLowerCase()
-    : '';
-  const isLocalDevHost = host === 'localhost' || host === '127.0.0.1';
-  // Reels: try direct MP4 first (fast when allowed), then proxy fallback via onError.
-  const ordered = (forReels || isLocalDevHost)
-    ? [directSrc, proxySrc]
-    : [proxySrc, directSrc];
+  // Always prefer the CORS proxy for Twitter MP4s — direct hotlinks 403 and cause
+  // long failed-first loads that feel like "never loads".
+  const ordered = shouldProxyVideoUrl(url)
+    ? [proxySrc, directSrc]
+    : [directSrc, proxySrc];
   return ordered.filter((value, index, arr) => value && arr.indexOf(value) === index);
+}
+
+function upgradeTwitterImageUrl(url) {
+  if (!url) return '';
+  const raw = String(url).trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes('twimg.com') && !host.includes('twitter.com')) return raw;
+
+    // Profile thumbs: *_normal → original
+    parsed.pathname = parsed.pathname.replace(
+      /_(?:normal|bigger|mini|small|medium|large)(?=\.[a-z0-9]+$)/i,
+      ''
+    );
+
+    if (/\/media\//i.test(parsed.pathname) || parsed.searchParams.has('name') || parsed.searchParams.has('format')) {
+      parsed.searchParams.set('name', 'orig');
+    }
+    return parsed.toString();
+  } catch {
+    return raw
+      .replace(/[?&]name=(?:small|medium|large|thumb|900x900|360x360)/i, (match) =>
+        match.startsWith('?') ? '?name=orig' : '&name=orig'
+      )
+      .replace(/_(?:normal|bigger|mini|small|medium|large)(\.[a-z0-9]+)(\?|$)/i, '$1$2');
+  }
+}
+
+function getPlayableImageSrc(url) {
+  const upgraded = upgradeTwitterImageUrl(url);
+  if (!upgraded) return null;
+  // Prefer direct for images (usually fine), but keep proxy as same URL when needed.
+  if (shouldProxyMediaUrl(upgraded) && upgraded.includes('pbs.twimg.com')) {
+    // Direct pbs is fine in most browsers; return upgraded high-res URL.
+    return upgraded;
+  }
+  return upgraded;
+}
+
+function prefetchUrl(url, options = {}) {
+  if (!url || typeof window === 'undefined') return null;
+  const isVideo = Boolean(options.asVideo);
+  if (!isVideo) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.loading = 'eager';
+    img.src = url;
+    return img;
+  }
+  // Full blob download = true instant playback once ready.
+  return ensureVideoBlob(url);
+}
+
+function compareVideoQualityDesc(a, b) {
+  // Always prefer the highest available quality (bitrate, then resolution).
+  const bitrateDelta = (b.bitrate || 0) - (a.bitrate || 0);
+  if (bitrateDelta !== 0) return bitrateDelta;
+  const areaA = (a.width || 0) * (a.height || 0);
+  const areaB = (b.width || 0) * (b.height || 0);
+  if (areaA !== areaB) return areaB - areaA;
+  // Prefer taller/portrait sources when area ties (better fit for reels).
+  return (b.height || 0) - (a.height || 0);
+}
+
+function isPhoneFastVideoCandidate(candidate) {
+  if (!candidate) return false;
+  const longEdge = Math.max(Number(candidate.width) || 0, Number(candidate.height) || 0);
+  if (longEdge > 0) return longEdge <= REEL_FAST_LONG_EDGE_MAX;
+  const bitrate = Number(candidate.bitrate) || 0;
+  if (bitrate > 0) return bitrate <= REEL_FAST_BITRATE_MAX;
+  return false;
+}
+
+function isDesktopFastVideoCandidate(candidate) {
+  if (!candidate) return false;
+  const longEdge = Math.max(Number(candidate.width) || 0, Number(candidate.height) || 0);
+  if (longEdge > 0) return longEdge <= DESKTOP_FAST_LONG_EDGE_MAX;
+  const bitrate = Number(candidate.bitrate) || 0;
+  if (bitrate > 0) return bitrate <= DESKTOP_FAST_BITRATE_MAX;
+  return false;
+}
+
+function orderVideoCandidateUrls(candidates, options = {}) {
+  const forMobileReels = Boolean(options.forMobileReels);
+  const sorted = [...candidates].sort(compareVideoQualityDesc);
+  if (!forMobileReels && !options.forInstantPlayback) {
+    return sorted.map((candidate) => candidate.url);
+  }
+
+  // Instant playback: best screen-sharp variant first, then fallbacks.
+  const fastFilter = forMobileReels ? isPhoneFastVideoCandidate : isDesktopFastVideoCandidate;
+  const fast = sorted.filter(fastFilter);
+  const ordered = [];
+  const pushUrl = (url) => {
+    if (url && !ordered.includes(url)) ordered.push(url);
+  };
+  pushUrl((fast[0] || sorted[0])?.url);
+  sorted.forEach((candidate) => pushUrl(candidate.url));
+  return ordered;
+}
+
+function resolveNetworkVideoSrc(item, options = {}) {
+  const media = getPostMedia(item, {
+    forMobileReels: Boolean(options.forMobileReels),
+    forInstantPlayback: true,
+  });
+  const failed = options.failedVideoSrcs || {};
+  const videoSources = media.videoCandidates
+    .flatMap((candidateUrl) => getPlayableVideoSources(candidateUrl))
+    .filter((src) => !failed[src]);
+  return {
+    networkVideoSrc: videoSources[0] || null,
+    posterUrl: media.posterUrl,
+    imageUrls: media.imageUrls,
+    videoCandidates: media.videoCandidates,
+  };
+}
+
+async function prefetchVideoQueue(urls, { concurrency = MEDIA_PREFETCH_CONCURRENCY, onReady } = {}) {
+  const unique = Array.from(new Set((urls || []).filter(Boolean)));
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < unique.length) {
+      const index = cursor;
+      cursor += 1;
+      const src = unique[index];
+      const blobUrl = await ensureVideoBlob(src);
+      if (blobUrl && typeof onReady === 'function') onReady(src, blobUrl);
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(concurrency, unique.length) }, () => worker());
+  await Promise.all(workers);
 }
 
 function isTwitterUrl(value) {
@@ -211,7 +423,14 @@ function extractMediaUrl(value) {
 function isLikelyImageUrl(url) {
   if (!url) return false;
   const lowered = String(url).toLowerCase();
-  return IMAGE_EXT_PATTERN.test(lowered) || lowered.includes('/image/');
+  return (
+    IMAGE_EXT_PATTERN.test(lowered) ||
+    lowered.includes('/image/') ||
+    lowered.includes('pbs.twimg.com/media/') ||
+    lowered.includes('pbs.twimg.com/ext_tw_video_thumb/') ||
+    lowered.includes('pbs.twimg.com/tweet_video_thumb/') ||
+    lowered.includes('pbs.twimg.com/amplify_video_thumb/')
+  );
 }
 
 function parseResolutionFromUrl(url) {
@@ -265,13 +484,15 @@ function getMediaCandidates(item) {
   const media = item?.media || {};
   const embedded = item?.embedded_content || {};
   const related = item?.related_stats || {};
+  // Prefer explicit variant lists first so quality sorting has full bitrate/resolution data.
   return [
+    ...(Array.isArray(media?.video_variants) ? media.video_variants : []),
+    ...(Array.isArray(related?.video_variants) ? related.video_variants : []),
     media.video_url,
-    ...(Array.isArray(media?.image_urls) ? media.image_urls : []),
     ...(Array.isArray(media?.videos) ? media.videos : []),
+    ...(Array.isArray(media?.image_urls) ? media.image_urls : []),
     ...(Array.isArray(media?.images) ? media.images : []),
     ...(Array.isArray(media?.media_urls) ? media.media_urls : []),
-    ...(Array.isArray(media?.video_variants) ? media.video_variants : []),
     embedded.video_url,
     embedded.media_url,
     embedded.image_url,
@@ -287,44 +508,34 @@ function getMediaCandidates(item) {
     related?.media_url,
     related?.image_url,
     ...(Array.isArray(related?.media_urls) ? related.media_urls : []),
-    ...(Array.isArray(related?.video_variants) ? related.video_variants : []),
     item?.url,
     ...String(item?.content || '').match(URL_PATTERN) || [],
   ].filter(Boolean);
 }
 
 function getPostMedia(item, options = {}) {
-  const forReels = Boolean(options.forReels);
+  const forMobileReels = Boolean(options.forMobileReels);
+  const forInstantPlayback = Boolean(options.forInstantPlayback) || forMobileReels;
   const candidates = getMediaCandidates(item);
-  const videoCandidates = candidates
+  const normalizedVideos = candidates
     .map((value) => normalizeVideoCandidate(value))
     .filter((candidate) => candidate.url && isLikelyVideoUrl(candidate.url))
-    .filter((candidate, index, arr) => arr.findIndex((itemCandidate) => itemCandidate.url === candidate.url) === index)
-    .sort((a, b) => {
-      if (forReels) {
-        // Smallest file first — starts playback much faster on mobile.
-        const brA = a.bitrate || (a.width * a.height) || 999_999_999;
-        const brB = b.bitrate || (b.width * b.height) || 999_999_999;
-        if (brA !== brB) return brA - brB;
-      } else {
-        const bitrateDelta = (b.bitrate || 0) - (a.bitrate || 0);
-        if (bitrateDelta !== 0) return bitrateDelta;
-      }
-      const areaA = (a.width || 0) * (a.height || 0);
-      const areaB = (b.width || 0) * (b.height || 0);
-      return areaB - areaA;
-    })
-    .map((candidate) => candidate.url);
+    .filter((candidate, index, arr) => arr.findIndex((itemCandidate) => itemCandidate.url === candidate.url) === index);
+  const videoCandidates = orderVideoCandidateUrls(normalizedVideos, {
+    forMobileReels,
+    forInstantPlayback,
+  });
   const videoUrl = videoCandidates[0] || null;
   const imageUrls = candidates
     .map((value) => extractMediaUrl(value))
+    .map((v) => getPlayableImageSrc(v))
     .filter((v) => v && !isLikelyVideoUrl(v) && isLikelyImageUrl(v))
     .filter((v, i, arr) => arr.indexOf(v) === i)
     .slice(0, 4);
   const embedded = item?.embedded_content || {};
   const mediaBag = item?.media || {};
   const related = item?.related_stats || {};
-  const posterUrl =
+  const posterUrl = getPlayableImageSrc(
     mediaBag.preview_image_url ||
     related.preview_image_url ||
     item?.thumbnail_url ||
@@ -334,7 +545,8 @@ function getPostMedia(item, options = {}) {
     embedded.preview_image_url ||
     embedded.poster_url ||
     imageUrls[0] ||
-    null;
+    null
+  );
   return { videoUrl, imageUrls, videoCandidates, posterUrl };
 }
 
@@ -529,10 +741,42 @@ function removeRedundantTrailingLinks(text, { openOnXUrl = '' } = {}) {
   return value.trim();
 }
 
+function MobileReelsLoadingScreen() {
+  useViewLoadingScrollLock();
+  return (
+    <Box
+      sx={{
+        position: 'fixed',
+        top: MOBILE_NAV_TOP,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100%',
+        height: 'calc(100dvh - var(--app-mobile-nav-offset))',
+        maxHeight: 'calc(100dvh - var(--app-mobile-nav-offset))',
+        zIndex: 1500,
+        backgroundColor: '#000',
+        display: 'grid',
+        placeItems: 'center',
+        placeContent: 'center',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        '@supports not (height: 100dvh)': {
+          height: 'calc(100svh - var(--app-mobile-nav-offset))',
+          maxHeight: 'calc(100svh - var(--app-mobile-nav-offset))',
+        },
+      }}
+    >
+      <RugbyBallLoader size={100} color="#10b981" compact label="Loading feed..." />
+    </Box>
+  );
+}
+
 const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) => {
   const [newsItems, setNewsItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [failedVideoSrcs, setFailedVideoSrcs] = useState({});
+  const [blobUrlBySrc, setBlobUrlBySrc] = useState({});
   const [imageIndexByPost, setImageIndexByPost] = useState({});
   const [reelPlaybackByPost, setReelPlaybackByPost] = useState({});
   const [reelControlsVisibleByPost, setReelControlsVisibleByPost] = useState({});
@@ -545,6 +789,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
   const reelsScrollRef = useRef(null);
   const reelVideoRefs = useRef({});
   const reelControlsTimeoutsRef = useRef({});
+  const activeReelIndexRef = useRef(0);
   const isSmallScreen = useMediaQuery('(max-width:600px)');
   const isMobileReels = useMediaQuery('(max-width:768px)');
 
@@ -576,11 +821,14 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
     return sortedItems
       .map((item, index) => {
         const itemKey = item?.id || `${item?.timestamp}-${item?.title}-${index}`;
-        const media = getPostMedia(item, { forReels: true });
-        const videoSources = media.videoCandidates
-          .flatMap((candidateUrl) => getPlayableVideoSources(candidateUrl, { forReels: true }))
-          .filter((src) => !failedVideoSrcs[src]);
-        const videoSrc = videoSources[0] || null;
+        const media = resolveNetworkVideoSrc(item, {
+          forMobileReels: true,
+          failedVideoSrcs,
+        });
+        const networkVideoSrc = media.networkVideoSrc;
+        const cachedBlobSrc = networkVideoSrc ? (blobUrlBySrc[networkVideoSrc] || videoBlobUrlCache.get(networkVideoSrc) || null) : null;
+        // Prefer fully cached blob when ready; always fall back to network so playback never stalls.
+        const videoSrc = cachedBlobSrc || networkVideoSrc || null;
         const sourceUrl = item?.embedded_content?.url || item?.source_url || item?.url || null;
         const tweetUrl = isTwitterUrl(sourceUrl)
           ? sourceUrl
@@ -614,7 +862,9 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
         return {
           itemKey,
           item,
+          networkVideoSrc,
           videoSrc,
+          isBlobReady: Boolean(cachedBlobSrc),
           posterUrl: media.posterUrl,
           imageUrls: media.imageUrls,
           authorName,
@@ -627,8 +877,95 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           content,
         };
       })
-      .filter((entry) => Boolean(entry.videoSrc || entry.imageUrls?.length));
-  }, [sortedItems, failedVideoSrcs]);
+      .filter((entry) => Boolean(entry.networkVideoSrc || entry.imageUrls?.length));
+  }, [sortedItems, failedVideoSrcs, blobUrlBySrc]);
+
+  // Desktop feed media: same zero-buffer blob strategy.
+  const desktopFeedItems = useMemo(() => {
+    if (isMobileReels) return [];
+    return sortedItems.map((item, index) => {
+      const itemKey = item?.id || `${item?.timestamp}-${item?.title}-${index}`;
+      const media = resolveNetworkVideoSrc(item, {
+        forMobileReels: false,
+        failedVideoSrcs,
+      });
+      const networkVideoSrc = media.networkVideoSrc;
+      const cachedBlobSrc = networkVideoSrc ? (blobUrlBySrc[networkVideoSrc] || videoBlobUrlCache.get(networkVideoSrc) || null) : null;
+      return {
+        item,
+        itemKey,
+        networkVideoSrc,
+        videoSrc: cachedBlobSrc || networkVideoSrc || null,
+        isBlobReady: Boolean(cachedBlobSrc),
+        posterUrl: media.posterUrl,
+        imageUrls: media.imageUrls,
+      };
+    });
+  }, [isMobileReels, sortedItems, failedVideoSrcs, blobUrlBySrc]);
+
+  // Prefetch videos + images for mobile reels AND desktop.
+  // Playback uses network immediately; blob cache upgrades in the background for smoother swipes.
+  useEffect(() => {
+    if (!sortedItems.length) return undefined;
+    let cancelled = false;
+
+    const videoTargets = [];
+    const imageTargets = [];
+
+    const pushItemMedia = (item, { forMobileReels, includeAllImages = false } = {}) => {
+      const media = resolveNetworkVideoSrc(item, { forMobileReels, failedVideoSrcs });
+      if (media.networkVideoSrc) videoTargets.push(media.networkVideoSrc);
+      if (media.posterUrl) imageTargets.push(media.posterUrl);
+      const imgs = media.imageUrls || [];
+      (includeAllImages ? imgs : imgs.slice(0, 2)).forEach((url) => imageTargets.push(url));
+    };
+
+    if (isMobileReels) {
+      const warmCount = Math.max(
+        REEL_BOOTSTRAP_PREFETCH_COUNT,
+        activeReelIndex + REEL_VIDEO_PREFETCH_RADIUS + 1
+      );
+      sortedItems.slice(0, warmCount).forEach((item) => {
+        pushItemMedia(item, { forMobileReels: true, includeAllImages: true });
+      });
+    } else {
+      sortedItems.slice(0, DESKTOP_VIDEO_PREFETCH_COUNT).forEach((item) => {
+        pushItemMedia(item, { forMobileReels: false, includeAllImages: true });
+      });
+      sortedItems.forEach((item) => {
+        const media = resolveNetworkVideoSrc(item, { forMobileReels: false, failedVideoSrcs });
+        if (media.posterUrl) imageTargets.push(media.posterUrl);
+        (media.imageUrls || []).slice(0, 1).forEach((url) => imageTargets.push(url));
+      });
+      sortedItems.slice(DESKTOP_VIDEO_PREFETCH_COUNT).forEach((item) => {
+        const media = resolveNetworkVideoSrc(item, { forMobileReels: false, failedVideoSrcs });
+        if (media.networkVideoSrc) videoTargets.push(media.networkVideoSrc);
+      });
+    }
+
+    const uniqueVideos = Array.from(new Set(videoTargets.filter(Boolean)));
+
+    // Immediately hydrate any blobs already in the module cache.
+    uniqueVideos.forEach((src) => {
+      if (!videoBlobUrlCache.has(src)) return;
+      const cached = videoBlobUrlCache.get(src);
+      setBlobUrlBySrc((prev) => (prev[src] === cached ? prev : { ...prev, [src]: cached }));
+    });
+
+    Array.from(new Set(imageTargets.filter(Boolean))).forEach((url) => prefetchUrl(url));
+
+    prefetchVideoQueue(uniqueVideos, {
+      concurrency: MEDIA_PREFETCH_CONCURRENCY,
+      onReady: (src, blobUrl) => {
+        if (cancelled || !blobUrl) return;
+        setBlobUrlBySrc((prev) => (prev[src] === blobUrl ? prev : { ...prev, [src]: blobUrl }));
+      },
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isMobileReels, sortedItems, failedVideoSrcs, activeReelIndex]);
 
   useEffect(() => {
     if (!isMobileReels) return;
@@ -638,22 +975,83 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
       if (!container) return;
       container.scrollTo({ top: 0, behavior: 'auto' });
     });
+    activeReelIndexRef.current = 0;
     return () => cancelAnimationFrame(id);
   }, [isMobileReels, mediaReelItems.length]);
+
+  // Shorts-style active detection via IntersectionObserver (more stable than scroll math).
+  useEffect(() => {
+    if (!isMobileReels) return undefined;
+    let observer = null;
+    let cancelled = false;
+    const frameId = requestAnimationFrame(() => {
+      if (cancelled) return;
+      const container = reelsScrollRef.current;
+      if (!container) return;
+
+      const slideNodes = Array.from(container.querySelectorAll('[data-reel-index]'));
+      if (!slideNodes.length) return;
+
+      const visibilityByIndex = new Map();
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const idx = Number(entry.target.getAttribute('data-reel-index'));
+            if (!Number.isFinite(idx)) return;
+            visibilityByIndex.set(idx, entry.intersectionRatio);
+          });
+          let bestIdx = activeReelIndexRef.current;
+          let bestRatio = -1;
+          visibilityByIndex.forEach((ratio, idx) => {
+            if (ratio > bestRatio) {
+              bestRatio = ratio;
+              bestIdx = idx;
+            }
+          });
+          if (bestRatio >= 0.55 && bestIdx !== activeReelIndexRef.current) {
+            activeReelIndexRef.current = bestIdx;
+            setActiveReelIndex(bestIdx);
+          }
+        },
+        {
+          root: container,
+          threshold: [0.55, 0.65, 0.75, 0.85, 0.95],
+        }
+      );
+
+      slideNodes.forEach((node) => observer.observe(node));
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
+      if (observer) observer.disconnect();
+    };
+  }, [isMobileReels, mediaReelItems.length]);
+
+  useEffect(() => {
+    activeReelIndexRef.current = activeReelIndex;
+  }, [activeReelIndex]);
 
   useEffect(() => {
     if (!isMobileReels) return;
     const active = mediaReelItems[activeReelIndex];
-    if (active?.videoSrc && active?.itemKey) {
-      setReelBuffering(active.itemKey, true);
+    if (!active?.videoSrc || !active?.itemKey) return;
+    // Blob-ready clips should never show a buffering state.
+    if (active.isBlobReady) {
+      setReelBuffering(active.itemKey, false);
+      return;
     }
+    const videoEl = reelVideoRefs.current[activeReelIndex];
+    const alreadyReady = Boolean(videoEl && videoEl.readyState >= 3);
+    setReelBuffering(active.itemKey, !alreadyReady);
   }, [isMobileReels, activeReelIndex, mediaReelItems]);
 
   useEffect(() => {
     if (!isMobileReels) return;
-    mediaReelItems.forEach((_, idx) => {
+    mediaReelItems.forEach((item, idx) => {
       const videoEl = reelVideoRefs.current[idx];
-      if (!videoEl) return;
+      if (!videoEl || !item?.videoSrc) return;
       videoEl.muted = reelsMuted;
       if (idx === activeReelIndex) {
         const playPromise = videoEl.play();
@@ -661,8 +1059,8 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           playPromise.catch(() => {});
         }
       } else {
+        // Pause only — never seek. Seeking causes visible glitches.
         videoEl.pause();
-        videoEl.currentTime = 0;
       }
     });
   }, [isMobileReels, activeReelIndex, mediaReelItems, reelsMuted]);
@@ -676,7 +1074,10 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
     if (!container) return;
     const nextIdx = currentIdx + 1;
     if (nextIdx >= mediaReelItems.length) return;
-    container.scrollTo({ top: nextIdx * container.clientHeight, behavior: 'smooth' });
+    const slideHeight = container.clientHeight || 0;
+    if (!slideHeight) return;
+    container.scrollTo({ top: nextIdx * slideHeight, behavior: 'smooth' });
+    activeReelIndexRef.current = nextIdx;
     setActiveReelIndex(nextIdx);
   };
 
@@ -927,6 +1328,9 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
   ]);
 
   if (loading) {
+    if (isMobileReels) {
+      return <MobileReelsLoadingScreen />;
+    }
     return <TabLoadingScreen label="Loading feed..." />;
   }
 
@@ -940,9 +1344,17 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           right: 0,
           bottom: 0,
           width: '100%',
+          height: 'calc(100dvh - var(--app-mobile-nav-offset))',
+          maxHeight: 'calc(100dvh - var(--app-mobile-nav-offset))',
           zIndex: 1500,
           backgroundColor: '#000',
           boxSizing: 'border-box',
+          overflow: 'hidden',
+          // Fallback when dvh is unsupported
+          '@supports not (height: 100dvh)': {
+            height: 'calc(100svh - var(--app-mobile-nav-offset))',
+            maxHeight: 'calc(100svh - var(--app-mobile-nav-offset))',
+          },
         }}
       >
         {sortedItems.length === 0 ? (
@@ -966,29 +1378,43 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
         ) : (
           <Box
             ref={reelsScrollRef}
+            className="news-reels-scroller"
             onScroll={(event) => {
+              // Lightweight fallback if IntersectionObserver lags mid-fling.
               const container = event.currentTarget;
               if (!container?.clientHeight) return;
               const nextIndex = Math.round(container.scrollTop / container.clientHeight);
-              if (nextIndex !== activeReelIndex) setActiveReelIndex(nextIndex);
+              if (
+                nextIndex >= 0 &&
+                nextIndex < mediaReelItems.length &&
+                nextIndex !== activeReelIndexRef.current
+              ) {
+                activeReelIndexRef.current = nextIndex;
+                setActiveReelIndex(nextIndex);
+              }
             }}
             sx={{
               width: '100%',
               height: '100%',
               overflowY: 'auto',
               overflowX: 'hidden',
+              // Native momentum + mandatory snap feels like Shorts; avoid CSS smooth on the scroller itself.
               scrollSnapType: 'y mandatory',
-              scrollBehavior: 'smooth',
               scrollSnapStop: 'always',
-              overscrollBehavior: 'contain',
+              overscrollBehavior: 'none',
               WebkitOverflowScrolling: 'touch',
+              touchAction: 'pan-y',
               backgroundColor: '#000',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              '&::-webkit-scrollbar': { display: 'none', width: 0, height: 0 },
             }}
           >
             {mediaReelItems.map((reelItem, idx) => {
               const isActiveReel = idx === activeReelIndex;
-              const shouldLoadReelVideo = isActiveReel && Boolean(reelItem.videoSrc);
-              const shouldLoadReelImages = isActiveReel || Math.abs(idx - activeReelIndex) === 1;
+              const distanceFromActive = Math.abs(idx - activeReelIndex);
+              const shouldPlayReelVideo = isActiveReel && Boolean(reelItem.videoSrc);
+              const shouldLoadReelImages = distanceFromActive <= REEL_IMAGE_PREFETCH_RADIUS;
               const titleLine = reelItem.title || '';
               const contentLine = String(reelItem.content || '').trim();
               const hideGenericTitle = /-\s*x\s*update$/i.test(titleLine);
@@ -999,18 +1425,34 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
               const reelDuration = Number(reelPlayback.duration) || 0;
               const reelCurrentTime = Math.min(Number(reelPlayback.currentTime) || 0, reelDuration || Number.MAX_SAFE_INTEGER);
               const reelProgress = reelDuration > 0 ? (reelCurrentTime / reelDuration) * 100 : 0;
-              const isReelBuffering = Boolean(reelBufferingByPost[reelItem.itemKey]);
+              const isReelBuffering = Boolean(reelBufferingByPost[reelItem.itemKey]) && !reelItem.isBlobReady;
+              // Full image/video visible — no stretch, no crop/clip.
+              const reelMediaFitSx = {
+                width: '100%',
+                maxWidth: '100%',
+                height: 'auto',
+                maxHeight: '100%',
+                objectFit: 'contain',
+                objectPosition: 'center center',
+                display: 'block',
+              };
               return (
                 <Box
                   key={reelItem.itemKey}
+                  data-reel-index={idx}
                   sx={{
                     height: '100%',
                     minHeight: '100%',
+                    maxHeight: '100%',
+                    width: '100%',
+                    flexShrink: 0,
                     position: 'relative',
                     scrollSnapAlign: 'start',
                     scrollSnapStop: 'always',
                     overflow: 'hidden',
                     backgroundColor: '#000',
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
                   }}
                 >
                   {reelItem.videoSrc && isActiveReel && reelDuration > 0 ? (
@@ -1021,8 +1463,8 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                         left: 0,
                         right: 0,
                         zIndex: 4,
-                        height: 3,
-                        backgroundColor: 'rgba(255,255,255,0.22)',
+                        height: 2.5,
+                        backgroundColor: 'rgba(255,255,255,0.18)',
                       }}
                     >
                       <Box
@@ -1030,16 +1472,29 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                           height: '100%',
                           width: `${reelProgress}%`,
                           backgroundColor: '#fff',
-                          transition: 'width 120ms linear',
+                          transition: 'width 80ms linear',
+                          willChange: 'width',
                         }}
                       />
                     </Box>
                   ) : null}
 
-                  <Box sx={{ position: 'absolute', inset: 0, backgroundColor: '#000' }}>
-                    {reelItem.videoSrc ? (
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      inset: 0,
+                      backgroundColor: '#000',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '100%',
+                      height: '100%',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {reelItem.networkVideoSrc || reelItem.videoSrc ? (
                       <>
-                        {reelItem.posterUrl && (isReelBuffering || !shouldLoadReelVideo) ? (
+                        {reelItem.posterUrl && (!reelItem.videoSrc || (isActiveReel && isReelBuffering && !reelItem.isBlobReady)) ? (
                           <Box
                             sx={{
                               position: 'absolute',
@@ -1049,6 +1504,9 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                               justifyContent: 'center',
                               backgroundColor: '#000',
                               pointerEvents: 'none',
+                              width: '100%',
+                              height: '100%',
+                              zIndex: 1,
                             }}
                           >
                             <Box
@@ -1056,69 +1514,78 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                               src={reelItem.posterUrl}
                               alt=""
                               aria-hidden
-                              sx={{
-                                maxWidth: '100%',
-                                maxHeight: '100%',
-                                width: 'auto',
-                                height: 'auto',
-                                objectFit: 'contain',
-                                objectPosition: 'center',
-                              }}
+                              sx={reelMediaFitSx}
                             />
                           </Box>
                         ) : null}
-                        <video
-                          ref={(el) => {
-                            reelVideoRefs.current[idx] = el;
-                          }}
-                          src={shouldLoadReelVideo ? reelItem.videoSrc : undefined}
-                          poster={reelItem.posterUrl || undefined}
-                          playsInline
-                          muted={reelsMuted}
-                          loop={false}
-                          autoPlay={shouldLoadReelVideo}
-                          preload={shouldLoadReelVideo ? 'auto' : 'none'}
-                          controls={false}
-                          onLoadedMetadata={(event) => handleReelMetadata(reelItem.itemKey, event)}
-                          onTimeUpdate={(event) => handleReelTimeUpdate(reelItem.itemKey, event)}
-                          onPlay={() => handleReelPlayState(reelItem.itemKey, false)}
-                          onPause={() => handleReelPlayState(reelItem.itemKey, true)}
-                          onWaiting={() => setReelBuffering(reelItem.itemKey, true)}
-                          onCanPlay={() => setReelBuffering(reelItem.itemKey, false)}
-                          onPlaying={() => setReelBuffering(reelItem.itemKey, false)}
-                          onEnded={() => advanceToNextReel(idx)}
-                          onError={() => {
-                            markVideoSrcFailed(reelItem.videoSrc);
-                          }}
-                          onClick={() => toggleReelPlayback(idx, reelItem.itemKey)}
-                          style={{
-                            position: 'absolute',
-                            inset: 0,
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                            objectPosition: 'center',
-                            display: 'block',
-                            backgroundColor: '#000',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Your browser cannot play this video.
-                        </video>
-                        {isActiveReel && isReelBuffering ? (
-                          <Box
-                            sx={{
-                              position: 'absolute',
-                              inset: 0,
-                              zIndex: 2,
-                              display: 'grid',
-                              placeItems: 'center',
-                              pointerEvents: 'none',
-                              backgroundColor: 'rgba(0,0,0,0.18)',
+                        {reelItem.videoSrc ? (
+                          <video
+                            ref={(el) => {
+                              reelVideoRefs.current[idx] = el;
+                            }}
+                            src={reelItem.videoSrc}
+                            poster={reelItem.posterUrl || undefined}
+                            playsInline
+                            muted={reelsMuted}
+                            loop={false}
+                            autoPlay={shouldPlayReelVideo}
+                            preload="auto"
+                            controls={false}
+                            onLoadedMetadata={(event) => {
+                              handleReelMetadata(reelItem.itemKey, event);
+                              setReelBuffering(reelItem.itemKey, false);
+                              if (shouldPlayReelVideo) {
+                                const playPromise = event.currentTarget.play();
+                                if (playPromise && typeof playPromise.catch === 'function') {
+                                  playPromise.catch(() => {});
+                                }
+                              }
+                            }}
+                            onTimeUpdate={(event) => handleReelTimeUpdate(reelItem.itemKey, event)}
+                            onPlay={() => handleReelPlayState(reelItem.itemKey, false)}
+                            onPause={() => handleReelPlayState(reelItem.itemKey, true)}
+                            onWaiting={() => {
+                              if (isActiveReel) setReelBuffering(reelItem.itemKey, true);
+                            }}
+                            onCanPlay={() => setReelBuffering(reelItem.itemKey, false)}
+                            onCanPlayThrough={() => setReelBuffering(reelItem.itemKey, false)}
+                            onPlaying={() => setReelBuffering(reelItem.itemKey, false)}
+                            onEnded={() => {
+                              const el = reelVideoRefs.current[idx];
+                              if (el) {
+                                try { el.currentTime = 0; } catch (_) { /* ignore */ }
+                              }
+                              advanceToNextReel(idx);
+                            }}
+                            onError={() => {
+                              // If blob failed, fall back by marking blob path failed and keeping network.
+                              if (reelItem.isBlobReady && reelItem.networkVideoSrc) {
+                                setBlobUrlBySrc((prev) => {
+                                  if (!prev[reelItem.networkVideoSrc]) return prev;
+                                  const next = { ...prev };
+                                  delete next[reelItem.networkVideoSrc];
+                                  return next;
+                                });
+                              }
+                              markVideoSrcFailed(reelItem.videoSrc);
+                            }}
+                            onClick={() => toggleReelPlayback(idx, reelItem.itemKey)}
+                            style={{
+                              width: '100%',
+                              maxWidth: '100%',
+                              height: 'auto',
+                              maxHeight: '100%',
+                              objectFit: 'contain',
+                              objectPosition: 'center center',
+                              display: 'block',
+                              backgroundColor: '#000',
+                              cursor: 'pointer',
+                              visibility: isActiveReel ? 'visible' : 'hidden',
+                              pointerEvents: isActiveReel ? 'auto' : 'none',
                             }}
                           >
-                            <RugbyBallLoader size={48} color="#ffffff" compact label="" />
-                          </Box>
+                            Your browser cannot play this video.
+                          </video>
                         ) : null}
                       </>
                     ) : (
@@ -1133,7 +1600,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                             width: '100%',
                             height: '100%',
                             transform: `translateX(-${activeReelImageIndex * 100}%)`,
-                            transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)',
+                            transition: 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1)',
                             willChange: 'transform',
                           }}
                         >
@@ -1149,21 +1616,23 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 backgroundColor: '#000',
+                                overflow: 'hidden',
                               }}
                             >
                               <Box
                                 component="img"
                                 src={shouldLoadReelImages ? img : undefined}
                                 alt={reelItem.title || 'Post media'}
-                                loading="lazy"
+                                loading={distanceFromActive <= 1 ? 'eager' : 'lazy'}
+                                decoding="async"
                                 draggable={false}
                                 sx={{
+                                  width: '100%',
                                   maxWidth: '100%',
-                                  maxHeight: '100%',
-                                  width: 'auto',
                                   height: 'auto',
+                                  maxHeight: '100%',
                                   objectFit: 'contain',
-                                  objectPosition: 'center',
+                                  objectPosition: 'center center',
                                   display: 'block',
                                   userSelect: 'none',
                                   WebkitUserDrag: 'none',
@@ -1214,18 +1683,19 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                     )}
                   </Box>
 
-                  {reelItem.videoSrc ? (
+                  {reelItem.networkVideoSrc ? (
                     <IconButton
                       aria-label={reelsMuted ? 'Unmute reel' : 'Mute reel'}
                       onClick={toggleReelsMuted}
                       sx={{
                         position: 'absolute',
                         right: 12,
-                        bottom: 'calc(168px + env(safe-area-inset-bottom, 0px))',
+                        bottom: 'calc(148px + env(safe-area-inset-bottom, 0px))',
                         zIndex: 6,
                         color: '#fff',
                         backgroundColor: 'rgba(15,23,42,0.55)',
                         border: '1px solid rgba(255,255,255,0.25)',
+                        backdropFilter: 'blur(8px)',
                         '&:hover': { backgroundColor: 'rgba(30,41,59,0.78)' },
                       }}
                     >
@@ -1505,20 +1975,20 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           </Paper>
         ) : (
           <Stack spacing={0}>
-            {sortedItems.map((item, index) => {
-              const itemKey = item?.id || `${item?.timestamp}-${item?.title}`;
-              const isLast = index === sortedItems.length - 1;
-              const { imageUrls, videoCandidates } = getPostMedia(item);
+            {(isMobileReels ? [] : desktopFeedItems).map((feedMedia, index) => {
+              const item = feedMedia.item;
+              const itemKey = feedMedia.itemKey;
+              const isLast = index === desktopFeedItems.length - 1;
+              const imageUrls = feedMedia.imageUrls || [];
               const sourceUrl = item?.embedded_content?.url || item?.source_url || item?.url || null;
               const tweetUrl = isTwitterUrl(sourceUrl)
                 ? sourceUrl
                 : (isTwitterUrl(item?.embedded_content?.url) ? item?.embedded_content?.url : null);
               const openOnXUrl = tweetUrl || sourceUrl;
-              const playableSources = videoCandidates
-                .flatMap((candidateUrl) => getPlayableVideoSources(candidateUrl))
-                .filter((src) => !failedVideoSrcs[src]);
-              const videoSrc = playableSources[0] || null;
+              const networkVideoSrc = feedMedia.networkVideoSrc;
+              const videoSrc = feedMedia.videoSrc;
               const canUseNativeVideo = Boolean(videoSrc);
+              const waitingForVideoBlob = Boolean(networkVideoSrc && !videoSrc);
               const activeImageIndex = getActiveImageIndex(itemKey, imageUrls.length);
               const hasImageCarousel = imageUrls.length > 1;
               const rawHandle = String(item?.author_handle || item?.source_handle || '').trim();
@@ -1737,12 +2207,14 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                           }}
                         >
                           <video
-                            src={videoSrc || undefined}
+                            key={videoSrc}
+                            src={videoSrc}
+                            poster={feedMedia.posterUrl || undefined}
                             controls
-                            preload="metadata"
+                            preload="auto"
                             playsInline
                             onError={() => {
-                              if (videoSrc) markVideoSrcFailed(videoSrc);
+                              if (networkVideoSrc) markVideoSrcFailed(networkVideoSrc);
                             }}
                             style={{
                               width: '100%',
@@ -1760,7 +2232,38 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                         </Box>
                       ) : null}
 
-                      {!canUseNativeVideo && imageUrls.length > 0 ? (
+                      {waitingForVideoBlob && feedMedia.posterUrl ? (
+                        <Box
+                          sx={{
+                            mt: 1.1,
+                            borderRadius: 2,
+                            overflow: 'hidden',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            backgroundColor: '#020617',
+                            width: '100%',
+                            maxHeight: '70vh',
+                            position: 'relative',
+                            display: 'grid',
+                            placeItems: 'center',
+                          }}
+                        >
+                          <Box
+                            component="img"
+                            src={feedMedia.posterUrl}
+                            alt=""
+                            loading="eager"
+                            decoding="async"
+                            sx={{
+                              width: '100%',
+                              maxHeight: '70vh',
+                              objectFit: 'contain',
+                              display: 'block',
+                            }}
+                          />
+                        </Box>
+                      ) : null}
+
+                      {!canUseNativeVideo && !waitingForVideoBlob && imageUrls.length > 0 ? (
                         <Box sx={{ mt: 1.1, width: '100%' }}>
                           <Box
                             sx={{
@@ -1802,7 +2305,8 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
                                     component="img"
                                     src={img}
                                     alt={item?.title || 'Post media'}
-                                    loading="lazy"
+                                    loading={index < 4 ? 'eager' : 'lazy'}
+                                    decoding="async"
                                     sx={{
                                       width: '100%',
                                       height: 'auto',

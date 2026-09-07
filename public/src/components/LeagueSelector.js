@@ -1,101 +1,98 @@
-import React, { memo, useState, useEffect } from 'react';
-import { FormControl, InputLabel, Select, MenuItem, useMediaQuery, Chip, Box } from '@mui/material';
+import React, { memo, useRef, useState } from 'react';
+import {
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  useMediaQuery,
+  Chip,
+  Box,
+  Typography,
+} from '@mui/material';
+
+const MOBILE_BREAKPOINT = '(max-width:899.95px)';
+
+const chipSx = (tone) => ({
+  height: 22,
+  maxWidth: '100%',
+  fontSize: '0.7rem',
+  fontWeight: 700,
+  letterSpacing: '0.01em',
+  backgroundColor:
+    tone === 'upcoming' ? 'rgba(16, 185, 129, 0.18)' : 'rgba(59, 130, 246, 0.18)',
+  color: tone === 'upcoming' ? '#6ee7b7' : '#93c5fd',
+  border:
+    tone === 'upcoming'
+      ? '1px solid rgba(16, 185, 129, 0.35)'
+      : '1px solid rgba(59, 130, 246, 0.35)',
+  '& .MuiChip-label': {
+    px: 0.9,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+});
 
 const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, onLeagueChange }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const isMobile = useMediaQuery('(max-width:768px)');
+  const [menuWidth, setMenuWidth] = useState(null);
+  const [menuMaxHeight, setMenuMaxHeight] = useState(360);
+  const controlRef = useRef(null);
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
 
-  // Prevent main content scrolling when menu is open (mobile only)
-  useEffect(() => {
-    if (!menuOpen || !isMobile) return;
-
-    const body = document.body;
-    const mainContent = document.querySelector('main') || document.querySelector('.main-content-wrapper');
-    
-    // Store original scroll position
-    const scrollY = window.scrollY;
-    const mainScrollTop = mainContent ? mainContent.scrollTop : 0;
-    
-    // Disable scrolling
-    body.classList.add('menu-open');
-    body.style.overflow = 'hidden';
-    body.style.position = 'fixed';
-    body.style.top = `-${scrollY}px`;
-    body.style.width = '100%';
-    
-    if (mainContent) {
-      mainContent.style.overflow = 'hidden';
+  const openMenu = () => {
+    const node = controlRef.current;
+    if (node) {
+      const width = node.offsetWidth;
+      if (width) setMenuWidth(width);
+      const rect = node.getBoundingClientRect();
+      // Always open downward: size menu to remaining space under the field
+      const spaceBelow = Math.floor(window.innerHeight - rect.bottom - 12);
+      const preferred = isMobile ? 420 : 480;
+      setMenuMaxHeight(Math.max(140, Math.min(preferred, spaceBelow)));
     }
+    setMenuOpen(true);
+  };
 
-    return () => {
-      // Restore scrolling when menu closes
-      body.classList.remove('menu-open');
-      body.style.overflow = '';
-      body.style.position = '';
-      body.style.top = '';
-      body.style.width = '';
-      
-      // Restore scroll position
-      window.scrollTo(0, scrollY);
-      
-      if (mainContent) {
-        mainContent.style.overflow = '';
-        mainContent.scrollTop = mainScrollTop;
-      }
-    };
-  }, [menuOpen, isMobile]);
   if (!leagues || leagues.length === 0) {
     return (
       <FormControl fullWidth>
-        <InputLabel 
-          sx={{ 
-            color: '#fafafa',
-            '@media (min-width: 769px)': {
-              overflow: 'visible',
-              whiteSpace: 'nowrap',
-              maxWidth: '100%',
-            },
-          }}
-        >
-          Select League
-        </InputLabel>
-        <Select
-          value=""
-          label="Select League"
-          disabled
-          sx={{
-            color: '#fafafa',
-            '& .MuiOutlinedInput-notchedOutline': {
-              borderColor: '#4b5563',
-            },
-          }}
-        >
+        <InputLabel sx={{ color: '#fafafa' }}>Select League</InputLabel>
+        <Select value="" label="Select League" disabled sx={{ color: '#fafafa' }}>
           <MenuItem value="">No leagues available</MenuItem>
         </Select>
       </FormControl>
     );
   }
-  
+
+  const paperWidth = menuWidth
+    ? Math.max(menuWidth, isMobile ? 220 : 232)
+    : isMobile
+      ? 'min(100%, calc(100vw - 48px))'
+      : 232;
+
   return (
-    <FormControl 
+    <FormControl
+      ref={controlRef}
       fullWidth
+      className="league-selector-control"
       sx={{
-        '@media (min-width: 769px)': {
-          maxWidth: '232px', // Fixed width on desktop
-          width: '100%',
-        },
+        maxWidth: '100%',
+        width: '100%',
+        minWidth: 0,
+        cursor: 'pointer',
+        '& .MuiInputLabel-root': { pointerEvents: 'none' },
+        '& .MuiOutlinedInput-notchedOutline': { pointerEvents: 'none' },
+        '& .MuiSelect-icon': { pointerEvents: 'none' },
       }}
     >
-      <InputLabel 
+      <InputLabel
         id="league-select-label"
-        shrink={!!selectedLeague}
-        sx={{ 
-          color: '#fafafa',
-          '@media (min-width: 769px)': {
-            overflow: 'visible',
-            whiteSpace: 'nowrap',
-            maxWidth: '100%',
-          },
+        shrink={Boolean(selectedLeague) || menuOpen}
+        sx={{
+          color: '#94a3b8',
+          pointerEvents: 'none',
+          '&.Mui-focused': { color: '#10b981' },
+          '&.MuiInputLabel-shrink': { color: '#10b981' },
         }}
       >
         Select League
@@ -103,278 +100,207 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
       <Select
         labelId="league-select-label"
         value={selectedLeague ? String(selectedLeague) : ''}
-        onChange={(e) => {
-          onLeagueChange(parseInt(e.target.value));
-        }}
-        onOpen={() => setMenuOpen(true)}
+        open={menuOpen}
+        onOpen={openMenu}
         onClose={() => setMenuOpen(false)}
+        onChange={(e) => {
+          const next = parseInt(e.target.value, 10);
+          if (!Number.isNaN(next)) onLeagueChange(next);
+          setMenuOpen(false);
+        }}
         label="Select League"
-        displayEmpty={false}
         renderValue={(value) => {
           if (!value) return '';
-          const league = leagues.find(l => String(l.id) === String(value));
+          const league = leagues.find((l) => String(l.id) === String(value));
           return league ? league.name : 'Select League';
         }}
         MenuProps={{
-          disablePortal: false, // Use portal to prevent layout shifts
-          disableScrollLock: true, // Prevent scroll lock on desktop
-          sx: {
-            zIndex: 2300,
+          disablePortal: false,
+          disableScrollLock: true,
+          keepMounted: false,
+          // Never flip upward when viewport height is short
+          marginThreshold: null,
+          transitionDuration: { enter: 120, exit: 90 },
+          sx: { zIndex: 2400 },
+          slotProps: {
+            root: {
+              onTouchMove: (event) => event.stopPropagation(),
+            },
           },
           PaperProps: {
+            className: 'league-selector-menu-paper',
             sx: {
-              maxHeight: 'none', // Show all leagues without scrolling
-              width: '232px',
-              minWidth: 0,
-              maxWidth: '232px',
-              boxSizing: 'border-box',
-              zIndex: 2301, // Above fixed header/drawer overlays
+              width: paperWidth,
+              maxWidth: isMobile ? 'calc(100vw - 32px)' : paperWidth,
+              maxHeight: menuMaxHeight,
               mt: 0.5,
-              backgroundColor: '#1f2937',
-              backgroundImage: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              borderRadius: '12px',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(16, 185, 129, 0.1)',
-              position: 'absolute', // Ensure absolute positioning
+              py: 0.5,
+              backgroundColor: '#111827',
+              backgroundImage: 'none',
+              border: '1px solid rgba(16, 185, 129, 0.28)',
+              borderRadius: '14px',
+              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
               overflowX: 'hidden',
               overflowY: 'auto',
+              WebkitOverflowScrolling: 'touch',
+              overscrollBehavior: 'contain',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              '&::-webkit-scrollbar': {
+                display: 'none',
+                width: 0,
+                height: 0,
+              },
+              zIndex: 2401,
+              '& .MuiList-root': {
+                py: 0.25,
+              },
               '& .MuiMenuItem-root': {
-                px: 2.5,
-                py: 1.25,
-                color: '#fafafa',
-                fontSize: '0.875rem',
-                fontWeight: 500,
-                borderRadius: '8px',
-                margin: '2px 8px',
-                transition: 'all 0.2s ease',
-                maxWidth: 'calc(100% - 16px)',
-                minWidth: 0,
-                overflow: 'hidden',
-                '&:hover': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                  transform: 'translateX(4px)',
-                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.2)',
-                },
+                display: 'flex',
+                justifyContent: 'center',
+                px: 1.5,
+                py: 1.15,
+                mx: 0.5,
+                my: 0.25,
+                borderRadius: '10px',
+                color: '#f1f5f9',
+                minHeight: 0,
+                whiteSpace: 'normal',
+                textAlign: 'center',
+                alignItems: 'center',
                 '&.Mui-selected': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.25)',
-                  color: '#10b981',
-                  fontWeight: 600,
+                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
                   '&:hover': {
-                    backgroundColor: 'rgba(16, 185, 129, 0.35)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.28)',
                   },
-                  '&::before': {
-                    content: '""',
-                    position: 'absolute',
-                    left: 0,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    width: '3px',
-                    height: '60%',
-                    backgroundColor: '#10b981',
-                    borderRadius: '0 2px 2px 0',
-                  },
+                },
+                '&:hover': {
+                  backgroundColor: 'rgba(148, 163, 184, 0.1)',
+                },
+                '&.Mui-focusVisible': {
+                  backgroundColor: 'rgba(16, 185, 129, 0.16)',
                 },
               },
             },
           },
-          anchorOrigin: {
-            vertical: 'bottom',
-            horizontal: 'left',
+          MenuListProps: {
+            autoFocusItem: false,
+            dense: false,
+            disablePadding: false,
           },
-          transformOrigin: {
-            vertical: 'top',
-            horizontal: 'left',
-          },
-          // Prevent menu from affecting layout
+          anchorOrigin: { vertical: 'bottom', horizontal: 'left' },
+          transformOrigin: { vertical: 'top', horizontal: 'left' },
           disableAutoFocusItem: true,
         }}
         sx={{
           color: '#fafafa',
           width: '100%',
-          maxWidth: '100%',
-          minWidth: 0,
-          boxSizing: 'border-box',
-          flexShrink: 1,
-          flexGrow: 0,
-          flexBasis: 'auto',
-          backgroundColor: 'rgba(31, 41, 55, 0.6)',
+          cursor: 'pointer',
+          backgroundColor: 'rgba(31, 41, 55, 0.85)',
           borderRadius: '12px',
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          '@media (min-width: 769px)': {
-            maxWidth: '232px', // Fixed width: 280px drawer - 48px padding
-            width: '100%',
-          },
           '& .MuiOutlinedInput-notchedOutline': {
-            borderColor: 'rgba(16, 185, 129, 0.2)',
-            borderWidth: '1.5px',
-            transition: 'all 0.3s ease',
+            borderColor: menuOpen ? '#10b981' : 'rgba(16, 185, 129, 0.25)',
+            borderWidth: menuOpen ? '2px' : '1.5px',
+            pointerEvents: 'none',
           },
           '&:hover .MuiOutlinedInput-notchedOutline': {
-            borderColor: 'rgba(16, 185, 129, 0.4)',
-            boxShadow: '0 0 0 3px rgba(16, 185, 129, 0.1)',
-          },
-          '&.Mui-focused': {
-            backgroundColor: 'rgba(31, 41, 55, 0.8)',
-            boxShadow: '0 4px 16px rgba(16, 185, 129, 0.2), inset 0 0 0 1px rgba(16, 185, 129, 0.3)',
+            borderColor: 'rgba(16, 185, 129, 0.5)',
           },
           '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
             borderColor: '#10b981',
             borderWidth: '2px',
-            boxShadow: '0 0 0 4px rgba(16, 185, 129, 0.15)',
           },
           '& .MuiSelect-select': {
             width: '100%',
-            maxWidth: '100%',
-            minWidth: 0,
+            cursor: 'pointer',
+            py: 1.5,
+            pl: 1.75,
+            pr: '44px !important',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            paddingRight: '24px',
-            paddingLeft: '14px',
-            paddingTop: '14px',
-            paddingBottom: '14px',
-            boxSizing: 'border-box',
-            display: 'block',
-            flex: '0 0 auto',
-            flexShrink: 1,
-            flexGrow: 0,
-            fontWeight: 500,
+            fontWeight: 600,
             fontSize: '0.9375rem',
-            '@media (min-width: 769px)': {
-              maxWidth: 'calc(232px - 24px)',
-            },
+            lineHeight: 1.35,
+            minHeight: 24,
           },
           '& .MuiSelect-icon': {
             color: '#10b981',
-            fontSize: '1.5rem',
-            right: '12px',
-            transition: 'transform 0.3s ease',
-          },
-          '&.Mui-focused .MuiSelect-icon': {
-            transform: 'rotate(180deg)',
-          },
-          '& .MuiOutlinedInput-root': {
-            width: '100%',
-            maxWidth: '100%',
-            minWidth: 0,
-            boxSizing: 'border-box',
-            overflow: 'hidden',
-            flexShrink: 1,
-            flexGrow: 0,
-            flexBasis: 'auto',
-            '@media (min-width: 769px)': {
-              maxWidth: '232px',
-            },
-          },
-          '& .MuiInputBase-root': {
-            width: '100%',
-            maxWidth: '100%',
-            minWidth: 0,
-            boxSizing: 'border-box',
-            flexShrink: 1,
-            flexGrow: 0,
-            '@media (min-width: 769px)': {
-              maxWidth: '232px',
-            },
+            right: 12,
+            pointerEvents: 'none',
+            transition: 'transform 0.18s ease',
+            transform: menuOpen ? 'rotate(180deg)' : 'none',
           },
         }}
       >
         {leagues.map((league) => {
           const upcoming = league.upcoming_matches || 0;
           const recent = league.recent_matches || 0;
-          const hasNews = league.has_news || (upcoming > 0 || recent > 0);
-          const totalNews = upcoming + recent;
-          
+          const hasMeta = upcoming > 0 || recent > 0;
+          const muted = !(league.has_news || hasMeta);
+
           return (
-            <MenuItem 
-              key={league.id} 
+            <MenuItem
+              key={league.id}
               value={String(league.id)}
-              sx={{
-                opacity: hasNews ? 1 : 0.6,
-                '&:hover': {
-                  opacity: 1,
-                },
-              }}
+              sx={{ opacity: muted ? 0.55 : 1 }}
             >
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'space-between',
-                width: '100%',
-                gap: 1,
-                minWidth: 0,
-              }}>
-                <Box
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: hasMeta ? 0.75 : 0,
+                  width: '100%',
+                  minWidth: 0,
+                  textAlign: 'center',
+                }}
+              >
+                <Typography
                   component="span"
                   sx={{
-                    flex: '1 1 auto',
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: 'block',
+                    width: '100%',
+                    color: 'inherit',
+                    fontSize: '0.9rem',
+                    fontWeight: 600,
+                    lineHeight: 1.35,
+                    textAlign: 'center',
+                    whiteSpace: 'normal',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
                   }}
                 >
                   {league.name}
-                </Box>
-                {hasNews && (
+                </Typography>
+                {hasMeta ? (
                   <Box
                     sx={{
                       display: 'flex',
-                      gap: 0.5,
-                      alignItems: 'center',
-                      justifyContent: 'flex-end',
-                      flexShrink: 1,
+                      flexWrap: 'wrap',
+                      gap: 0.6,
+                      justifyContent: 'center',
+                      width: '100%',
                       minWidth: 0,
-                      maxWidth: '48%',
-                      overflow: 'hidden',
                     }}
                   >
-                    {upcoming > 0 && (
+                    {upcoming > 0 ? (
                       <Chip
+                        size="small"
                         label={`${upcoming} upcoming`}
-                        size="small"
-                        sx={{
-                          height: '20px',
-                          fontSize: '0.7rem',
-                          fontWeight: 600,
-                          backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                          color: '#10b981',
-                          border: '1px solid rgba(16, 185, 129, 0.3)',
-                          maxWidth: '100%',
-                          flexShrink: 1,
-                          '& .MuiChip-label': {
-                            padding: '0 6px',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          },
-                        }}
+                        sx={chipSx('upcoming')}
                       />
-                    )}
-                    {recent > 0 && (
+                    ) : null}
+                    {recent > 0 ? (
                       <Chip
-                        label={`${recent} recent`}
                         size="small"
-                        sx={{
-                          height: '20px',
-                          fontSize: '0.7rem',
-                          fontWeight: 600,
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#3b82f6',
-                          border: '1px solid rgba(59, 130, 246, 0.3)',
-                          maxWidth: '100%',
-                          flexShrink: 1,
-                          '& .MuiChip-label': {
-                            padding: '0 6px',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          },
-                        }}
+                        label={`${recent} recent`}
+                        sx={chipSx('recent')}
                       />
-                    )}
+                    ) : null}
                   </Box>
-                )}
+                ) : null}
               </Box>
             </MenuItem>
           );

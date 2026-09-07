@@ -41,42 +41,125 @@ textarea {
   }
 }
 
-/* Prevent scrolling when league dropdown menu is open */
-body.menu-open {
-  overflow: hidden !important;
+/* Mobile: stop hold-and-drag "floating" ghosts on buttons / icons / images */
+@media (max-width: 899.95px) {
+  button,
+  a,
+  img,
+  .MuiButton-root,
+  .MuiIconButton-root,
+  .MuiTab-root,
+  .MuiChip-root,
+  .MuiSelect-select,
+  .app-top-nav,
+  .mobile-control-panel button,
+  .mobile-control-panel .MuiButton-root,
+  .mobile-control-panel .MuiIconButton-root {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-user-drag: none !important;
+    user-drag: none !important;
+    -webkit-touch-callout: none !important;
+    touch-action: manipulation !important;
+  }
+
+  /* No lift/scale on press — feels like the control is floating while you drag */
+  .MuiButton-root:active,
+  .MuiIconButton-root:active,
+  .MuiButtonBase-root:active {
+    transform: none !important;
+  }
+
+  .MuiButton-root:hover,
+  .MuiIconButton-root:hover {
+    transform: none !important;
+  }
 }
 
-body.menu-open main,
-body.menu-open .main-content-wrapper {
-  overflow: hidden !important;
-  pointer-events: auto !important; /* Ensure menu can still be clicked */
+.league-selector-menu-paper {
+  z-index: 2401 !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
-/* Ensure menu and drawer remain interactive */
-body.menu-open .MuiDrawer-paper,
-body.menu-open .MuiMenu-root,
-body.menu-open .MuiMenu-paper {
-  pointer-events: auto !important;
+.league-selector-menu-paper::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
-/* Prevent scrolling when mobile drawer is open */
-body.drawer-open {
+.league-selector-menu-paper .MuiList-root,
+.league-selector-menu-paper .MuiMenu-list {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.league-selector-menu-paper .MuiList-root::-webkit-scrollbar,
+.league-selector-menu-paper .MuiMenu-list::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.league-selector-menu-paper .MuiMenuItem-root {
+  white-space: normal !important;
+  text-align: center !important;
+  justify-content: center !important;
+}
+
+.league-selector-control {
+  max-width: 100% !important;
+}
+
+/* Prevent page scroll when mobile control panel is open.
+   Must beat .news-page-scroll { overflow-y: auto !important }. */
+html.drawer-open,
+body.drawer-open,
+#root.drawer-open,
+html.drawer-open.news-page-scroll,
+body.drawer-open.news-page-scroll,
+#root.drawer-open.news-page-scroll {
   overflow: hidden !important;
+  overscroll-behavior: none !important;
 }
 
 body.drawer-open main,
 body.drawer-open .main-content-wrapper {
   overflow: hidden !important;
-  pointer-events: auto !important; /* Ensure drawer can still be clicked */
+  pointer-events: none !important;
 }
 
-/* Ensure drawer remains interactive */
-body.drawer-open .MuiDrawer-paper {
+/* Control panel + league menu stay interactive */
+body.drawer-open .mobile-control-panel,
+body.drawer-open .MuiDrawer-paper,
+body.drawer-open .MuiMenu-root,
+body.drawer-open .MuiMenu-paper,
+body.drawer-open .league-selector-menu-paper {
   pointer-events: auto !important;
 }
 
+body.drawer-open .mobile-control-panel {
+  touch-action: manipulation !important;
+}
+
+body.drawer-open .MuiMenu-root,
+body.drawer-open .MuiMenu-paper,
+body.drawer-open .league-selector-menu-paper {
+  /* Allow scroll inside menu without stealing taps */
+  touch-action: pan-y !important;
+}
+
+.mobile-control-panel {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
 /* Force mobile drawer to be visible when open */
-@media (max-width: 768px) {
+@media (max-width: 899.95px) {
   .MuiDrawer-root[class*="MuiDrawer-temporary"] .MuiDrawer-paper[aria-hidden="false"],
   .MuiDrawer-root[class*="MuiDrawer-temporary"][aria-hidden="false"] .MuiDrawer-paper {
     transform: translateX(0) !important;
@@ -90,51 +173,49 @@ body.drawer-open .MuiDrawer-paper {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* GPU acceleration for animated elements */
-video,
-.MuiDrawer-paper,
-.MuiBackdrop-root {
-  will-change: transform;
+/* Light GPU hint for video only — avoid will-change/transform on drawers
+   (those fight translateX slide + Select menus and cause mobile flicker). */
+video {
   transform: translateZ(0);
   backface-visibility: hidden;
-  perspective: 1000px;
-}
-
-/* Optimize transitions */
-[style*="transition"],
-[class*="transition"] {
-  will-change: transform, opacity;
 }
 
 /* Ensure Select dropdown menu appears above drawer on all screen sizes */
 .MuiDrawer-paper {
-  overflow: visible !important; /* Allow menu to be visible */
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
   position: relative !important;
   max-width: 280px !important;
   width: 280px !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 /* Make dropdown menu items text smaller on both desktop and mobile */
-.MuiDrawer-paper .MuiMenuItem-root {
+.MuiDrawer-paper .MuiMenuItem-root,
+.league-selector-menu-paper .MuiMenuItem-root {
   font-size: 0.875rem !important; /* 14px instead of default 16px */
 }
 
 /* Desktop only: keep control panel fixed while main content scrolls */
-@media (min-width: 769px) {
+@media (min-width: 900px) {
   /* Keep permanent control panel pinned to viewport */
   .MuiDrawer-root[class*="MuiDrawer-permanent"] .MuiDrawer-paper,
   .MuiDrawer-root:not([class*="MuiDrawer-temporary"]) .MuiDrawer-paper {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
   }
   
-  /* Use full-page document scrolling on desktop */
+  /* Use full-page document scrolling on desktop.
+     Do NOT set overflow-x:hidden here — with overflow-y:visible it computes to
+     overflow-y:auto and steals wheel/trackpad from the window. */
   main {
-    overflow-y: visible !important;
-    overflow-x: hidden !important;
+    overflow: visible !important;
     height: auto !important;
     max-height: none !important;
   }
@@ -145,7 +226,8 @@ video,
     width: 280px !important;
     max-width: 280px !important;
     min-width: 280px !important;
-    overflow: visible !important; /* Allow labels to be visible */
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
   }
   
   /* Ensure the drawer content Box doesn't expand */
@@ -154,7 +236,7 @@ video,
     max-width: 100% !important;
     min-width: 0 !important;
     box-sizing: border-box !important;
-    overflow: visible !important; /* Allow label to be visible */
+    overflow-x: hidden !important;
   }
   
   /* Ensure the Box wrapper around LeagueSelector doesn't expand */
@@ -163,7 +245,7 @@ video,
     max-width: 100% !important;
     min-width: 0 !important;
     box-sizing: border-box !important;
-    overflow: visible !important; /* Allow label to be visible */
+    overflow-x: hidden !important;
   }
   
   /* Fix InputLabel visibility - prevent cut-off */
@@ -220,22 +302,18 @@ video,
     table-layout: fixed !important;
   }
   
-  /* Force Select select element to fixed width with truncation */
-  /* Reduced padding-right from 32px to 24px to give more room for text */
+  /* Force Select select element to FULL width hit target (arrow area included) */
   .MuiDrawer-paper .MuiSelect-select {
-    width: calc(100% - 24px) !important;
-    max-width: calc(232px - 24px) !important;
+    width: 100% !important;
+    max-width: 100% !important;
     min-width: 0 !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
     box-sizing: border-box !important;
-    padding-right: 24px !important; /* Reduced from 32px to give more text space */
+    padding-right: 44px !important;
     display: block !important;
-    flex: 0 0 auto !important;
-    flex-shrink: 1 !important;
-    flex-grow: 0 !important;
-    table-layout: fixed !important;
+    cursor: pointer !important;
   }
   
   /* Force InputBase to fixed width */
@@ -248,7 +326,7 @@ video,
     flex-grow: 0 !important;
     flex-basis: auto !important;
     display: flex !important;
-    table-layout: fixed !important;
+    cursor: pointer !important;
   }
   
   /* Target the native input element */
@@ -259,17 +337,24 @@ video,
     box-sizing: border-box !important;
   }
   
-  /* Target the div wrapper inside Select */
-  .MuiDrawer-paper .MuiSelect-root > div {
+  /* Select value wrapper must fill the field so corners/arrow open the menu */
+  .MuiDrawer-paper .MuiSelect-root > div,
+  .league-selector-control .MuiSelect-select {
     width: 100% !important;
-    max-width: calc(232px - 24px) !important;
+    max-width: 100% !important;
     min-width: 0 !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
     display: block !important;
     box-sizing: border-box !important;
-    table-layout: fixed !important;
+    cursor: pointer !important;
+  }
+
+  .league-selector-control .MuiInputLabel-root,
+  .league-selector-control .MuiOutlinedInput-notchedOutline,
+  .league-selector-control .MuiSelect-icon {
+    pointer-events: none !important;
   }
   
   /* Force the input container to respect width constraints */
@@ -308,23 +393,186 @@ video,
   }
 }
 
-/* Shared mobile top nav offset: safe-area + 10px pad + 36px row + 10px pad */
+/* Shared nav offsets + content breathing room under the fixed header */
 :root {
-  --app-mobile-nav-offset: calc(56px + env(safe-area-inset-top, 0px));
+  /* Mobile header: safe-area + 14px pad + 40px row + 14px pad */
+  --app-mobile-nav-offset: calc(68px + env(safe-area-inset-top, 0px));
+  --app-content-top-gap: 16px;
+  --app-view-chrome: var(--app-mobile-nav-offset);
+  --app-view-pad: var(--app-content-top-gap);
+  --app-desktop-panel-width: 0px;
 }
 
-/* Full-page scroll mode for top-level app views */
-html.news-page-scroll,
-body.news-page-scroll,
-#root.news-page-scroll {
+@media (min-width: 600px) {
+  :root {
+    --app-tablet-nav-offset: 64px;
+    --app-content-top-gap: 20px;
+    --app-view-chrome: var(--app-tablet-nav-offset);
+    --app-view-pad: var(--app-content-top-gap);
+  }
+}
+
+@media (min-width: 900px) {
+  :root {
+    /* Desktop header minHeight is 56px */
+    --app-desktop-nav-offset: 56px;
+    --app-content-top-gap: 24px;
+    --app-view-chrome: var(--app-desktop-nav-offset);
+    --app-view-pad: var(--app-content-top-gap);
+    --app-desktop-panel-width: 280px;
+  }
+}
+
+/* Keep mobile top nav razor-sharp (no backdrop blur / soft compositing). */
+@media (max-width: 899.95px) {
+  .app-top-nav {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background-color: #0e1117 !important;
+    /* Full visual width — scrollbar scrolls underneath, no right-side gap */
+    left: 0 !important;
+    right: auto !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+  }
+
+  .app-top-nav .MuiTypography-root {
+    -webkit-text-fill-color: #f8fafc !important;
+    color: #f8fafc !important;
+    background: none !important;
+    -webkit-background-clip: border-box !important;
+    background-clip: border-box !important;
+  }
+
+  .app-top-nav .MuiIconButton-root {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .app-top-nav img {
+    filter: none !important;
+  }
+}
+
+/* Full-page scroll mode — document scrolls only when content overflows the viewport. */
+html.news-page-scroll {
+  overflow-x: hidden !important;
   overflow-y: auto !important;
   height: auto !important;
+  min-height: 100%;
+  overscroll-behavior-y: none;
+}
+
+body.news-page-scroll,
+#root.news-page-scroll {
+  overflow: visible !important;
+  height: auto !important;
+  min-height: 100%;
+}
+
+/* Lock document while a tab loader is showing (all screens) — no empty-page scroll */
+html.view-loading,
+body.view-loading,
+#root.view-loading,
+html.view-loading.news-page-scroll,
+body.view-loading.news-page-scroll,
+#root.view-loading.news-page-scroll {
+  overflow: hidden !important;
+  height: 100% !important;
+  max-height: 100dvh !important;
+  overscroll-behavior: none !important;
+}
+
+@supports not (height: 100dvh) {
+  html.view-loading,
+  body.view-loading,
+  #root.view-loading,
+  html.view-loading.news-page-scroll,
+  body.view-loading.news-page-scroll,
+  #root.view-loading.news-page-scroll {
+    max-height: 100vh !important;
+  }
+}
+
+/* Mobile: body can also be the scroll surface when not loading */
+@media (max-width: 899.95px) {
+  body.news-page-scroll:not(.view-loading),
+  #root.news-page-scroll:not(.view-loading) {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  html.view-loading,
+  body.view-loading,
+  #root.view-loading {
+    touch-action: none;
+  }
+}
+
+/* Desktop: window scroll only when content overflows (not while loading) */
+@media (min-width: 900px) {
+  html.news-page-scroll:not(.view-loading) {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  body.news-page-scroll:not(.view-loading),
+  #root.news-page-scroll:not(.view-loading) {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    touch-action: auto !important;
+  }
+
+  /* App shell grows with real content only — don't force extra viewport height stacking */
+  body.news-page-scroll #root > .app-shell,
+  body.news-page-scroll #root > div {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 100%;
+  }
+
+  .main-news-page-scroll,
+  .main-news-page-scroll .main-content-wrapper,
+  main.main-news-page-scroll,
+  .main-content-wrapper {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+  }
+
+  .main-content-wrapper {
+    align-items: stretch !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
 }
 
 .main-news-page-scroll {
-  overflow-y: visible !important;
+  overflow: visible !important;
   height: auto !important;
   max-height: none !important;
+}
+
+/* Fixed header always paints edge-to-edge (scrollbar slides under it) */
+.app-top-nav {
+  left: 0 !important;
+  right: auto !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  box-sizing: border-box !important;
+}
+
+@media (min-width: 900px) {
+  .app-top-nav {
+    left: 280px !important;
+    width: calc(100vw - 280px) !important;
+    max-width: calc(100vw - 280px) !important;
+  }
 }
 
 /* Mobile news reels: lock page scroll, reels scroll internally below nav */
@@ -332,14 +580,40 @@ html.news-reels-immersive,
 body.news-reels-immersive,
 #root.news-reels-immersive {
   overflow: hidden !important;
-  height: 100svh !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
   overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 .main-news-reels-immersive {
   overflow: hidden !important;
-  height: 100svh !important;
-  max-height: 100svh !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  padding: 0 !important;
+}
+
+@supports not (height: 100dvh) {
+  html.news-reels-immersive,
+  body.news-reels-immersive,
+  #root.news-reels-immersive,
+  .main-news-reels-immersive {
+    height: 100svh !important;
+    max-height: 100svh !important;
+  }
+}
+
+.news-reels-scroller {
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+}
+
+.news-reels-scroller::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* Allow menu to be visible but constrained */
@@ -1730,21 +2004,22 @@ h2.match-title {
   /* Drawer/Sidebar Mobile Styles */
   .MuiDrawer-paper {
     box-shadow: 4px 0 20px rgba(0,0,0,0.5) !important;
-    overflow: visible !important; /* Allow dropdown menu to overflow drawer */
   }
   
-  /* Ensure Select menu appears above drawer */
-  .MuiDrawer-paper .MuiMenu-root {
-    z-index: 1400 !important;
+  /* Portaled league menu stays above nav + control panel */
+  .MuiMenu-root,
+  .league-selector-menu-paper {
+    z-index: 2400 !important;
   }
   
-  .MuiDrawer-paper .MuiPaper-root.MuiMenu-paper {
-    z-index: 1400 !important;
+  .MuiPaper-root.MuiMenu-paper,
+  .league-selector-menu-paper {
+    z-index: 2401 !important;
   }
   
   /* Prevent body scroll when drawer is open */
   body.drawer-open {
-    overflow: hidden;
+    overflow: hidden !important;
   }
   
   /* Prediction Cards */
@@ -2013,6 +2288,13 @@ h2.match-title {
     padding: 12px 14px !important;
     font-size: 1rem !important;
   }
+
+  .league-selector-control .MuiSelect-select {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 14px 44px 14px 14px !important;
+    cursor: pointer !important;
+  }
   
   /* Drawer backdrop */
   .MuiBackdrop-root {
@@ -2021,13 +2303,9 @@ h2.match-title {
     transition: opacity 0.3s ease-in-out !important;
   }
   
-  /* Hamburger button animation */
-  .MuiIconButton-root {
-    transition: transform 0.3s ease !important;
-  }
-  
+  /* Hamburger: no transform on tap (causes panel jank) */
   .MuiIconButton-root:active {
-    transform: scale(0.95);
+    transform: none;
   }
   
   /* Smooth drawer transitions */

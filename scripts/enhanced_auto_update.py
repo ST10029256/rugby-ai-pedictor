@@ -10,7 +10,7 @@ import os
 import sys
 import logging
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
@@ -367,17 +367,13 @@ class SnapshotRuntime:
             logger.debug(f"SnapshotRuntime error for event {event_id}: {e}")
 
     def freeze_upcoming(self, conn: sqlite3.Connection, hours_ahead: int = 48, limit: int = 400) -> Dict[str, int]:
-        """Freeze immutable pre-kickoff snapshots for all upcoming fixtures in the horizon.
+        """Lock immutable AI predictions at local midnight before match day.
 
-        Runs during the daily sync so every fixture is predicted before it is
-        played. The horizon is filtered in SQL: selecting all unfinished games
-        and narrowing afterwards let hundreds of stale past fixtures - games
-        that never received a final score - fill the row limit and push out the
-        fixtures actually about to kick off.
-
-        The default horizon deliberately spans two days rather than one, so a
-        single failed nightly run does not leave a day of games with no
-        prediction. Existing rows are never overwritten.
+        The GitHub job runs 22:00 UTC = 00:00 SAST. At that instant we freeze
+        today's remaining SAST card and tomorrow's card, so a Saturday game is
+        stored as Saturday begins — before kickoff. Existing rows are never
+        overwritten. ``hours_ahead`` is kept for callers but the window is
+        match-day based (today + tomorrow SAST), not a rolling hour horizon.
         """
         stats = {"scanned": 0, "created": 0, "skipped_existing": 0, "skipped_started": 0, "errors": 0}
         if not self.enabled:
@@ -388,8 +384,15 @@ class SnapshotRuntime:
 
         _ensure_prediction_snapshot_table(conn)
         cur = conn.cursor()
-        now = datetime.utcnow()
-        horizon_days = max(1, (max(1, int(hours_ahead)) + 23) // 24)
+        try:
+            from zoneinfo import ZoneInfo
+            local_tz = ZoneInfo("Africa/Johannesburg")
+        except Exception:
+            local_tz = timezone(timedelta(hours=2))
+        today_local = datetime.now(local_tz).date()
+        day_from = today_local.isoformat()
+        day_to = (today_local + timedelta(days=1)).isoformat()
+        _ = hours_ahead
         cur.execute(
             """
             SELECT
@@ -406,11 +409,11 @@ class SnapshotRuntime:
               AND e.away_team_id IS NOT NULL
               AND (e.home_score IS NULL OR e.away_score IS NULL)
               AND e.date_event IS NOT NULL
-              AND date(e.date_event) BETWEEN date('now') AND date('now', ?)
+              AND date(e.date_event) BETWEEN ? AND ?
             ORDER BY COALESCE(e.timestamp, e.date_event) ASC
             LIMIT ?
             """,
-            (f"+{horizon_days} days", max(1, int(limit))),
+            (day_from, day_to, max(1, int(limit))),
         )
         rows = cur.fetchall()
         predictor = self._get_predictor()
@@ -498,6 +501,70 @@ class SnapshotRuntime:
                     match_id, home_team, away_team, e,
                 )
 
+        conn.commit()
+        return stats
+
+    def finalize_scored_snapshots(self, conn: sqlite3.Connection) -> Dict[str, int]:
+        """Stamp actual scores onto frozen midnight snapshots once results exist."""
+        stats = {"finalized": 0, "errors": 0}
+        _ensure_prediction_snapshot_table(conn)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                e.id,
+                e.home_score,
+                e.away_score,
+                s.predicted_winner,
+                s.predicted_home_score,
+                s.predicted_away_score
+            FROM event e
+            JOIN prediction_snapshot s
+              ON s.match_id = e.id
+             AND s.snapshot_type = 'pre_kickoff_live'
+             AND s.model_version = ?
+            WHERE e.home_score IS NOT NULL
+              AND e.away_score IS NOT NULL
+              AND s.actual_home_score IS NULL
+            """,
+            (self.model_version,),
+        )
+        rows = cur.fetchall()
+        for match_id, home_score, away_score, pred_winner, pred_home, pred_away in rows:
+            try:
+                actual_winner = self._actual_winner(home_score, away_score)
+                prediction_correct = None
+                if pred_winner in {"Home", "Away", "Draw"} and actual_winner:
+                    prediction_correct = 1 if pred_winner == actual_winner else 0
+                score_error = None
+                if pred_home is not None and pred_away is not None:
+                    score_error = abs(float(pred_home) - float(home_score)) + abs(
+                        float(pred_away) - float(away_score)
+                    )
+                cur.execute(
+                    """
+                    UPDATE prediction_snapshot
+                    SET actual_home_score=?, actual_away_score=?, actual_winner=?,
+                        prediction_correct=?, score_error=?, updated_at=CURRENT_TIMESTAMP
+                    WHERE match_id=? AND model_version=? AND snapshot_type='pre_kickoff_live'
+                      AND actual_home_score IS NULL
+                    """,
+                    (
+                        int(home_score),
+                        int(away_score),
+                        actual_winner,
+                        prediction_correct,
+                        score_error,
+                        int(match_id),
+                        self.model_version,
+                    ),
+                )
+                if cur.rowcount:
+                    stats["finalized"] += 1
+                    self.stats["finalized"] += 1
+            except Exception as e:
+                stats["errors"] += 1
+                logger.warning("Snapshot finalize failed for match %s: %s", match_id, e)
         conn.commit()
         return stats
 
@@ -952,6 +1019,12 @@ def main():
                 freeze_stats["skipped_existing"],
                 freeze_stats["skipped_started"],
                 freeze_stats["errors"],
+            )
+            finalize_stats = snapshot_runtime.finalize_scored_snapshots(conn)
+            logger.info(
+                "🏁 Snapshot actuals: finalized=%s errors=%s",
+                finalize_stats["finalized"],
+                finalize_stats["errors"],
             )
             # A fixture with no snapshot by kickoff can never get one, so a run
             # that saw upcoming games and stored none is a silent data loss.

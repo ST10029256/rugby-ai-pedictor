@@ -17,7 +17,7 @@ import MatchLineups from './components/MatchLineups';
 import LeagueTeams from './components/LeagueTeams';
 import RugbyBallLoader from './components/RugbyBallLoader';
 import HistoricalPredictions from './components/HistoricalPredictions';
-import { VIEW_CONTENT_WRAPPER_SX } from './utils/viewLoader';
+import { VIEW_CONTENT_WRAPPER_SX, clearViewLoadingScrollLock } from './utils/viewLoader';
 import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
 import { MEDIA_URLS } from './utils/storageUrls';
 import './App.css';
@@ -27,7 +27,7 @@ import { getDeviceId } from './utils/deviceId';
 import { ensureProfileFromAuth } from './utils/userProfile';
 import { predictionsWidgetSx } from './utils/predictionsLayout';
 import { applyLeagueDisplayNames, modelTeamNameForPrediction } from './utils/teamDisplayNames';
-import { hasUsableOdds, impliedHomeProbability, oddsAdjustedView } from './utils/oddsAdjustment';
+import { hasUsableOdds, oddsAdjustedView } from './utils/oddsAdjustment';
 
 const darkTheme = createTheme({
   palette: {
@@ -88,37 +88,213 @@ function toUTCDateFromIso(isoDate) {
   return new Date(Date.UTC(y, m - 1, d));
 }
 
+function addDaysIso(isoDate, days) {
+  const d = toUTCDateFromIso(isoDate);
+  if (!d) return '';
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function parseScoreValue(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function matchActualScores(match) {
+  const actualHome = parseScoreValue(match?.home_score);
+  const actualAway = parseScoreValue(match?.away_score);
+  if (actualHome === null || actualAway === null) {
+    return { actual_home_score: null, actual_away_score: null };
+  }
+  return { actual_home_score: actualHome, actual_away_score: actualAway };
+}
+
+function withMatchActuals(prediction, match) {
+  const actuals = matchActualScores(match);
+  const predictedHome = parseScoreValue(
+    prediction?.predicted_home_score ?? prediction?.home_score
+  );
+  const predictedAway = parseScoreValue(
+    prediction?.predicted_away_score ?? prediction?.away_score
+  );
+  let predictionCorrect = prediction?.prediction_correct;
+  if (
+    predictionCorrect == null &&
+    actuals.actual_home_score !== null &&
+    predictedHome !== null &&
+    predictedAway !== null
+  ) {
+    const actualWinner =
+      actuals.actual_home_score > actuals.actual_away_score
+        ? 'home'
+        : actuals.actual_away_score > actuals.actual_home_score
+          ? 'away'
+          : 'draw';
+    const predictedWinner =
+      predictedHome > predictedAway ? 'home' : predictedAway > predictedHome ? 'away' : 'draw';
+    predictionCorrect = actualWinner === predictedWinner;
+  }
+  return {
+    ...prediction,
+    ...actuals,
+    prediction_correct: predictionCorrect ?? null,
+  };
+}
+
+function cardFromFrozenMatch(match, leagueId, odds) {
+  const matchDate = extractMatchDateIso(match) || getLocalYYYYMMDD();
+  const kickoffAt = getKickoffAtFromMatch(match, leagueId);
+  const predictedHome = parseScoreValue(match?.predicted_home_score);
+  const predictedAway = parseScoreValue(match?.predicted_away_score);
+  const hasAi = predictedHome !== null && predictedAway !== null;
+  const apiWinner = match?.predicted_winner;
+  const homeWinProb = parseScoreValue(match?.home_win_prob);
+  const yourOddsView = oddsAdjustedView(
+    homeWinProb ?? 0.5,
+    odds,
+    match.home_team,
+    match.away_team
+  );
+
+  if (!hasAi) {
+    return withMatchActuals({
+      home_team: match.home_team,
+      away_team: match.away_team,
+      date: matchDate,
+      kickoff_at: kickoffAt,
+      league_id: leagueId,
+      home_team_id: match.home_team_id,
+      away_team_id: match.away_team_id,
+      prediction_unavailable: true,
+      unavailable_reason: 'No AI forecast was locked at midnight before kickoff',
+      winner: null,
+      predicted_winner: null,
+      confidence: null,
+      home_score: null,
+      away_score: null,
+      show_scores: false,
+      model_available: false,
+      manual_odds: odds,
+    }, match);
+  }
+
+  let winner = null;
+  if (apiWinner === 'Draw' || apiWinner === 'draw') {
+    winner = 'Draw';
+  } else if (apiWinner === 'Home' || apiWinnerMatchesSide(apiWinner, match, 'home')) {
+    winner = match.home_team;
+  } else if (apiWinner === 'Away' || apiWinnerMatchesSide(apiWinner, match, 'away')) {
+    winner = match.away_team;
+  } else if (predictedHome === predictedAway) {
+    winner = 'Draw';
+  } else {
+    winner = predictedHome > predictedAway ? match.home_team : match.away_team;
+  }
+
+  let confidence = match?.predicted_confidence ?? match?.confidence ?? homeWinProb;
+  if (typeof confidence === 'string') {
+    const parsed = parseFloat(String(confidence).replace('%', ''));
+    confidence = parsed > 1 ? parsed / 100 : parsed;
+  }
+  if (typeof confidence === 'number' && confidence > 1) {
+    confidence = confidence / 100;
+  }
+  if (!Number.isFinite(confidence)) {
+    confidence = homeWinProb != null
+      ? (homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb)
+      : 0.5;
+  }
+
+  const displayHome = Math.round(predictedHome);
+  const displayAway = Math.round(predictedAway);
+  const scoreDiff = Math.abs(displayHome - displayAway);
+  let intensity = 'Tight Margin (3-5 pts)';
+  if (scoreDiff <= 2) intensity = 'Narrow Margin (0-2 pts)';
+  else if (scoreDiff <= 5) intensity = 'Tight Margin (3-5 pts)';
+  else if (scoreDiff <= 10) intensity = 'Solid Margin (6-10 pts)';
+  else intensity = 'Wide Margin (11+ pts)';
+
+  let confidenceLevel = 'Close Match Expected';
+  if (confidence >= 0.8) confidenceLevel = 'High Confidence';
+  else if (confidence >= 0.65) confidenceLevel = 'Moderate Confidence';
+
+  return withMatchActuals({
+    home_team: match.home_team,
+    away_team: match.away_team,
+    date: matchDate,
+    kickoff_at: kickoffAt,
+    winner,
+    predicted_winner: winner,
+    confidence: `${(confidence * 100).toFixed(1)}%`,
+    home_score: String(displayHome),
+    away_score: String(displayAway),
+    predicted_home_score: displayHome,
+    predicted_away_score: displayAway,
+    home_win_prob: homeWinProb,
+    league_id: leagueId,
+    intensity,
+    confidence_level: confidenceLevel,
+    score_diff: displayHome - displayAway,
+    prediction_type: 'AI Snapshot (midnight lock)',
+    ai_probability: homeWinProb,
+    hybrid_probability: homeWinProb,
+    bookmaker_count: match?.odds_bookmaker_count || 0,
+    confidence_boost: 0,
+    home_team_id: match.home_team_id,
+    away_team_id: match.away_team_id,
+    live_odds_available: hasUsableOdds(odds),
+    manual_odds: odds,
+    show_scores: true,
+    model_available: true,
+    your_odds_home_win_prob: yourOddsView ? yourOddsView.home_win_prob : null,
+    your_odds_winner: yourOddsView ? yourOddsView.winner : null,
+    your_odds_confidence: yourOddsView ? yourOddsView.confidence : null,
+    your_odds_implied_home_win_prob: yourOddsView ? yourOddsView.odds_implied_home_win_prob : null,
+  }, match);
+}
+
 function getNextMatchWeek(matches) {
-  const todayIso = getLocalYYYYMMDD();
   const dated = (matches || [])
     .map((match) => ({ match, dateIso: extractMatchDateIso(match) }))
-    .filter((x) => x.dateIso && x.dateIso >= todayIso)
+    .filter((x) => x.dateIso)
     .sort((a, b) => a.dateIso.localeCompare(b.dateIso));
 
   if (dated.length === 0) {
     return { matches: [], startDateIso: '', endDateIso: '' };
   }
 
-  // Keep only the first contiguous fixture block (current round/weekend).
-  // Example: dates [2026-03-06, 2026-03-07, 2026-03-14] => keep 06+07, exclude 14.
-  const cluster = [dated[0]];
-  let lastIso = dated[0].dateIso;
-  const MAX_GAP_DAYS = 2;
-  for (let i = 1; i < dated.length; i += 1) {
-    const currIso = dated[i].dateIso;
-    const prevDate = toUTCDateFromIso(lastIso);
-    const currDate = toUTCDateFromIso(currIso);
-    if (!prevDate || !currDate) break;
-    const gapDays = Math.round((currDate.getTime() - prevDate.getTime()) / (24 * 60 * 60 * 1000));
-    if (gapDays > MAX_GAP_DAYS) break;
-    cluster.push(dated[i]);
-    lastIso = currIso;
+  const todayIso = getLocalYYYYMMDD();
+  const yesterdayIso = addDaysIso(todayIso, -1);
+  const yesterday = dated.filter((x) => x.dateIso === yesterdayIso);
+  const upcoming = dated.filter((x) => x.dateIso >= todayIso);
+
+  // Keep yesterday after midnight so those cards can flip to AI vs actual,
+  // and still show the next live round instead of hiding it behind yesterday.
+  let cluster = [];
+  if (upcoming.length > 0) {
+    cluster = [upcoming[0]];
+    let lastIso = upcoming[0].dateIso;
+    const MAX_GAP_DAYS = 2;
+    for (let i = 1; i < upcoming.length; i += 1) {
+      const currIso = upcoming[i].dateIso;
+      const prevDate = toUTCDateFromIso(lastIso);
+      const currDate = toUTCDateFromIso(currIso);
+      if (!prevDate || !currDate) break;
+      const gapDays = Math.round((currDate.getTime() - prevDate.getTime()) / (24 * 60 * 60 * 1000));
+      if (gapDays > MAX_GAP_DAYS) break;
+      cluster.push(upcoming[i]);
+      lastIso = currIso;
+    }
   }
 
-  const startDateIso = cluster[0].dateIso;
-  const endDateIso = cluster[cluster.length - 1].dateIso;
-  const windowMatches = cluster.map((x) => x.match);
-  return { matches: windowMatches, startDateIso, endDateIso };
+  const combined = [...yesterday, ...cluster];
+  const source = combined.length > 0 ? combined : dated.slice(0, 1);
+  return {
+    matches: source.map((x) => x.match),
+    startDateIso: source[0].dateIso,
+    endDateIso: source[source.length - 1].dateIso,
+  };
 }
 
 function getMatchKickoffSortMs(match, leagueId) {
@@ -276,9 +452,15 @@ function isUpcomingMatch(match, leagueId) {
 
 function getUpcomingExclusionReason(match, leagueId) {
   if (!match) return 'missing_match';
-  if (isFinishedMatch(match)) return 'finished_status';
   const dateIso = extractMatchDateIso(match);
   const todayIso = getLocalYYYYMMDD();
+  const oldestKeepIso = addDaysIso(todayIso, -1);
+  // Yesterday stays on Predictions after midnight so AI vs actual can show.
+  // Today and future stay as the live/upcoming card.
+  if (dateIso && oldestKeepIso && dateIso >= oldestKeepIso) {
+    return null;
+  }
+  if (isFinishedMatch(match)) return 'finished_status';
   const isTodayFixture = Boolean(dateIso) && dateIso === todayIso;
   const staleScoredFutureFixture =
     isLikelyStaleScoredFixture(match) && Boolean(dateIso) && dateIso > todayIso;
@@ -300,6 +482,11 @@ function getUpcomingExclusionReason(match, leagueId) {
         }
         // Keep only genuinely upcoming kickoffs (small grace for clock skew).
         if (kickoffMs < nowMs - 5 * 60 * 1000) {
+          // Unscored weekend games must stay on Predictions after midnight.
+          const oldestKeepIso = addDaysIso(todayIso, -2);
+          if (!hasRecordedResult(match) && dateIso && oldestKeepIso && dateIso >= oldestKeepIso) {
+            return null;
+          }
           return 'kickoff_in_past';
         }
         return null;
@@ -313,7 +500,13 @@ function getUpcomingExclusionReason(match, leagueId) {
   // Date-only fallback for feeds that omit a trustworthy kickoff timestamp.
   // Keep same-day/future fixtures visible even if a partial score was synced.
   if (!dateIso) return 'missing_date';
-  if (dateIso < todayIso) return 'fixture_date_in_past';
+  if (dateIso < todayIso) {
+    const oldestKeepIso = addDaysIso(todayIso, -2);
+    if (!hasRecordedResult(match) && oldestKeepIso && dateIso >= oldestKeepIso) {
+      return null;
+    }
+    return 'fixture_date_in_past';
+  }
   return null;
 }
 
@@ -430,11 +623,9 @@ function App() {
   const [leagues, setLeagues] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState(null);
   const [upcomingMatches, setUpcomingMatches] = useState([]);
-  const [predictions, setPredictions] = useState([]);
   const [manualOdds, setManualOdds] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', 'standings', 'history', or 'profile'
   const [profileRevision, setProfileRevision] = useState(0);
@@ -451,7 +642,6 @@ function App() {
   const isMobile = useMediaQuery('(max-width:899.95px)');
   const isMobileReelsViewport = useMediaQuery('(max-width:768px)');
   const isMobileNewsReels = isMobileReelsViewport && activeView === 'news';
-  const isTallMobileViewport = useMediaQuery('(min-height:860px)');
 
   const upcomingWindow = useMemo(() => getNextMatchWeek(upcomingMatches), [upcomingMatches]);
   const upcomingWindowMatches = useMemo(() => {
@@ -465,6 +655,39 @@ function App() {
       return String(a?.away_team || '').localeCompare(String(b?.away_team || ''));
     });
   }, [upcomingWindow.matches, selectedLeague]);
+
+  const oddsInputMatches = useMemo(() => {
+    const todayIso = getLocalYYYYMMDD();
+    return upcomingWindowMatches.filter((match) => {
+      const dateIso = extractMatchDateIso(match);
+      return !dateIso || dateIso >= todayIso;
+    });
+  }, [upcomingWindowMatches]);
+
+  const predictions = useMemo(() => {
+    if (!selectedLeague || upcomingWindowMatches.length === 0) return [];
+    const seenEventIds = new Set();
+    const seenMatchups = new Set();
+    const cards = [];
+    for (const match of upcomingWindowMatches) {
+      const matchDate = extractMatchDateIso(match) || getLocalYYYYMMDD();
+      const eventIdKey = String(match.event_id || match.id || '').trim();
+      if (eventIdKey) {
+        if (seenEventIds.has(eventIdKey)) continue;
+        seenEventIds.add(eventIdKey);
+      }
+      const homeKey = match.home_team_id || normalizeTeamNameForDedupe(match.home_team);
+      const awayKey = match.away_team_id || normalizeTeamNameForDedupe(match.away_team);
+      const matchupKey = `${homeKey}::${awayKey}::${matchDate}`;
+      if (seenMatchups.has(matchupKey)) continue;
+      seenMatchups.add(matchupKey);
+      const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
+      const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
+      const odds = manualOdds[idKey] || manualOdds[nameKey];
+      cards.push(cardFromFrozenMatch(match, selectedLeague, odds));
+    }
+    return cards;
+  }, [selectedLeague, upcomingWindowMatches, manualOdds]);
 
   // Check authentication on mount — skip silent auto-login when biometric is enabled.
   useEffect(() => {
@@ -581,7 +804,24 @@ function App() {
     setLeagues([]);
     setSelectedLeague(null);
     setUpcomingMatches([]);
-    setPredictions([]);
+    setMobileOpen(false);
+    setActiveView('predictions');
+
+    // Clear mobile scroll locks so the login screen stays interactive.
+    const html = document.documentElement;
+    const body = document.body;
+    const root = document.getElementById('root');
+    html.classList.remove('news-reels-immersive', 'news-page-scroll', 'drawer-open', 'menu-open');
+    body.classList.remove('news-reels-immersive', 'news-page-scroll', 'drawer-open', 'menu-open');
+    if (root) root.classList.remove('news-reels-immersive', 'news-page-scroll', 'drawer-open', 'menu-open');
+    html.style.overflow = '';
+    html.style.height = '';
+    body.style.overflow = '';
+    body.style.position = '';
+    body.style.top = '';
+    body.style.width = '';
+    body.style.touchAction = '';
+    body.style.overscrollBehavior = '';
   };
 
   // Restore selected league from localStorage after authentication check
@@ -605,63 +845,48 @@ function App() {
   }, [selectedLeague]);
 
 
-  // Prevent scrolling when mobile drawer is open
+  // Prevent page scrolling when mobile drawer is open (only while authenticated).
   useEffect(() => {
-    if (!isMobile || !mobileOpen) return;
+    if (!authenticated || !isMobile || !mobileOpen) return;
 
     const html = document.documentElement;
     const body = document.body;
     const root = document.getElementById('root');
-    const mainContent = document.querySelector('main') || document.querySelector('.main-content-wrapper');
-    
-    // Store original scroll position
     const scrollY = window.scrollY;
-    const mainScrollTop = mainContent ? mainContent.scrollTop : 0;
-    
-    // Disable scrolling
+
     html.classList.add('drawer-open');
     body.classList.add('drawer-open');
     if (root) root.classList.add('drawer-open');
+
+    const hadPageScroll =
+      html.classList.contains('news-page-scroll') ||
+      body.classList.contains('news-page-scroll');
+    html.classList.remove('news-page-scroll');
+    body.classList.remove('news-page-scroll');
+    if (root) root.classList.remove('news-page-scroll');
+
+    // Lock page without position:fixed (that jumps/glitches the panel on iOS).
     html.style.overflow = 'hidden';
-    html.style.height = '100%';
     body.style.overflow = 'hidden';
-    body.style.position = 'fixed';
-    body.style.top = `-${scrollY}px`;
-    body.style.width = '100%';
-    body.style.touchAction = 'none';
     body.style.overscrollBehavior = 'none';
-    
-    if (mainContent) {
-      mainContent.style.overflow = 'hidden';
-      mainContent.style.touchAction = 'none';
-      mainContent.style.overscrollBehavior = 'none';
-    }
 
     return () => {
-      // Restore scrolling when drawer closes
       html.classList.remove('drawer-open');
       body.classList.remove('drawer-open');
       if (root) root.classList.remove('drawer-open');
-      html.style.overflow = '';
-      html.style.height = '';
-      body.style.overflow = '';
-      body.style.position = '';
-      body.style.top = '';
-      body.style.width = '';
-      body.style.touchAction = '';
-      body.style.overscrollBehavior = '';
-      
-      // Restore scroll position
-      window.scrollTo(0, scrollY);
-      
-      if (mainContent) {
-        mainContent.style.overflow = '';
-        mainContent.style.touchAction = '';
-        mainContent.style.overscrollBehavior = '';
-        mainContent.scrollTop = mainScrollTop;
+
+      if (hadPageScroll) {
+        html.classList.add('news-page-scroll');
+        body.classList.add('news-page-scroll');
+        if (root) root.classList.add('news-page-scroll');
       }
+
+      html.style.overflow = '';
+      body.style.overflow = '';
+      body.style.overscrollBehavior = '';
+      window.scrollTo(0, scrollY);
     };
-  }, [mobileOpen, isMobile]);
+  }, [authenticated, mobileOpen, isMobile]);
 
   // News + Standings + Predictions + History should use normal page scrolling (no inner scroll panel).
   // Mobile news uses fixed full-screen reels below nav — lock document scroll instead.
@@ -669,15 +894,17 @@ function App() {
     const html = document.documentElement;
     const body = document.body;
     const root = document.getElementById('root');
-    const shouldUseReelsImmersive = isMobileReelsViewport && activeView === 'news';
+    const shouldUseReelsImmersive =
+      authenticated && isMobileReelsViewport && activeView === 'news';
     const shouldUsePageScroll =
-      (activeView === 'news' && !shouldUseReelsImmersive) ||
-      activeView === 'standings' ||
-      activeView === 'teams' ||
-      activeView === 'lineups' ||
-      activeView === 'predictions' ||
-      activeView === 'history' ||
-      activeView === 'profile';
+      authenticated &&
+      ((activeView === 'news' && !shouldUseReelsImmersive) ||
+        activeView === 'standings' ||
+        activeView === 'teams' ||
+        activeView === 'lineups' ||
+        activeView === 'predictions' ||
+        activeView === 'history' ||
+        activeView === 'profile');
 
     html.classList.toggle('news-page-scroll', shouldUsePageScroll);
     body.classList.toggle('news-page-scroll', shouldUsePageScroll);
@@ -688,6 +915,28 @@ function App() {
       root.classList.toggle('news-reels-immersive', shouldUseReelsImmersive);
     }
 
+    // Drop any stuck mobile loading lock when switching views.
+    clearViewLoadingScrollLock();
+
+    // Desktop/tablet: only html may be a scroll container, and only when content overflows.
+    if (shouldUsePageScroll && !isMobileReelsViewport) {
+      html.style.setProperty('overflow-y', 'auto', 'important');
+      html.style.setProperty('overflow-x', 'hidden', 'important');
+      html.style.height = 'auto';
+      html.style.maxHeight = '';
+      body.style.setProperty('overflow', 'visible', 'important');
+      body.style.height = 'auto';
+      body.style.position = '';
+      body.style.top = '';
+      body.style.width = '';
+      body.style.overscrollBehavior = 'none';
+      if (root) {
+        root.style.setProperty('overflow', 'visible', 'important');
+        root.style.height = 'auto';
+        root.style.minHeight = '100%';
+      }
+    }
+
     return () => {
       html.classList.remove('news-page-scroll');
       body.classList.remove('news-page-scroll');
@@ -696,9 +945,21 @@ function App() {
       if (root) {
         root.classList.remove('news-page-scroll');
         root.classList.remove('news-reels-immersive');
+        root.style.overflow = '';
+        root.style.height = '';
+        root.style.minHeight = '';
       }
+      html.style.overflow = '';
+      html.style.overflowY = '';
+      html.style.overflowX = '';
+      html.style.height = '';
+      body.style.overflow = '';
+      body.style.overflowY = '';
+      body.style.overflowX = '';
+      body.style.height = '';
+      clearViewLoadingScrollLock();
     };
-  }, [activeView, isMobileReelsViewport]);
+  }, [authenticated, activeView, isMobileReelsViewport]);
 
   useEffect(() => {
     // Only load leagues when authenticated
@@ -828,7 +1089,6 @@ function App() {
 
     // Clear old matches immediately to prevent showing wrong games
     setUpcomingMatches([]);
-    setPredictions([]);
     setLoadingMatches(true);
 
     const fetchUpcoming = async () => {
@@ -958,378 +1218,6 @@ function App() {
     };
   }, [selectedLeague, upcomingWindowMatches]);
 
-  const handleGeneratePredictions = async () => {
-    if (!selectedLeague || upcomingWindowMatches.length === 0) {
-      return;
-    }
-
-    setGenerating(true);
-    const newPredictions = [];
-    const seenMatchups = new Set();
-    const seenEventIds = new Set();
-
-    // Import predict helpers dynamically
-    const { predictMatch, predictMatchesBatch } = await import('./firebase');
-
-    // Precompute unique match tasks (so we don't waste time on duplicates)
-    const tasks = [];
-    for (const match of upcomingWindowMatches) {
-      const matchDate = extractMatchDateIso(match) || getLocalYYYYMMDD();
-      const eventIdKey = String(match.event_id || match.id || '').trim();
-      if (eventIdKey) {
-        if (seenEventIds.has(eventIdKey)) {
-          continue;
-        }
-        seenEventIds.add(eventIdKey);
-      }
-
-      const homeKey = match.home_team_id || normalizeTeamNameForDedupe(match.home_team);
-      const awayKey = match.away_team_id || normalizeTeamNameForDedupe(match.away_team);
-      const matchupKey = `${homeKey}::${awayKey}::${matchDate}`;
-      if (seenMatchups.has(matchupKey)) {
-        console.log('⏭️ Skipping duplicate matchup (precompute):', matchupKey);
-        continue;
-      }
-      seenMatchups.add(matchupKey);
-
-      const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
-      const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
-      const odds = manualOdds[idKey] || manualOdds[nameKey];
-
-      tasks.push({ match, matchDate, matchupKey, odds });
-    }
-
-    // Fast path: ask the backend for the whole round in a single request.
-    // It serves cached / snapshot predictions and computes only the misses,
-    // so we avoid firing one Cloud Function call per match. We still fall back
-    // to per-match calls below for anything the batch didn't return.
-    const batchByEventId = new Map();
-    const batchByNameKey = new Map();
-    try {
-      const batchMatches = tasks.map(({ match, matchDate }) => ({
-        event_id: match.id || match.event_id || null,
-        home_team: predictionTeamName(match, 'home'),
-        away_team: predictionTeamName(match, 'away'),
-        match_date: matchDate,
-      }));
-      const batchResult = await predictMatchesBatch({
-        league_id: selectedLeague,
-        matches: batchMatches,
-      });
-      const preds = batchResult?.data?.predictions || [];
-      for (const p of preds) {
-        if (p && !p.error) {
-          if (p.event_id !== null && p.event_id !== undefined) {
-            batchByEventId.set(String(p.event_id), p);
-          }
-          batchByNameKey.set(`${p.home_team}::${p.away_team}::${p.match_date}`, p);
-        }
-      }
-    } catch (batchErr) {
-      console.warn('Batch prediction unavailable, using per-match fallback:', batchErr?.message);
-    }
-
-    // Helper function to retry API calls with exponential backoff
-    const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 1000) => {
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          return await fn();
-        } catch (error) {
-          const isLastAttempt = attempt === maxRetries - 1;
-          const isCorsError = error.message?.includes('CORS') || error.code === 'functions/internal';
-          const is503Error = error.message?.includes('503') || error.code === 'functions/unavailable';
-          
-          if (isLastAttempt) {
-            throw error;
-          }
-          
-          // Only retry on CORS/503 errors
-          if (isCorsError || is503Error) {
-            const delay = initialDelay * Math.pow(2, attempt);
-            await new Promise(resolve => setTimeout(resolve, delay));
-          } else {
-            throw error;
-          }
-        }
-      }
-    };
-
-    // Worker to process tasks with limited parallelism
-    const concurrency = Math.min(2, tasks.length || 1); // Reduced to 2 to avoid overwhelming backend
-    let taskIndex = 0;
-
-    const runTask = async () => {
-      while (taskIndex < tasks.length) {
-        const currentIndex = taskIndex++;
-        const { match, matchDate, odds } = tasks[currentIndex];
-        const kickoffAt = getKickoffAtFromMatch(match, selectedLeague);
-
-        try {
-          const result = await retryWithBackoff(async () => {
-            // Prefer the batched result when present; only hit the network for misses.
-            const eid = String(match.id || match.event_id || '');
-            const nameKey = `${predictionTeamName(match, 'home')}::${predictionTeamName(match, 'away')}::${matchDate}`;
-            const fromBatch =
-              (eid && batchByEventId.get(eid)) || batchByNameKey.get(nameKey);
-            if (fromBatch) {
-              return { data: fromBatch };
-            }
-            return await predictMatch({
-              home_team: predictionTeamName(match, 'home'),
-              away_team: predictionTeamName(match, 'away'),
-              league_id: selectedLeague,
-              match_date: matchDate,
-              event_id: match.id || match.event_id || null,
-              enhanced: false,
-            });
-          });
-
-          if (result && result.data && !result.data.error) {
-            const pred = result.data;
-
-            // The match started without a forecast being frozen, so none exists.
-            // One cannot be produced now: the model has since been trained on
-            // the result, so any number would be hindsight dressed as a
-            // prediction. Say so rather than showing a fabricated scoreline.
-            if (pred.prediction_unavailable) {
-              newPredictions.push({
-                home_team: match.home_team,
-                away_team: match.away_team,
-                date: matchDate,
-                kickoff_at: kickoffAt,
-                league_id: selectedLeague,
-                home_team_id: match.home_team_id,
-                away_team_id: match.away_team_id,
-                prediction_unavailable: true,
-                unavailable_reason: pred.unavailable_reason || 'No pre-kickoff forecast was recorded',
-                winner: null,
-                predicted_winner: null,
-                confidence: null,
-                home_score: null,
-                away_score: null,
-                show_scores: false,
-                model_available: false,
-              });
-              continue;
-            }
-
-            const modelAvailable = pred.model_available !== false && pred.show_scores !== false;
-            const bookmakerHomeWinProb = pred.bookmaker_home_win_prob ?? null;
-            const bookmakerCount = pred.bookmaker_count ?? 0;
-
-            if (!modelAvailable) {
-              // No trained model for this league, so the market is all there is.
-              // A user's own odds replace the shared market price here rather
-              // than competing with an AI number, since there isn't one.
-              const userImplied = hasUsableOdds(odds)
-                ? impliedHomeProbability(odds.home, odds.away)
-                : null;
-              const homeWinProb = userImplied ?? pred.home_win_prob ?? bookmakerHomeWinProb ?? 0.5;
-              const predictionType = userImplied !== null
-                ? 'Your Odds Only'
-                : (pred.prediction_type || 'Bookmaker Odds Only');
-
-              let winner;
-              let finalConfidence;
-              const apiWinner = pred.predicted_winner || pred.winner;
-              if (apiWinner === 'Draw' || apiWinner === 'draw') {
-                winner = 'Draw';
-                finalConfidence = 0.5;
-              } else if (apiWinner === 'Home' || apiWinnerMatchesSide(apiWinner, match, 'home')) {
-                winner = match.home_team;
-                finalConfidence = homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb;
-              } else if (apiWinner === 'Away' || apiWinnerMatchesSide(apiWinner, match, 'away')) {
-                winner = match.away_team;
-                finalConfidence = homeWinProb < 0.5 ? 1 - homeWinProb : homeWinProb;
-              } else if (homeWinProb > 0.5) {
-                winner = match.home_team;
-                finalConfidence = homeWinProb;
-              } else if (homeWinProb < 0.5) {
-                winner = match.away_team;
-                finalConfidence = 1 - homeWinProb;
-              } else {
-                winner = 'Draw';
-                finalConfidence = 0.5;
-              }
-
-              let confidenceLevel = 'Close Match Expected';
-              if (finalConfidence >= 0.8) {
-                confidenceLevel = 'High Confidence';
-              } else if (finalConfidence >= 0.65) {
-                confidenceLevel = 'Moderate Confidence';
-              }
-
-              newPredictions.push({
-                home_team: match.home_team,
-                away_team: match.away_team,
-                date: matchDate,
-                kickoff_at: kickoffAt,
-                winner,
-                predicted_winner: winner,
-                confidence: `${(finalConfidence * 100).toFixed(1)}%`,
-                home_score: null,
-                away_score: null,
-                show_scores: false,
-                model_available: false,
-                home_win_prob: homeWinProb,
-                league_id: selectedLeague,
-                intensity: 'Odds-based pick (no AI score yet)',
-                confidence_level: confidenceLevel,
-                score_diff: null,
-                prediction_type: predictionType,
-                ai_probability: null,
-                hybrid_probability: homeWinProb,
-                bookmaker_probability: bookmakerHomeWinProb ?? homeWinProb,
-                bookmaker_count: bookmakerCount,
-                confidence_boost: 0,
-                home_team_id: match.home_team_id,
-                away_team_id: match.away_team_id,
-                live_odds_available: bookmakerCount > 0 || hasUsableOdds(odds),
-                manual_odds: odds,
-              });
-              continue;
-            }
-
-            // Extract AI prediction values (matching Streamlit make_expert_prediction)
-            const aiHomeWinProb = pred.ai_home_win_prob ?? pred.home_win_prob ?? 0.5;
-            const backendHybridProb = pred.hybrid_home_win_prob ?? pred.home_win_prob ?? aiHomeWinProb;
-            const predictedHomeScore = parseFloat(pred.predicted_home_score || 0);
-            const predictedAwayScore = parseFloat(pred.predicted_away_score || 0);
-            const displayHomeScore = Math.round(predictedHomeScore);
-            const displayAwayScore = Math.round(predictedAwayScore);
-            const isDisplayedDraw = displayHomeScore === displayAwayScore;
-
-            // The backend value is the single source of truth: it was computed
-            // once before kickoff and stored, so every user sees this exact
-            // number. The browser must not recompute it — doing so previously
-            // meant a user's odds silently rewrote "the AI prediction".
-            const homeWinProb = backendHybridProb;
-            const predictionType = pred.prediction_type || (bookmakerCount > 0 ? 'Hybrid AI + Live Odds' : 'AI Only (No Odds)');
-
-            // A user's own odds produce a separate, clearly-labelled figure.
-            const yourOddsView = oddsAdjustedView(
-              aiHomeWinProb,
-              odds,
-              match.home_team,
-              match.away_team
-            );
-
-            let winner;
-            let finalConfidence;
-            // Use predicted_winner from API when available; otherwise derive from scores (allow Draw)
-            const apiWinner = pred.predicted_winner || pred.winner;
-            if (apiWinner === 'Draw' || apiWinner === 'draw') {
-              winner = 'Draw';
-              finalConfidence = 0.5;
-            } else if (apiWinner === 'Home' || apiWinnerMatchesSide(apiWinner, match, 'home')) {
-              winner = match.home_team;
-              finalConfidence = homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb;
-            } else if (apiWinner === 'Away' || apiWinnerMatchesSide(apiWinner, match, 'away')) {
-              winner = match.away_team;
-              finalConfidence = homeWinProb < 0.5 ? 1 - homeWinProb : homeWinProb;
-            } else if (isDisplayedDraw || predictedHomeScore === predictedAwayScore) {
-              winner = 'Draw';
-              finalConfidence = 0.5;
-            } else if (homeWinProb > 0.5) {
-              winner = match.home_team;
-              finalConfidence = homeWinProb;
-            } else if (homeWinProb < 0.5) {
-              winner = match.away_team;
-              finalConfidence = 1 - homeWinProb;
-            } else {
-              winner = 'Draw';
-              finalConfidence = 0.5;
-            }
-
-            // Scores are shown exactly as the model produced them. They used to
-            // be swapped around to agree with an odds-adjusted winner, which
-            // displayed a scoreline the model never predicted.
-            const alignedHomeScore = displayHomeScore;
-            const alignedAwayScore = displayAwayScore;
-
-            const scoreDiff = Math.abs(alignedHomeScore - alignedAwayScore);
-            let intensity = 'Tight Margin (3-5 pts)';
-            if (scoreDiff <= 2) {
-              intensity = 'Narrow Margin (0-2 pts)';
-            } else if (scoreDiff <= 5) {
-              intensity = 'Tight Margin (3-5 pts)';
-            } else if (scoreDiff <= 10) {
-              intensity = 'Solid Margin (6-10 pts)';
-            } else {
-              intensity = 'Wide Margin (11+ pts)';
-            }
-
-            let confidenceLevel = 'Close Match Expected';
-            if (finalConfidence >= 0.8) {
-              confidenceLevel = 'High Confidence';
-            } else if (finalConfidence >= 0.65) {
-              confidenceLevel = 'Moderate Confidence';
-            }
-
-            const finalPrediction = {
-              home_team: match.home_team,
-              away_team: match.away_team,
-              date: matchDate,
-              kickoff_at: kickoffAt,
-              winner: winner,
-              predicted_winner: winner,
-              confidence: `${(finalConfidence * 100).toFixed(1)}%`,
-              home_score: alignedHomeScore.toString(),
-              away_score: alignedAwayScore.toString(),
-              home_win_prob: homeWinProb,
-              league_id: selectedLeague,
-              intensity: intensity,
-              confidence_level: confidenceLevel,
-              score_diff: alignedHomeScore - alignedAwayScore,
-              prediction_type: predictionType,
-              ai_probability: aiHomeWinProb,
-              hybrid_probability: homeWinProb,
-              bookmaker_probability: bookmakerHomeWinProb,
-              bookmaker_count: bookmakerCount,
-              confidence_boost: finalConfidence - Math.max(aiHomeWinProb, 1 - aiHomeWinProb),
-              home_team_id: match.home_team_id,
-              away_team_id: match.away_team_id,
-              live_odds_available: bookmakerCount > 0 || hasUsableOdds(odds),
-              manual_odds: odds,
-              show_scores: true,
-              model_available: true,
-              // Shown next to the AI prediction, never in place of it.
-              your_odds_home_win_prob: yourOddsView ? yourOddsView.home_win_prob : null,
-              your_odds_winner: yourOddsView ? yourOddsView.winner : null,
-              your_odds_confidence: yourOddsView ? yourOddsView.confidence : null,
-              your_odds_implied_home_win_prob: yourOddsView ? yourOddsView.odds_implied_home_win_prob : null,
-            };
-
-            newPredictions.push(finalPrediction);
-          } else {
-            if (result?.data?.error) {
-              console.error('Prediction error:', result.data.error);
-            }
-          }
-        } catch (err) {
-          console.error('Exception predicting match:', err);
-        }
-      }
-    };
-
-    await Promise.all(Array.from({ length: concurrency }, () => runTask()));
-
-    const dedupedPredictions = dedupeUpcomingMatches(
-      newPredictions.map((p) => ({
-        ...p,
-        date_event: p.date,
-        home_team: p.home_team,
-        away_team: p.away_team,
-        kickoff_at: p.kickoff_at,
-      })),
-      selectedLeague
-    ).map((p) => ({
-      ...p,
-      date: p.date_event || p.date,
-    }));
-    setPredictions(dedupedPredictions);
-    setGenerating(false);
-  };
 
   const handleManualOddsChange = useCallback((matchKey, odds) => {
     setManualOdds(prev => ({
@@ -1388,17 +1276,33 @@ function App() {
 
   const handleLeagueChange = useCallback((league) => {
     setSelectedLeague(league);
-    if (isMobile) {
-      setMobileOpen(false);
-    }
-  }, [isMobile]);
+    // Keep the control panel open so the league dropdown can close cleanly.
+    // Panel closes via nav change / explicit close only.
+  }, []);
 
   // Show login widget if not authenticated
   if (checkingAuth) {
     return (
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
-        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight="100vh">
+        <Box
+          display="flex"
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+          sx={{
+            position: 'fixed',
+            inset: 0,
+            width: '100%',
+            height: '100dvh',
+            minHeight: '100dvh',
+            display: 'flex',
+            placeContent: 'center',
+            placeItems: 'center',
+            backgroundColor: '#020617',
+            zIndex: 40,
+          }}
+        >
           <RugbyBallLoader size={120} color="#10b981" label="Loading..." />
         </Box>
       </ThemeProvider>
@@ -1426,7 +1330,24 @@ function App() {
     return (
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
-        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight="100vh">
+        <Box
+          display="flex"
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+          sx={{
+            position: 'fixed',
+            inset: 0,
+            width: '100%',
+            height: '100dvh',
+            minHeight: '100dvh',
+            display: 'flex',
+            placeContent: 'center',
+            placeItems: 'center',
+            backgroundColor: '#020617',
+            zIndex: 40,
+          }}
+        >
           <RugbyBallLoader size={120} color="#10b981" label="Loading..." />
         </Box>
       </ThemeProvider>
@@ -1443,14 +1364,15 @@ function App() {
       boxSizing: 'border-box',
       background: 'linear-gradient(180deg, rgba(38, 39, 48, 0.95) 0%, rgba(31, 41, 55, 0.98) 100%)',
       position: 'relative',
-      overflowY: isMobile && isTallMobileViewport ? 'hidden' : 'auto',
+      // Outer panel scrolls on mobile — avoid nested scroll glitches.
+      overflowY: isMobile ? 'visible' : 'auto',
       overflowX: 'hidden',
+      WebkitOverflowScrolling: isMobile ? 'auto' : 'touch',
+      overscrollBehavior: 'contain',
       minHeight: isMobile ? '100%' : 'auto',
-      // Prevent content from affecting layout when dropdown opens
       ...(!isMobile ? {
         contain: 'layout style',
       } : {}),
-      // Premium styling
       '&::before': {
         content: '""',
         position: 'absolute',
@@ -1485,57 +1407,25 @@ function App() {
         },
       }}>
         {isMobile ? (
-          <Box
+          <Typography
+            variant="h5"
             sx={{
-              display: 'grid',
-              gridTemplateColumns: '40px 1fr 40px',
-              alignItems: 'center',
+              color: '#fafafa',
+              fontWeight: 800,
+              fontSize: '1.1rem',
+              textAlign: 'center',
+              letterSpacing: '-0.02em',
               width: '100%',
+              '& .text': {
+                background: 'linear-gradient(135deg, #fafafa 0%, #10b981 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              },
             }}
           >
-            <Box aria-hidden sx={{ width: 40 }} />
-            <Typography
-              variant="h5"
-              sx={{
-                color: '#fafafa',
-                fontWeight: 800,
-                fontSize: '1.1rem',
-                textAlign: 'center',
-                letterSpacing: '-0.02em',
-                justifySelf: 'center',
-                '& .text': {
-                  background: 'linear-gradient(135deg, #fafafa 0%, #10b981 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                },
-              }}
-            >
-              <span className="text">Menu</span>
-            </Typography>
-            <IconButton
-              onClick={handleDrawerToggle}
-              sx={{
-                justifySelf: 'end',
-                color: '#fafafa',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                '&:hover': {
-                  transform: 'rotate(90deg) scale(1.1)',
-                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                  borderColor: 'rgba(16, 185, 129, 0.4)',
-                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-                },
-                '&:active': {
-                  transform: 'rotate(90deg) scale(0.95)',
-                },
-              }}
-              aria-label="close drawer"
-            >
-              <CloseIcon />
-            </IconButton>
-          </Box>
+            <span className="text">Menu</span>
+          </Typography>
         ) : (
           <>
         <Typography variant="h5" sx={{ 
@@ -1620,8 +1510,11 @@ function App() {
                     fullWidth
                     onClick={() => handleViewChange(item.id)}
                     sx={{
-                      justifyContent: 'flex-start',
-                      gap: 1.25,
+                      display: 'grid',
+                      gridTemplateColumns: '28px 1fr 28px',
+                      alignItems: 'center',
+                      justifyContent: 'stretch',
+                      gap: 0,
                       py: 1.15,
                       px: 1.5,
                       borderRadius: '12px',
@@ -1636,20 +1529,45 @@ function App() {
                         ? '1px solid rgba(16, 185, 129, 0.45)'
                         : '1px solid rgba(255,255,255,0.06)',
                       boxShadow: isActive ? '0 4px 14px rgba(16, 185, 129, 0.15)' : 'none',
-                      transition: 'all 0.2s ease',
+                      transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
+                      WebkitUserSelect: 'none',
+                      userSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                      touchAction: 'manipulation',
                       '&:hover': {
                         backgroundColor: isActive
                           ? 'linear-gradient(135deg, rgba(16,185,129,0.24), rgba(16,185,129,0.12))'
                           : 'rgba(255,255,255,0.06)',
                         borderColor: isActive ? 'rgba(16, 185, 129, 0.55)' : 'rgba(255,255,255,0.12)',
-                        transform: 'translateX(2px)',
+                      },
+                      '&:active': {
+                        transform: 'none',
                       },
                     }}
                   >
-                    <Box component="span" sx={{ fontSize: '1.1rem', lineHeight: 1, width: 24, textAlign: 'center' }}>
+                    <Box
+                      component="span"
+                      sx={{
+                        justifySelf: 'start',
+                        fontSize: '1.1rem',
+                        lineHeight: 1,
+                        width: 28,
+                        textAlign: 'left',
+                      }}
+                    >
                       {item.icon}
                     </Box>
-                    {item.label}
+                    <Box
+                      component="span"
+                      sx={{
+                        textAlign: 'center',
+                        width: '100%',
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {item.label}
+                    </Box>
+                    <Box aria-hidden component="span" sx={{ width: 28 }} />
                   </Button>
                 );
               })}
@@ -1699,13 +1617,18 @@ function App() {
                 borderRadius: '12px',
                 backgroundColor: 'rgba(255, 255, 255, 0.03)',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
-                transition: 'all 0.3s ease',
+                transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
+                touchAction: 'manipulation',
                 '&:hover': {
                   color: '#fafafa',
                   backgroundColor: 'rgba(239, 68, 68, 0.15)',
                   borderColor: 'rgba(239, 68, 68, 0.3)',
-                  transform: 'translateY(-1px)',
                   boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+                },
+                '&:active': {
+                  transform: 'none',
                 },
               }}
             >
@@ -1781,13 +1704,18 @@ function App() {
                 borderRadius: '12px',
                 backgroundColor: 'rgba(255, 255, 255, 0.03)',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
-                transition: 'all 0.3s ease',
+                transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
+                touchAction: 'manipulation',
                 '&:hover': {
                   color: '#fafafa',
                   backgroundColor: 'rgba(239, 68, 68, 0.15)',
                   borderColor: 'rgba(239, 68, 68, 0.3)',
-                  transform: 'translateY(-1px)',
                   boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+                },
+                '&:active': {
+                  transform: 'none',
                 },
               }}
             >
@@ -1802,30 +1730,27 @@ function App() {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <Box sx={{ 
+      <Box
+        className="app-shell"
+        sx={{ 
         display: 'flex', 
-        minHeight: '100vh', 
+        minHeight: '100%',
         backgroundColor: '#0e1117',
         position: 'relative',
-        overflow:
-          !isMobile &&
-          (activeView === 'news' ||
-            activeView === 'standings' ||
-            activeView === 'teams' ||
-            activeView === 'predictions' ||
-            activeView === 'lineups' ||
-            activeView === 'history' ||
-            activeView === 'profile')
-            ? 'visible'
-            : 'hidden',
-        // Desktop only: Ensure container allows sticky positioning
-        ...(isMobile ? {} : (activeView === 'news' || activeView === 'standings' || activeView === 'teams' || activeView === 'lineups' || activeView === 'predictions' || activeView === 'history' || activeView === 'profile' ? {
-          height: 'auto',
-          overflow: 'visible',
-        } : {
-          height: '100vh',
-          overflow: 'hidden',
-        })),
+        // Desktop + non-reels mobile: shell grows so the document can scroll
+        ...(isMobileNewsReels
+          ? {
+              overflow: 'hidden',
+              height: '100dvh',
+              maxHeight: '100dvh',
+              minHeight: '100dvh',
+            }
+          : {
+              overflow: 'visible',
+              height: 'auto',
+              maxHeight: 'none',
+              minHeight: '100dvh',
+            }),
       }}>
         {/* Video Background */}
         <Box
@@ -1891,14 +1816,17 @@ function App() {
                 backdropFilter: 'blur(20px) saturate(180%)',
                 borderRight: '1px solid rgba(16, 185, 129, 0.2)',
                 boxShadow: '4px 0 24px rgba(0, 0, 0, 0.4), inset -1px 0 0 rgba(16, 185, 129, 0.1)',
-                overflow: 'visible',
+                overflowY: 'auto',
+                overflowX: 'hidden',
                 position: 'fixed',
                 top: 0,
                 left: 0,
-                height: '100vh',
-                maxHeight: '100vh',
-                // Prevent drawer from affecting main content layout
-                contain: 'layout style paint',
+                height: '100dvh',
+                maxHeight: '100dvh',
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehavior: 'contain',
+                // layout/style only — paint containment clips Select menus
+                contain: 'layout style',
               },
             }}
           >
@@ -1922,20 +1850,19 @@ function App() {
                 pointerEvents: 'none',
               }}
             />
-            {/* Backdrop */}
+            {/* Backdrop — below nav so hamburger/close stays tappable */}
             {mobileOpen && (
               <Box
                 onClick={handleDrawerToggle}
                 sx={{
                   position: 'fixed',
-                  top: 0,
+                  top: 'var(--app-mobile-nav-offset)',
                   left: 0,
                   right: 0,
                   bottom: 0,
                   backgroundColor: 'rgba(0, 0, 0, 0.7)',
                   zIndex: 2099,
-                  animation: 'fadeIn 0.3s ease-in-out',
-                  willChange: 'opacity',
+                  animation: 'fadeIn 0.25s ease-out',
                   '@keyframes fadeIn': {
                     from: { opacity: 0 },
                     to: { opacity: 1 },
@@ -1944,27 +1871,38 @@ function App() {
               />
             )}
             
-            {/* Mobile Control Panel */}
+            {/* Mobile Control Panel — single scroll owner; no nested scroll / will-change thrash */}
             <Box
+              className="mobile-control-panel"
               sx={{
                 position: 'fixed',
                 top: 'var(--app-mobile-nav-offset)',
                 left: 0,
                 width: '280px',
-                height: 'calc(100svh - var(--app-mobile-nav-offset))',
-                background: 'linear-gradient(180deg, rgba(38, 39, 48, 0.98) 0%, rgba(31, 41, 55, 0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
+                height: 'calc(100dvh - var(--app-mobile-nav-offset))',
+                maxHeight: 'calc(100dvh - var(--app-mobile-nav-offset))',
+                background: 'linear-gradient(180deg, #262730 0%, #1f2937 100%)',
                 borderRight: '1px solid rgba(16, 185, 129, 0.2)',
                 boxShadow: '4px 0 24px rgba(0, 0, 0, 0.5), inset -1px 0 0 rgba(16, 185, 129, 0.1)',
                 zIndex: 2100,
-                transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
-                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                overflowY: isTallMobileViewport ? 'hidden' : 'auto',
+                transform: mobileOpen ? 'translate3d(0,0,0)' : 'translate3d(-100%,0,0)',
+                transition: 'transform 0.28s cubic-bezier(0.4, 0, 0.2, 1)',
+                overflowY: 'auto',
                 overflowX: 'hidden',
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehavior: 'contain',
+                // manipulation > pan-y: allows taps on Select without scroll hijack
+                touchAction: 'manipulation',
                 display: 'flex',
                 flexDirection: 'column',
-                willChange: 'transform', // GPU acceleration
-                backfaceVisibility: 'hidden', // Smooth rendering
+                pointerEvents: mobileOpen ? 'auto' : 'none',
+                // Solid fill — blur on a sliding panel causes iOS tap/scroll flicker
+                WebkitBackdropFilter: 'none',
+                backdropFilter: 'none',
+                '@supports not (height: 100dvh)': {
+                  height: 'calc(100svh - var(--app-mobile-nav-offset))',
+                  maxHeight: 'calc(100svh - var(--app-mobile-nav-offset))',
+                },
               }}
             >
               {drawerContent}
@@ -1973,30 +1911,36 @@ function App() {
         )}
 
         {/* Navigation Tabs - Fixed header on all screen sizes */}
-        <Box sx={{ 
+        <Box
+          className="app-top-nav"
+          sx={{ 
+            // Full viewport width so the scrollbar sits under the header (no right gap)
             position: 'fixed',
             top: 0,
             left: { xs: 0, md: '280px' },
-            right: 0,
-            width: { xs: '100%', md: 'auto' },
-            maxWidth: 'none',
+            right: 'auto',
+            width: { xs: '100vw', md: 'calc(100vw - 280px)' },
+            maxWidth: { xs: '100vw', md: 'calc(100vw - 280px)' },
             display: 'flex',
             gap: { xs: 0, md: 2 },
             justifyContent: { xs: 'center', md: 'center' },
             alignItems: 'center',
             paddingLeft: { xs: '12px', sm: '16px', md: '32px' },
             paddingRight: { xs: '12px', sm: '16px', md: '32px' },
-            paddingTop: { xs: 'calc(env(safe-area-inset-top, 0px) + 10px)', md: '12px' },
-            paddingBottom: { xs: '10px', md: '12px' },
+            paddingTop: { xs: 'calc(env(safe-area-inset-top, 0px) + 14px)', md: '12px' },
+            paddingBottom: { xs: '14px', md: '12px' },
             backgroundColor: '#0e1117',
-            backdropFilter: 'blur(10px)',
+            backdropFilter: { xs: 'none', md: 'blur(10px)' },
+            WebkitBackdropFilter: { xs: 'none', md: 'blur(10px)' },
             borderBottom: '1px solid rgba(16, 185, 129, 0.2)',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-            zIndex: 2000,
-            minHeight: { xs: 'calc(56px + env(safe-area-inset-top, 0px))', md: '56px' },
+            zIndex: isMobile && mobileOpen ? 2200 : 2000,
+            minHeight: { xs: 'calc(68px + env(safe-area-inset-top, 0px))', md: '56px' },
             boxSizing: 'border-box',
             margin: 0,
             overflow: 'hidden',
+            WebkitFontSmoothing: 'antialiased',
+            MozOsxFontSmoothing: 'grayscale',
           }}>
             {isMobile ? (
               <Box
@@ -2005,7 +1949,8 @@ function App() {
                   gridTemplateColumns: '40px 1fr 40px',
                   alignItems: 'center',
                   width: '100%',
-                  minHeight: 36,
+                  height: 40,
+                  minHeight: 40,
                 }}
               >
                 <IconButton
@@ -2014,27 +1959,34 @@ function App() {
                   onClick={handleDrawerToggle}
                   sx={{
                     justifySelf: 'start',
-                    backgroundColor: 'rgba(38, 39, 48, 0.95)',
-                    backdropFilter: 'blur(10px)',
+                    width: 40,
+                    height: 40,
+                    minWidth: 40,
+                    minHeight: 40,
+                    p: 0,
+                    m: 0,
+                    backgroundColor: '#262730',
+                    backdropFilter: 'none',
+                    WebkitBackdropFilter: 'none',
                     color: '#fafafa',
-                    padding: '7px',
                     borderRadius: '10px',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.08)',
-                    transition: 'all 0.25s ease',
+                    transition: 'background-color 0.2s ease',
+                    WebkitTapHighlightColor: 'transparent',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    '& .MuiSvgIcon-root': {
+                      fontSize: 22,
+                      filter: 'none',
+                      opacity: 1,
+                    },
                     '&:hover': {
                       backgroundColor: 'rgba(16, 185, 129, 0.18)',
-                      transform: 'scale(1.04)',
-                    },
-                    '&:active': {
-                      transform: 'scale(0.96)',
                     },
                   }}
                 >
-                  {mobileOpen ? (
-                    <CloseIcon sx={{ fontSize: '20px' }} />
-                  ) : (
-                    <MenuIcon sx={{ fontSize: '20px' }} />
-                  )}
+                  {mobileOpen ? <CloseIcon /> : <MenuIcon />}
                 </IconButton>
 
                 <Box
@@ -2056,7 +2008,8 @@ function App() {
                       width: 22,
                       height: 22,
                       flexShrink: 0,
-                      filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.35))',
+                      // drop-shadow filters can bleed blur into nearby text on mobile WebKit
+                      filter: 'none',
                     }}
                   />
                   <Typography
@@ -2068,17 +2021,19 @@ function App() {
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
-                      background: 'linear-gradient(135deg, #f8fafc 0%, #10b981 100%)',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      backgroundClip: 'text',
+                      // Solid color on mobile — gradient + background-clip text looks soft/blurry
+                      color: '#f8fafc',
+                      background: 'none',
+                      WebkitBackgroundClip: 'unset',
+                      WebkitTextFillColor: 'unset',
+                      backgroundClip: 'unset',
                     }}
                   >
                     {APP_DISPLAY_NAME}
                   </Typography>
                 </Box>
 
-                <Box aria-hidden sx={{ width: 40 }} />
+                <Box aria-hidden sx={{ width: 40, height: 40 }} />
               </Box>
             ) : (
             <Box
@@ -2143,11 +2098,14 @@ function App() {
             p: 0,
             pt: isMobileNewsReels
               ? 0
-              : { xs: 'var(--app-mobile-nav-offset)', sm: '84px', md: '84px' },
+              : {
+                  xs: 'var(--app-mobile-nav-offset)',
+                  sm: 'var(--app-tablet-nav-offset, 64px)',
+                  md: 'var(--app-desktop-nav-offset, 56px)',
+                },
             backgroundColor: 'transparent',
             color: '#fafafa',
             width: '100%',
-            overflowX: 'hidden',
             boxSizing: 'border-box',
             display: 'flex',
             flexDirection: 'column',
@@ -2157,21 +2115,26 @@ function App() {
             position: 'relative',
             zIndex: 1,
             ...(isMobileNewsReels ? {
-              overflowY: 'hidden',
-              height: '100svh',
-              maxHeight: '100svh',
+              overflow: 'hidden',
+              height: '100dvh',
+              maxHeight: '100dvh',
               contain: 'layout style',
+              '@supports not (height: 100dvh)': {
+                height: '100svh',
+                maxHeight: '100svh',
+              },
             } : ((activeView === 'news' || activeView === 'standings' || activeView === 'teams' || activeView === 'lineups' || activeView === 'predictions' || activeView === 'history' || activeView === 'profile') ? {
-              overflowY: 'visible',
+              // Grow with content only — forced minHeight was creating empty scroll
+              overflow: 'visible',
               height: 'auto',
               maxHeight: 'none',
-              // News uses full page scroll to avoid nested scroll containers.
-              contain: 'layout style',
+              minHeight: 0,
+              contain: 'none',
             } : {
               overflowY: 'auto',
+              overflowX: 'hidden',
               height: '100vh',
               maxHeight: '100vh',
-              // Prevent layout shifts when dropdown opens
               contain: 'layout style',
             })),
           }}
@@ -2186,14 +2149,29 @@ function App() {
               md: activeView === 'predictions' ? 2 : 0,
               lg: activeView === 'predictions' ? 3 : 0,
             },
-            paddingTop: 0,
-            overflowX: activeView === 'predictions' ? 'visible' : 'hidden',
+            paddingTop: isMobileNewsReels
+              ? 0
+              : CONTENT_TAB_VIEWS.has(activeView)
+                ? 0
+                : 'var(--app-content-top-gap, 20px)',
+            overflow: 'visible',
             boxSizing: 'border-box',
+            alignItems: 'stretch',
           }}>
             {CONTENT_TAB_VIEWS.has(activeView) ? (
               <Box
                 sx={
-                  activeView === 'lineups'
+                  activeView === 'news'
+                    ? {
+                        ...VIEW_CONTENT_WRAPPER_SX,
+                        ...(isMobileNewsReels
+                          ? { p: 0, px: 0, pt: 0, pb: 0 }
+                          : null),
+                        minHeight: isMobileNewsReels ? '100%' : VIEW_CONTENT_WRAPPER_SX.minHeight,
+                        height: isMobileNewsReels ? '100%' : 'auto',
+                        overflow: isMobileNewsReels ? 'hidden' : VIEW_CONTENT_WRAPPER_SX.overflowY,
+                      }
+                    : activeView === 'lineups'
                     ? { ...VIEW_CONTENT_WRAPPER_SX, bgcolor: 'transparent' }
                     : VIEW_CONTENT_WRAPPER_SX
                 }
@@ -2224,7 +2202,7 @@ function App() {
             {/* Header Video - same width as odds */}
             <Box 
               sx={{ 
-                mt: { xs: 2, sm: 0 },
+                mt: { xs: 0, sm: 0 },
                 width: '100%',
                 maxWidth: { xs: '100%', sm: '900px', md: '100%' },
                 height: { xs: '280px', sm: '380px', md: '550px', lg: '600px' },
@@ -2311,7 +2289,7 @@ function App() {
               {loadingMatches ? (
                 <Box sx={{ 
                   ...predictionsWidgetSx,
-                  minHeight: { xs: 'calc(100svh - 400px)', sm: 'calc(100vh - 450px)' },
+                  minHeight: 220,
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -2321,15 +2299,15 @@ function App() {
                 }}>
                   <RugbyBallLoader size={100} color="#10b981" compact label="Loading matches..." />
                 </Box>
-              ) : upcomingWindowMatches.length > 0 ? (
+              ) : oddsInputMatches.length > 0 ? (
                 <ManualOddsInput
-                  matches={upcomingWindowMatches}
+                  matches={oddsInputMatches}
                   selectedLeague={selectedLeague}
                   manualOdds={manualOdds}
                   onOddsChange={handleManualOddsChange}
                   showHeader={false}
                 />
-              ) : (
+              ) : upcomingWindowMatches.length === 0 ? (
                 <Box sx={{ ...predictionsWidgetSx, mb: 4, p: 2, backgroundColor: '#1f2937', borderRadius: 2 }}>
                   <Typography variant="h6" sx={{ mb: 1, color: '#fafafa' }}>
                     📅 Upcoming Matches
@@ -2338,34 +2316,8 @@ function App() {
                     {selectedLeague ? 'No upcoming matches found for this league' : 'Select a league to see upcoming matches'}
                   </Typography>
                 </Box>
-              )}
+              ) : null}
 
-                {/* Generate Predictions Button */}
-                <Box sx={{ ...predictionsWidgetSx, my: 4, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>
-                  {generating && (
-                    <Box sx={{ 
-                      width: '100%', 
-                      minHeight: { xs: 'calc(100svh - 400px)', sm: 'calc(100vh - 450px)' },
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      py: 4,
-                      mb: 2,
-                    }}>
-                      <RugbyBallLoader size={100} color="#10b981" compact label="Generating predictions..." />
-                    </Box>
-                  )}
-                  <button
-                    className="generate-button"
-                    onClick={handleGeneratePredictions}
-                    disabled={generating || upcomingWindowMatches.length === 0}
-                  >
-                    🎯 Generate Expert Predictions
-                  </button>
-                </Box>
-
-                {/* Predictions Display */}
                 {predictions.length > 0 && (
                   <PredictionsDisplay
                     predictions={predictions}

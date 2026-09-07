@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, CircularProgress } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import { getLiveMatches } from '../firebase';
+import RugbyBallLoader from './RugbyBallLoader';
 import { predictionsWidgetSx } from '../utils/predictionsLayout';
 
 function LiveMatches({ leagueId }) {
@@ -48,8 +49,8 @@ function LiveMatches({ leagueId }) {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-        <CircularProgress />
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', p: 3, minHeight: 200 }}>
+        <RugbyBallLoader size={80} color="#10b981" compact label="Loading matches..." />
       </Box>
     );
   }

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-03-06T08:36:20Z",
+  "generated_at_utc": "2026-09-07T06:07:17Z",
   "db_path": "C:\\Users\\dylan\\OneDrive\\Desktop\\Knights\\Knights Code\\rugby-ai-pedictor-main\\data.sqlite",
   "gap_days_rule": 90,
   "league_gap_overrides": {
@@ -7,7 +7,7 @@
     "4430": 60
   },
   "scored_only": true,
-  "league_count": 9,
+  "league_count": 10,
   "leagues": [
     {
       "league_id": 4986,
@@ -25,8 +25,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": null,
-          "first_event_id": 2330388,
-          "last_event_id": 2330399
+          "first_event_id": 2597662,
+          "last_event_id": 2597673
         },
         {
           "season_index": 2,
@@ -37,8 +37,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 314.45,
-          "first_event_id": 2330400,
-          "last_event_id": 2330411
+          "first_event_id": 2597674,
+          "last_event_id": 2597685
         },
         {
           "season_index": 3,
@@ -49,8 +49,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 314.48,
-          "first_event_id": 2330412,
-          "last_event_id": 2330423
+          "first_event_id": 2597686,
+          "last_event_id": 2597697
         },
         {
           "season_index": 4,
@@ -61,8 +61,8 @@
           "match_count": 6,
           "duration_days": 22,
           "gap_from_prev_days": 285.37,
-          "first_event_id": 2330424,
-          "last_event_id": 2330429
+          "first_event_id": 2597698,
+          "last_event_id": 2597703
         },
         {
           "season_index": 5,
@@ -73,8 +73,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 377.79,
-          "first_event_id": 2330430,
-          "last_event_id": 2330441
+          "first_event_id": 2597704,
+          "last_event_id": 2597715
         },
         {
           "season_index": 6,
@@ -85,8 +85,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 314.65,
-          "first_event_id": 2330442,
-          "last_event_id": 2330453
+          "first_event_id": 2597716,
+          "last_event_id": 2597727
         },
         {
           "season_index": 7,
@@ -97,8 +97,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 314.46,
-          "first_event_id": 2330454,
-          "last_event_id": 2330465
+          "first_event_id": 2597728,
+          "last_event_id": 2597739
         },
         {
           "season_index": 8,
@@ -109,8 +109,8 @@
           "match_count": 6,
           "duration_days": 35,
           "gap_from_prev_days": 755.42,
-          "first_event_id": 2330466,
-          "last_event_id": 2330471
+          "first_event_id": 2597740,
+          "last_event_id": 2597745
         },
         {
           "season_index": 9,
@@ -121,8 +121,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 251.93,
-          "first_event_id": 2330472,
-          "last_event_id": 2330483
+          "first_event_id": 2597746,
+          "last_event_id": 2597757
         },
         {
           "season_index": 10,
@@ -133,8 +133,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 308.21,
-          "first_event_id": 2330484,
-          "last_event_id": 2330495
+          "first_event_id": 2597758,
+          "last_event_id": 2597769
         },
         {
           "season_index": 11,
@@ -145,8 +145,8 @@
           "match_count": 6,
           "duration_days": 21,
           "gap_from_prev_days": 287.0,
-          "first_event_id": 2330496,
-          "last_event_id": 2330501
+          "first_event_id": 2597770,
+          "last_event_id": 2597775
         },
         {
           "season_index": 12,
@@ -157,8 +157,8 @@
           "match_count": 12,
           "duration_days": 49,
           "gap_from_prev_days": 377.56,
-          "first_event_id": 2330502,
-          "last_event_id": 2330513
+          "first_event_id": 2597776,
+          "last_event_id": 2597787
         },
         {
           "season_index": 13,
@@ -169,8 +169,8 @@
           "match_count": 12,
           "duration_days": 48,
           "gap_from_prev_days": 322.01,
-          "first_event_id": 2330514,
-          "last_event_id": 2330525
+          "first_event_id": 2597788,
+          "last_event_id": 2597799
         }
       ]
     },
@@ -178,7 +178,7 @@
       "league_id": 4446,
       "league_name": "United Rugby Championship",
       "gap_days_rule": 90,
-      "total_matches_considered": 2226,
+      "total_matches_considered": 2284,
       "season_count": 17,
       "seasons": [
         {
@@ -322,7 +322,7 @@
           "match_count": 97,
           "duration_days": 176,
           "gap_from_prev_days": 502.93,
-          "first_event_id": 2312777,
+          "first_event_id": 2599391,
           "last_event_id": 2312873
         },
         {
@@ -376,14 +376,14 @@
         {
           "season_index": 17,
           "start_utc": "2025-09-26T17:00:00Z",
-          "end_utc": "2026-02-28T19:45:00Z",
+          "end_utc": "2026-06-19T18:30:00Z",
           "start_date": "2025-09-26",
-          "end_date": "2026-02-28",
-          "match_count": 93,
-          "duration_days": 155,
+          "end_date": "2026-06-19",
+          "match_count": 151,
+          "duration_days": 266,
           "gap_from_prev_days": 104.04,
           "first_event_id": 2313478,
-          "last_event_id": 2313571
+          "last_event_id": 2599332
         }
       ]
     },
@@ -391,8 +391,8 @@
       "league_id": 5069,
       "league_name": "Currie Cup",
       "gap_days_rule": 90,
-      "total_matches_considered": 745,
-      "season_count": 15,
+      "total_matches_considered": 774,
+      "season_count": 16,
       "seasons": [
         {
           "season_index": 1,
@@ -403,8 +403,8 @@
           "match_count": 55,
           "duration_days": 105,
           "gap_from_prev_days": null,
-          "first_event_id": 2330526,
-          "last_event_id": 2330580
+          "first_event_id": 2597800,
+          "last_event_id": 2597854
         },
         {
           "season_index": 2,
@@ -415,8 +415,8 @@
           "match_count": 59,
           "duration_days": 104,
           "gap_from_prev_days": 259.06,
-          "first_event_id": 2330581,
-          "last_event_id": 2330639
+          "first_event_id": 2597855,
+          "last_event_id": 2597913
         },
         {
           "season_index": 3,
@@ -427,8 +427,8 @@
           "match_count": 35,
           "duration_days": 77,
           "gap_from_prev_days": 286.07,
-          "first_event_id": 2330640,
-          "last_event_id": 2330674
+          "first_event_id": 2597914,
+          "last_event_id": 2597948
         },
         {
           "season_index": 4,
@@ -439,8 +439,8 @@
           "match_count": 35,
           "duration_days": 77,
           "gap_from_prev_days": 286.09,
-          "first_event_id": 2330675,
-          "last_event_id": 2330709
+          "first_event_id": 2597949,
+          "last_event_id": 2597983
         },
         {
           "season_index": 5,
@@ -451,8 +451,8 @@
           "match_count": 43,
           "duration_days": 77,
           "gap_from_prev_days": 286.07,
-          "first_event_id": 2330710,
-          "last_event_id": 2330752
+          "first_event_id": 2597984,
+          "last_event_id": 2598026
         },
         {
           "season_index": 6,
@@ -463,8 +463,8 @@
           "match_count": 64,
           "duration_days": 133,
           "gap_from_prev_days": 230.08,
-          "first_event_id": 2330753,
-          "last_event_id": 2330816
+          "first_event_id": 2598027,
+          "last_event_id": 2598090
         },
         {
           "season_index": 7,
@@ -475,8 +475,8 @@
           "match_count": 144,
           "duration_days": 197,
           "gap_from_prev_days": 166.21,
-          "first_event_id": 2330817,
-          "last_event_id": 2330960
+          "first_event_id": 2598091,
+          "last_event_id": 2598234
         },
         {
           "season_index": 8,
@@ -487,8 +487,8 @@
           "match_count": 45,
           "duration_days": 98,
           "gap_from_prev_days": 272.12,
-          "first_event_id": 2330961,
-          "last_event_id": 2331005
+          "first_event_id": 2598235,
+          "last_event_id": 2598279
         },
         {
           "season_index": 9,
@@ -499,8 +499,8 @@
           "match_count": 24,
           "duration_days": 70,
           "gap_from_prev_days": 293.04,
-          "first_event_id": 2331006,
-          "last_event_id": 2331029
+          "first_event_id": 2598280,
+          "last_event_id": 2598303
         },
         {
           "season_index": 10,
@@ -511,8 +511,8 @@
           "match_count": 22,
           "duration_days": 63,
           "gap_from_prev_days": 762.12,
-          "first_event_id": 2331030,
-          "last_event_id": 2331051
+          "first_event_id": 2598304,
+          "last_event_id": 2598325
         },
         {
           "season_index": 11,
@@ -523,8 +523,8 @@
           "match_count": 42,
           "duration_days": 84,
           "gap_from_prev_days": 139.17,
-          "first_event_id": 2331052,
-          "last_event_id": 2331096
+          "first_event_id": 2598326,
+          "last_event_id": 2598370
         },
         {
           "season_index": 12,
@@ -535,8 +535,8 @@
           "match_count": 44,
           "duration_days": 161,
           "gap_from_prev_days": 125.08,
-          "first_event_id": 2331097,
-          "last_event_id": 2331141
+          "first_event_id": 2598371,
+          "last_event_id": 2598415
         },
         {
           "season_index": 13,
@@ -547,8 +547,8 @@
           "match_count": 59,
           "duration_days": 106,
           "gap_from_prev_days": 258.04,
-          "first_event_id": 2331142,
-          "last_event_id": 2331200
+          "first_event_id": 2598416,
+          "last_event_id": 2598474
         },
         {
           "season_index": 14,
@@ -556,11 +556,11 @@
           "end_utc": "2024-09-21T14:00:00Z",
           "start_date": "2024-07-05",
           "end_date": "2024-09-21",
-          "match_count": 43,
+          "match_count": 44,
           "duration_days": 78,
           "gap_from_prev_days": 376.96,
-          "first_event_id": 2331201,
-          "last_event_id": 2331243
+          "first_event_id": 2598475,
+          "last_event_id": 2598517
         },
         {
           "season_index": 15,
@@ -571,8 +571,20 @@
           "match_count": 31,
           "duration_days": 56,
           "gap_from_prev_days": 307.12,
-          "first_event_id": 2331244,
-          "last_event_id": 2331274
+          "first_event_id": 2598518,
+          "last_event_id": 2598548
+        },
+        {
+          "season_index": 16,
+          "start_utc": "2026-07-17T15:00:00Z",
+          "end_utc": "2026-08-30T13:00:00Z",
+          "start_date": "2026-07-17",
+          "end_date": "2026-08-30",
+          "match_count": 28,
+          "duration_days": 43,
+          "gap_from_prev_days": 300.08,
+          "first_event_id": 2599796,
+          "last_event_id": 2599876
         }
       ]
     },
@@ -592,8 +604,8 @@
           "match_count": 48,
           "duration_days": 43,
           "gap_from_prev_days": null,
-          "first_event_id": 2325822,
-          "last_event_id": 2325869
+          "first_event_id": 2593081,
+          "last_event_id": 2593128
         },
         {
           "season_index": 2,
@@ -604,8 +616,8 @@
           "match_count": 48,
           "duration_days": 42,
           "gap_from_prev_days": 1426.46,
-          "first_event_id": 2325870,
-          "last_event_id": 2325917
+          "first_event_id": 2593129,
+          "last_event_id": 2593176
         },
         {
           "season_index": 3,
@@ -616,8 +628,8 @@
           "match_count": 45,
           "duration_days": 42,
           "gap_from_prev_days": 1419.78,
-          "first_event_id": 2325918,
-          "last_event_id": 2325962
+          "first_event_id": 2593177,
+          "last_event_id": 2593221
         },
         {
           "season_index": 4,
@@ -628,8 +640,8 @@
           "match_count": 6,
           "duration_days": 12,
           "gap_from_prev_days": 1100.12,
-          "first_event_id": 2325963,
-          "last_event_id": 2325968
+          "first_event_id": 2593222,
+          "last_event_id": 2593227
         },
         {
           "season_index": 5,
@@ -640,8 +652,8 @@
           "match_count": 48,
           "duration_days": 49,
           "gap_from_prev_days": 294.16,
-          "first_event_id": 2325969,
-          "last_event_id": 2326016
+          "first_event_id": 2593228,
+          "last_event_id": 2593275
         },
         {
           "season_index": 6,
@@ -652,8 +664,8 @@
           "match_count": 6,
           "duration_days": 10,
           "gap_from_prev_days": 741.75,
-          "first_event_id": 2326017,
-          "last_event_id": 2326022
+          "first_event_id": 2593276,
+          "last_event_id": 2593281
         }
       ]
     },
@@ -661,7 +673,7 @@
       "league_id": 4551,
       "league_name": "Super Rugby",
       "gap_days_rule": 90,
-      "total_matches_considered": 1756,
+      "total_matches_considered": 1824,
       "season_count": 17,
       "seasons": [
         {
@@ -673,8 +685,8 @@
           "match_count": 94,
           "duration_days": 106,
           "gap_from_prev_days": null,
-          "first_event_id": 2328539,
-          "last_event_id": 2328632
+          "first_event_id": 2595813,
+          "last_event_id": 2595906
         },
         {
           "season_index": 2,
@@ -685,8 +697,8 @@
           "match_count": 94,
           "duration_days": 106,
           "gap_from_prev_days": 257.63,
-          "first_event_id": 2328633,
-          "last_event_id": 2328726
+          "first_event_id": 2595907,
+          "last_event_id": 2596000
         },
         {
           "season_index": 3,
@@ -697,8 +709,8 @@
           "match_count": 124,
           "duration_days": 141,
           "gap_from_prev_days": 264.65,
-          "first_event_id": 2328727,
-          "last_event_id": 2328850
+          "first_event_id": 2596001,
+          "last_event_id": 2596124
         },
         {
           "season_index": 4,
@@ -709,8 +721,8 @@
           "match_count": 125,
           "duration_days": 162,
           "gap_from_prev_days": 229.87,
-          "first_event_id": 2328851,
-          "last_event_id": 2328975
+          "first_event_id": 2596125,
+          "last_event_id": 2596249
         },
         {
           "season_index": 5,
@@ -721,8 +733,8 @@
           "match_count": 127,
           "duration_days": 169,
           "gap_from_prev_days": 195.05,
-          "first_event_id": 2328976,
-          "last_event_id": 2329102
+          "first_event_id": 2596250,
+          "last_event_id": 2596376
         },
         {
           "season_index": 6,
@@ -733,8 +745,8 @@
           "match_count": 125,
           "duration_days": 167,
           "gap_from_prev_days": 196.0,
-          "first_event_id": 2329103,
-          "last_event_id": 2329227
+          "first_event_id": 2596377,
+          "last_event_id": 2596501
         },
         {
           "season_index": 7,
@@ -745,8 +757,8 @@
           "match_count": 125,
           "duration_days": 141,
           "gap_from_prev_days": 194.87,
-          "first_event_id": 2329228,
-          "last_event_id": 2329352
+          "first_event_id": 2596502,
+          "last_event_id": 2596626
         },
         {
           "season_index": 8,
@@ -757,8 +769,8 @@
           "match_count": 142,
           "duration_days": 162,
           "gap_from_prev_days": 236.96,
-          "first_event_id": 2329353,
-          "last_event_id": 2329494
+          "first_event_id": 2596627,
+          "last_event_id": 2596768
         },
         {
           "season_index": 9,
@@ -769,8 +781,8 @@
           "match_count": 142,
           "duration_days": 163,
           "gap_from_prev_days": 201.05,
-          "first_event_id": 2329495,
-          "last_event_id": 2329636
+          "first_event_id": 2596769,
+          "last_event_id": 2596910
         },
         {
           "season_index": 10,
@@ -781,8 +793,8 @@
           "match_count": 127,
           "duration_days": 167,
           "gap_from_prev_days": 195.96,
-          "first_event_id": 2329637,
-          "last_event_id": 2329763
+          "first_event_id": 2596911,
+          "last_event_id": 2597037
         },
         {
           "season_index": 11,
@@ -793,8 +805,8 @@
           "match_count": 91,
           "duration_days": 92,
           "gap_from_prev_days": 194.96,
-          "first_event_id": 2329764,
-          "last_event_id": 2329855
+          "first_event_id": 2597038,
+          "last_event_id": 2597129
         },
         {
           "season_index": 12,
@@ -805,8 +817,8 @@
           "match_count": 69,
           "duration_days": 119,
           "gap_from_prev_days": 642.73,
-          "first_event_id": 2329884,
-          "last_event_id": 2329952
+          "first_event_id": 2597158,
+          "last_event_id": 2597226
         },
         {
           "season_index": 13,
@@ -817,8 +829,8 @@
           "match_count": 91,
           "duration_days": 119,
           "gap_from_prev_days": 244.07,
-          "first_event_id": 2329953,
-          "last_event_id": 2330045
+          "first_event_id": 2597227,
+          "last_event_id": 2597319
         },
         {
           "season_index": 14,
@@ -829,8 +841,8 @@
           "match_count": 91,
           "duration_days": 120,
           "gap_from_prev_days": 250.96,
-          "first_event_id": 2330046,
-          "last_event_id": 2330136
+          "first_event_id": 2597320,
+          "last_event_id": 2597410
         },
         {
           "season_index": 15,
@@ -841,8 +853,8 @@
           "match_count": 91,
           "duration_days": 120,
           "gap_from_prev_days": 243.96,
-          "first_event_id": 2330137,
-          "last_event_id": 2330227
+          "first_event_id": 2597411,
+          "last_event_id": 2597501
         },
         {
           "season_index": 16,
@@ -853,20 +865,20 @@
           "match_count": 83,
           "duration_days": 127,
           "gap_from_prev_days": 236.96,
-          "first_event_id": 2330228,
-          "last_event_id": 2330310
+          "first_event_id": 2597502,
+          "last_event_id": 2597584
         },
         {
           "season_index": 17,
           "start_utc": "2026-02-13T06:05:00Z",
-          "end_utc": "2026-02-28T08:35:00Z",
+          "end_utc": "2026-06-20T07:05:00Z",
           "start_date": "2026-02-13",
-          "end_date": "2026-02-28",
-          "match_count": 15,
-          "duration_days": 15,
+          "end_date": "2026-06-20",
+          "match_count": 83,
+          "duration_days": 127,
           "gap_from_prev_days": 236.96,
-          "first_event_id": 2330311,
-          "last_event_id": 2330325
+          "first_event_id": 2597585,
+          "last_event_id": 2599370
         }
       ]
     },
@@ -874,7 +886,7 @@
       "league_id": 4430,
       "league_name": "French Top 14",
       "gap_days_rule": 60,
-      "total_matches_considered": 2922,
+      "total_matches_considered": 2985,
       "season_count": 15,
       "seasons": [
         {
@@ -886,8 +898,8 @@
           "match_count": 185,
           "duration_days": 284,
           "gap_from_prev_days": null,
-          "first_event_id": 2322837,
-          "last_event_id": 2323021
+          "first_event_id": 2590096,
+          "last_event_id": 2590280
         },
         {
           "season_index": 2,
@@ -898,8 +910,8 @@
           "match_count": 187,
           "duration_days": 295,
           "gap_from_prev_days": 432.91,
-          "first_event_id": 2323022,
-          "last_event_id": 2323208
+          "first_event_id": 2590281,
+          "last_event_id": 2590467
         },
         {
           "season_index": 3,
@@ -910,8 +922,8 @@
           "match_count": 187,
           "duration_days": 287,
           "gap_from_prev_days": 82.92,
-          "first_event_id": 2323209,
-          "last_event_id": 2323395
+          "first_event_id": 2590468,
+          "last_event_id": 2590654
         },
         {
           "season_index": 4,
@@ -922,8 +934,8 @@
           "match_count": 187,
           "duration_days": 288,
           "gap_from_prev_days": 69.12,
-          "first_event_id": 2323396,
-          "last_event_id": 2323582
+          "first_event_id": 2590655,
+          "last_event_id": 2590841
         },
         {
           "season_index": 5,
@@ -934,8 +946,8 @@
           "match_count": 187,
           "duration_days": 288,
           "gap_from_prev_days": 75.99,
-          "first_event_id": 2323583,
-          "last_event_id": 2323769
+          "first_event_id": 2590842,
+          "last_event_id": 2591028
         },
         {
           "season_index": 6,
@@ -946,8 +958,8 @@
           "match_count": 187,
           "duration_days": 302,
           "gap_from_prev_days": 75.99,
-          "first_event_id": 2323770,
-          "last_event_id": 2323956
+          "first_event_id": 2591029,
+          "last_event_id": 2591215
         },
         {
           "season_index": 7,
@@ -958,8 +970,8 @@
           "match_count": 374,
           "duration_days": 653,
           "gap_from_prev_days": 68.99,
-          "first_event_id": 2323957,
-          "last_event_id": 2324330
+          "first_event_id": 2591216,
+          "last_event_id": 2591589
         },
         {
           "season_index": 8,
@@ -970,8 +982,8 @@
           "match_count": 188,
           "duration_days": 280,
           "gap_from_prev_days": 82.77,
-          "first_event_id": 2324331,
-          "last_event_id": 2324518
+          "first_event_id": 2591590,
+          "last_event_id": 2591777
         },
         {
           "season_index": 9,
@@ -982,8 +994,8 @@
           "match_count": 175,
           "duration_days": 267,
           "gap_from_prev_days": 83.75,
-          "first_event_id": 2324519,
-          "last_event_id": 2324693
+          "first_event_id": 2591778,
+          "last_event_id": 2591952
         },
         {
           "season_index": 10,
@@ -994,8 +1006,8 @@
           "match_count": 188,
           "duration_days": 294,
           "gap_from_prev_days": 473.99,
-          "first_event_id": 2324701,
-          "last_event_id": 2324888
+          "first_event_id": 2591960,
+          "last_event_id": 2599398
         },
         {
           "season_index": 11,
@@ -1006,8 +1018,8 @@
           "match_count": 188,
           "duration_days": 293,
           "gap_from_prev_days": 70.72,
-          "first_event_id": 2324889,
-          "last_event_id": 2325076
+          "first_event_id": 2592148,
+          "last_event_id": 2592335
         },
         {
           "season_index": 12,
@@ -1018,8 +1030,8 @@
           "match_count": 187,
           "duration_days": 287,
           "gap_from_prev_days": 70.76,
-          "first_event_id": 2325077,
-          "last_event_id": 2325263
+          "first_event_id": 2592336,
+          "last_event_id": 2592522
         },
         {
           "season_index": 13,
@@ -1030,8 +1042,8 @@
           "match_count": 188,
           "duration_days": 315,
           "gap_from_prev_days": 62.0,
-          "first_event_id": 2325264,
-          "last_event_id": 2325451
+          "first_event_id": 2592523,
+          "last_event_id": 2592710
         },
         {
           "season_index": 14,
@@ -1039,23 +1051,23 @@
           "end_utc": "2025-06-28T19:05:00Z",
           "start_date": "2024-09-07",
           "end_date": "2025-06-28",
-          "match_count": 188,
+          "match_count": 189,
           "duration_days": 294,
           "gap_from_prev_days": 70.73,
-          "first_event_id": 2325452,
-          "last_event_id": 2325639
+          "first_event_id": 2592711,
+          "last_event_id": 2592898
         },
         {
           "season_index": 15,
           "start_utc": "2025-09-06T11:00:00Z",
-          "end_utc": "2026-03-01T20:05:00Z",
+          "end_utc": "2026-06-27T19:00:00Z",
           "start_date": "2025-09-06",
-          "end_date": "2026-03-01",
-          "match_count": 126,
-          "duration_days": 176,
+          "end_date": "2026-06-27",
+          "match_count": 188,
+          "duration_days": 294,
           "gap_from_prev_days": 69.66,
-          "first_event_id": 2325640,
-          "last_event_id": 2325765
+          "first_event_id": 2599751,
+          "last_event_id": 2599702
         }
       ]
     },
@@ -1063,7 +1075,7 @@
       "league_id": 4414,
       "league_name": "English Premiership Rugby",
       "gap_days_rule": 70,
-      "total_matches_considered": 2050,
+      "total_matches_considered": 2093,
       "season_count": 19,
       "seasons": [
         {
@@ -1075,8 +1087,8 @@
           "match_count": 132,
           "duration_days": 252,
           "gap_from_prev_days": null,
-          "first_event_id": 2326314,
-          "last_event_id": 2326445
+          "first_event_id": 2593588,
+          "last_event_id": 2593719
         },
         {
           "season_index": 2,
@@ -1087,8 +1099,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 111.09,
-          "first_event_id": 2326446,
-          "last_event_id": 2326580
+          "first_event_id": 2593720,
+          "last_event_id": 2593854
         },
         {
           "season_index": 3,
@@ -1099,8 +1111,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 97.09,
-          "first_event_id": 2326581,
-          "last_event_id": 2326715
+          "first_event_id": 2593855,
+          "last_event_id": 2593989
         },
         {
           "season_index": 4,
@@ -1111,8 +1123,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 97.96,
-          "first_event_id": 2326716,
-          "last_event_id": 2326850
+          "first_event_id": 2593990,
+          "last_event_id": 2594124
         },
         {
           "season_index": 5,
@@ -1123,8 +1135,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 97.96,
-          "first_event_id": 2326851,
-          "last_event_id": 2326985
+          "first_event_id": 2594125,
+          "last_event_id": 2594259
         },
         {
           "season_index": 6,
@@ -1135,8 +1147,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 104.2,
-          "first_event_id": 2326986,
-          "last_event_id": 2327120
+          "first_event_id": 2594260,
+          "last_event_id": 2594394
         },
         {
           "season_index": 7,
@@ -1147,8 +1159,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 97.2,
-          "first_event_id": 2327121,
-          "last_event_id": 2327255
+          "first_event_id": 2594395,
+          "last_event_id": 2594529
         },
         {
           "season_index": 8,
@@ -1159,8 +1171,8 @@
           "match_count": 135,
           "duration_days": 224,
           "gap_from_prev_days": 139.22,
-          "first_event_id": 2327256,
-          "last_event_id": 2327390
+          "first_event_id": 2594530,
+          "last_event_id": 2594664
         },
         {
           "season_index": 9,
@@ -1171,8 +1183,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 97.2,
-          "first_event_id": 2327391,
-          "last_event_id": 2327525
+          "first_event_id": 2594665,
+          "last_event_id": 2594799
         },
         {
           "season_index": 10,
@@ -1183,8 +1195,8 @@
           "match_count": 135,
           "duration_days": 266,
           "gap_from_prev_days": 97.22,
-          "first_event_id": 2327526,
-          "last_event_id": 2327660
+          "first_event_id": 2594800,
+          "last_event_id": 2594934
         },
         {
           "season_index": 11,
@@ -1195,8 +1207,8 @@
           "match_count": 36,
           "duration_days": 36,
           "gap_from_prev_days": 97.2,
-          "first_event_id": 2327661,
-          "last_event_id": 2327696
+          "first_event_id": 2594935,
+          "last_event_id": 2594970
         },
         {
           "season_index": 12,
@@ -1207,8 +1219,8 @@
           "match_count": 24,
           "duration_days": 21,
           "gap_from_prev_days": 348.2,
-          "first_event_id": 2327793,
-          "last_event_id": 2327816
+          "first_event_id": 2595067,
+          "last_event_id": 2595090
         },
         {
           "season_index": 13,
@@ -1219,8 +1231,8 @@
           "match_count": 2,
           "duration_days": 5,
           "gap_from_prev_days": 112.96,
-          "first_event_id": 2327817,
-          "last_event_id": 2327818
+          "first_event_id": 2595091,
+          "last_event_id": 2595092
         },
         {
           "season_index": 14,
@@ -1231,8 +1243,8 @@
           "match_count": 126,
           "duration_days": 277,
           "gap_from_prev_days": 226.96,
-          "first_event_id": 2327819,
-          "last_event_id": 2327944
+          "first_event_id": 2595093,
+          "last_event_id": 2595218
         },
         {
           "season_index": 15,
@@ -1243,8 +1255,8 @@
           "match_count": 159,
           "duration_days": 273,
           "gap_from_prev_days": 83.09,
-          "first_event_id": 2327945,
-          "last_event_id": 2328103
+          "first_event_id": 2595219,
+          "last_event_id": 2595377
         },
         {
           "season_index": 16,
@@ -1255,8 +1267,8 @@
           "match_count": 120,
           "duration_days": 259,
           "gap_from_prev_days": 84.0,
-          "first_event_id": 2328104,
-          "last_event_id": 2328262
+          "first_event_id": 2595378,
+          "last_event_id": 2595536
         },
         {
           "season_index": 17,
@@ -1267,8 +1279,8 @@
           "match_count": 93,
           "duration_days": 238,
           "gap_from_prev_days": 139.2,
-          "first_event_id": 2328263,
-          "last_event_id": 2328355
+          "first_event_id": 2595537,
+          "last_event_id": 2595629
         },
         {
           "season_index": 18,
@@ -1279,20 +1291,20 @@
           "match_count": 93,
           "duration_days": 266,
           "gap_from_prev_days": 104.2,
-          "first_event_id": 2328356,
-          "last_event_id": 2328448
+          "first_event_id": 2595630,
+          "last_event_id": 2595722
         },
         {
           "season_index": 19,
           "start_utc": "2025-09-25T18:45:00Z",
-          "end_utc": "2026-01-24T17:30:00Z",
+          "end_utc": "2026-06-20T14:00:00Z",
           "start_date": "2025-09-25",
-          "end_date": "2026-01-24",
-          "match_count": 50,
-          "duration_days": 120,
+          "end_date": "2026-06-20",
+          "match_count": 93,
+          "duration_days": 267,
           "gap_from_prev_days": 103.2,
-          "first_event_id": 2328449,
-          "last_event_id": 2328498
+          "first_event_id": 2595723,
+          "last_event_id": 2599349
         }
       ]
     },
@@ -1300,7 +1312,7 @@
       "league_id": 4714,
       "league_name": "Six Nations Championship",
       "gap_days_rule": 90,
-      "total_matches_considered": 249,
+      "total_matches_considered": 255,
       "season_count": 17,
       "seasons": [
         {
@@ -1312,8 +1324,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": null,
-          "first_event_id": 2326059,
-          "last_event_id": 2326073
+          "first_event_id": 2593318,
+          "last_event_id": 2593332
         },
         {
           "season_index": 2,
@@ -1324,8 +1336,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.88,
-          "first_event_id": 2326074,
-          "last_event_id": 2326088
+          "first_event_id": 2593333,
+          "last_event_id": 2593347
         },
         {
           "season_index": 3,
@@ -1336,8 +1348,8 @@
           "match_count": 15,
           "duration_days": 43,
           "gap_from_prev_days": 321.0,
-          "first_event_id": 2326089,
-          "last_event_id": 2326103
+          "first_event_id": 2593348,
+          "last_event_id": 2593362
         },
         {
           "season_index": 4,
@@ -1348,8 +1360,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.78,
-          "first_event_id": 2326104,
-          "last_event_id": 2326118
+          "first_event_id": 2593363,
+          "last_event_id": 2593377
         },
         {
           "season_index": 5,
@@ -1360,8 +1372,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.85,
-          "first_event_id": 2326119,
-          "last_event_id": 2326133
+          "first_event_id": 2593378,
+          "last_event_id": 2593392
         },
         {
           "season_index": 6,
@@ -1372,8 +1384,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.77,
-          "first_event_id": 2326134,
-          "last_event_id": 2326148
+          "first_event_id": 2593393,
+          "last_event_id": 2593407
         },
         {
           "season_index": 7,
@@ -1384,8 +1396,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 328.13,
-          "first_event_id": 2326149,
-          "last_event_id": 2326163
+          "first_event_id": 2593408,
+          "last_event_id": 2593422
         },
         {
           "season_index": 8,
@@ -1396,8 +1408,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.89,
-          "first_event_id": 2326164,
-          "last_event_id": 2326178
+          "first_event_id": 2593423,
+          "last_event_id": 2593437
         },
         {
           "season_index": 9,
@@ -1408,8 +1420,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.77,
-          "first_event_id": 2326179,
-          "last_event_id": 2326193
+          "first_event_id": 2593438,
+          "last_event_id": 2593452
         },
         {
           "season_index": 10,
@@ -1420,8 +1432,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.89,
-          "first_event_id": 2326194,
-          "last_event_id": 2326208
+          "first_event_id": 2593453,
+          "last_event_id": 2593467
         },
         {
           "season_index": 11,
@@ -1432,8 +1444,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.12,
-          "first_event_id": 2326209,
-          "last_event_id": 2326223
+          "first_event_id": 2593468,
+          "last_event_id": 2593482
         },
         {
           "season_index": 12,
@@ -1444,8 +1456,8 @@
           "match_count": 15,
           "duration_days": 48,
           "gap_from_prev_days": 692.89,
-          "first_event_id": 2326224,
-          "last_event_id": 2326238
+          "first_event_id": 2593483,
+          "last_event_id": 2593497
         },
         {
           "season_index": 13,
@@ -1456,8 +1468,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 315.76,
-          "first_event_id": 2326239,
-          "last_event_id": 2326253
+          "first_event_id": 2593498,
+          "last_event_id": 2593512
         },
         {
           "season_index": 14,
@@ -1468,8 +1480,8 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.76,
-          "first_event_id": 2326254,
-          "last_event_id": 2326268
+          "first_event_id": 2593513,
+          "last_event_id": 2593527
         },
         {
           "season_index": 15,
@@ -1480,8 +1492,8 @@
           "match_count": 15,
           "duration_days": 43,
           "gap_from_prev_days": 321.12,
-          "first_event_id": 2326269,
-          "last_event_id": 2326283
+          "first_event_id": 2593528,
+          "last_event_id": 2593542
         },
         {
           "season_index": 16,
@@ -1492,20 +1504,20 @@
           "match_count": 15,
           "duration_days": 42,
           "gap_from_prev_days": 321.01,
-          "first_event_id": 2326284,
-          "last_event_id": 2326298
+          "first_event_id": 2593543,
+          "last_event_id": 2593557
         },
         {
           "season_index": 17,
           "start_utc": "2026-02-05T20:10:00Z",
-          "end_utc": "2026-02-22T15:10:00Z",
+          "end_utc": "2026-03-14T20:10:00Z",
           "start_date": "2026-02-05",
-          "end_date": "2026-02-22",
-          "match_count": 9,
-          "duration_days": 16,
+          "end_date": "2026-03-14",
+          "match_count": 15,
+          "duration_days": 37,
           "gap_from_prev_days": 327.01,
-          "first_event_id": 2326299,
-          "last_event_id": 2326307
+          "first_event_id": 2593558,
+          "last_event_id": 2593572
         }
       ]
     },
@@ -1513,8 +1525,8 @@
       "league_id": 5479,
       "league_name": "Rugby Union International Friendlies",
       "gap_days_rule": 90,
-      "total_matches_considered": 769,
-      "season_count": 24,
+      "total_matches_considered": 789,
+      "season_count": 25,
       "seasons": [
         {
           "season_index": 1,
@@ -1525,8 +1537,8 @@
           "match_count": 13,
           "duration_days": 14,
           "gap_from_prev_days": null,
-          "first_event_id": 2331275,
-          "last_event_id": 2331287
+          "first_event_id": 2598549,
+          "last_event_id": 2598561
         },
         {
           "season_index": 2,
@@ -1537,8 +1549,8 @@
           "match_count": 14,
           "duration_days": 21,
           "gap_from_prev_days": 552.79,
-          "first_event_id": 2331288,
-          "last_event_id": 2331301
+          "first_event_id": 2598562,
+          "last_event_id": 2598575
         },
         {
           "season_index": 3,
@@ -1549,8 +1561,8 @@
           "match_count": 22,
           "duration_days": 29,
           "gap_from_prev_days": 125.57,
-          "first_event_id": 2331302,
-          "last_event_id": 2331323
+          "first_event_id": 2598576,
+          "last_event_id": 2598597
         },
         {
           "season_index": 4,
@@ -1561,8 +1573,8 @@
           "match_count": 14,
           "duration_days": 139,
           "gap_from_prev_days": 230.56,
-          "first_event_id": 2331324,
-          "last_event_id": 2331337
+          "first_event_id": 2598598,
+          "last_event_id": 2598611
         },
         {
           "season_index": 5,
@@ -1573,8 +1585,8 @@
           "match_count": 13,
           "duration_days": 64,
           "gap_from_prev_days": 138.74,
-          "first_event_id": 2331338,
-          "last_event_id": 2331350
+          "first_event_id": 2598612,
+          "last_event_id": 2598624
         },
         {
           "season_index": 6,
@@ -1585,8 +1597,8 @@
           "match_count": 22,
           "duration_days": 42,
           "gap_from_prev_days": 118.79,
-          "first_event_id": 2331351,
-          "last_event_id": 2331372
+          "first_event_id": 2598625,
+          "last_event_id": 2598646
         },
         {
           "season_index": 7,
@@ -1597,8 +1609,8 @@
           "match_count": 15,
           "duration_days": 14,
           "gap_from_prev_days": 188.6,
-          "first_event_id": 2331373,
-          "last_event_id": 2331387
+          "first_event_id": 2598647,
+          "last_event_id": 2598661
         },
         {
           "season_index": 8,
@@ -1609,8 +1621,8 @@
           "match_count": 25,
           "duration_days": 42,
           "gap_from_prev_days": 118.64,
-          "first_event_id": 2331388,
-          "last_event_id": 2331412
+          "first_event_id": 2598662,
+          "last_event_id": 2598686
         },
         {
           "season_index": 9,
@@ -1621,8 +1633,8 @@
           "match_count": 20,
           "duration_days": 29,
           "gap_from_prev_days": 180.71,
-          "first_event_id": 2331413,
-          "last_event_id": 2331432
+          "first_event_id": 2598687,
+          "last_event_id": 2598706
         },
         {
           "season_index": 10,
@@ -1633,8 +1645,8 @@
           "match_count": 41,
           "duration_days": 42,
           "gap_from_prev_days": 111.75,
-          "first_event_id": 2331433,
-          "last_event_id": 2331473
+          "first_event_id": 2598707,
+          "last_event_id": 2598747
         },
         {
           "season_index": 11,
@@ -1645,8 +1657,8 @@
           "match_count": 25,
           "duration_days": 176,
           "gap_from_prev_days": 180.18,
-          "first_event_id": 2331474,
-          "last_event_id": 2331498
+          "first_event_id": 2598748,
+          "last_event_id": 2598772
         },
         {
           "season_index": 12,
@@ -1657,8 +1669,8 @@
           "match_count": 24,
           "duration_days": 28,
           "gap_from_prev_days": 189.96,
-          "first_event_id": 2331499,
-          "last_event_id": 2331522
+          "first_event_id": 2598773,
+          "last_event_id": 2598796
         },
         {
           "season_index": 13,
@@ -1669,8 +1681,8 @@
           "match_count": 47,
           "duration_days": 42,
           "gap_from_prev_days": 117.61,
-          "first_event_id": 2331523,
-          "last_event_id": 2331569
+          "first_event_id": 2598797,
+          "last_event_id": 2598843
         },
         {
           "season_index": 14,
@@ -1681,8 +1693,8 @@
           "match_count": 26,
           "duration_days": 34,
           "gap_from_prev_days": 175.98,
-          "first_event_id": 2331570,
-          "last_event_id": 2331595
+          "first_event_id": 2598844,
+          "last_event_id": 2598869
         },
         {
           "season_index": 15,
@@ -1693,8 +1705,8 @@
           "match_count": 36,
           "duration_days": 42,
           "gap_from_prev_days": 111.46,
-          "first_event_id": 2331596,
-          "last_event_id": 2331631
+          "first_event_id": 2598870,
+          "last_event_id": 2598905
         },
         {
           "season_index": 16,
@@ -1705,8 +1717,8 @@
           "match_count": 25,
           "duration_days": 27,
           "gap_from_prev_days": 175.98,
-          "first_event_id": 2331632,
-          "last_event_id": 2331656
+          "first_event_id": 2598906,
+          "last_event_id": 2598930
         },
         {
           "season_index": 17,
@@ -1717,8 +1729,8 @@
           "match_count": 41,
           "duration_days": 35,
           "gap_from_prev_days": 125.43,
-          "first_event_id": 2331657,
-          "last_event_id": 2331697
+          "first_event_id": 2598931,
+          "last_event_id": 2598971
         },
         {
           "season_index": 18,
@@ -1729,8 +1741,8 @@
           "match_count": 14,
           "duration_days": 84,
           "gap_from_prev_days": 643.69,
-          "first_event_id": 2331698,
-          "last_event_id": 2331711
+          "first_event_id": 2598972,
+          "last_event_id": 2598985
         },
         {
           "season_index": 19,
@@ -1741,8 +1753,8 @@
           "match_count": 56,
           "duration_days": 153,
           "gap_from_prev_days": 209.67,
-          "first_event_id": 2331712,
-          "last_event_id": 2331767
+          "first_event_id": 2598986,
+          "last_event_id": 2599041
         },
         {
           "season_index": 20,
@@ -1753,8 +1765,8 @@
           "match_count": 78,
           "duration_days": 168,
           "gap_from_prev_days": 196.25,
-          "first_event_id": 2331768,
-          "last_event_id": 2331850
+          "first_event_id": 2599042,
+          "last_event_id": 2599124
         },
         {
           "season_index": 21,
@@ -1765,8 +1777,8 @@
           "match_count": 42,
           "duration_days": 154,
           "gap_from_prev_days": 202.9,
-          "first_event_id": 2331851,
-          "last_event_id": 2331892
+          "first_event_id": 2599125,
+          "last_event_id": 2599166
         },
         {
           "season_index": 22,
@@ -1774,11 +1786,11 @@
           "end_utc": "2024-11-30T15:10:00Z",
           "start_date": "2024-06-22",
           "end_date": "2024-11-30",
-          "match_count": 84,
+          "match_count": 85,
           "duration_days": 161,
           "gap_from_prev_days": 216.45,
-          "first_event_id": 2331893,
-          "last_event_id": 2331979
+          "first_event_id": 2599167,
+          "last_event_id": 2599253
         },
         {
           "season_index": 23,
@@ -1786,11 +1798,11 @@
           "end_utc": "2025-07-19T21:25:00Z",
           "start_date": "2025-06-14",
           "end_date": "2025-07-19",
-          "match_count": 33,
+          "match_count": 34,
           "duration_days": 35,
           "gap_from_prev_days": 195.91,
-          "first_event_id": 2331980,
-          "last_event_id": 2332012
+          "first_event_id": 2599254,
+          "last_event_id": 2599286
         },
         {
           "season_index": 24,
@@ -1798,11 +1810,44 @@
           "end_utc": "2025-11-29T15:10:00Z",
           "start_date": "2025-10-25",
           "end_date": "2025-11-29",
-          "match_count": 39,
+          "match_count": 40,
           "duration_days": 35,
           "gap_from_prev_days": 97.35,
-          "first_event_id": 2332013,
-          "last_event_id": 2332051
+          "first_event_id": 2599287,
+          "last_event_id": 2599325
+        },
+        {
+          "season_index": 25,
+          "start_utc": "2026-06-19T16:15:00Z",
+          "end_utc": "2026-08-29T19:00:00Z",
+          "start_date": "2026-06-19",
+          "end_date": "2026-08-29",
+          "match_count": 17,
+          "duration_days": 71,
+          "gap_from_prev_days": 202.05,
+          "first_event_id": 2599788,
+          "last_event_id": 2599874
+        }
+      ]
+    },
+    {
+      "league_id": 5480,
+      "league_name": "Nations Championship",
+      "gap_days_rule": 90,
+      "total_matches_considered": 18,
+      "season_count": 1,
+      "seasons": [
+        {
+          "season_index": 1,
+          "start_utc": "2026-07-04T07:10:00Z",
+          "end_utc": "2026-07-18T19:10:00Z",
+          "start_date": "2026-07-04",
+          "end_date": "2026-07-18",
+          "match_count": 18,
+          "duration_days": 14,
+          "gap_from_prev_days": null,
+          "first_event_id": 2599369,
+          "last_event_id": 2599352
         }
       ]
     }

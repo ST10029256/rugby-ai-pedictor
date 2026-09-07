@@ -4,7 +4,6 @@ import {
   Typography,
   Card,
   CardContent,
-  CircularProgress,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -16,7 +15,6 @@ import {
   InputLabel,
   Paper,
   Divider,
-  Button,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
@@ -66,8 +64,10 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
   const preferredRwcYears = useMemo(() => ['2023', '2019', '2015', '2011', '2007'], []);
   const LUX = useMemo(
     () => ({
-      gold: '#fbbf24',
-      goldSoft: 'rgba(251,191,36,0.16)',
+      gold: '#f4e4bc',
+      goldBright: '#fbbf24',
+      goldSoft: 'rgba(214,185,122,0.32)',
+      goldLine: 'rgba(245,225,170,0.7)',
       bgA: 'rgba(17, 24, 39, 0.72)',
       bgB: 'rgba(15, 23, 42, 0.72)',
       border: 'rgba(255,255,255,0.10)',
@@ -86,28 +86,10 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
     const leagueEntry = all.find((entry) => Number(entry?.league_id) === targetLeagueId);
     const seasons = Array.isArray(leagueEntry?.seasons) ? leagueEntry.seasons : [];
     return seasons
-      .map((s, idx) => {
+      .map((s) => {
         const startDate = String(s?.start_date || '').slice(0, 10);
         const rawEndDate = String(s?.end_date || '').slice(0, 10);
-        let endDate = rawEndDate;
-        const start = new Date(`${startDate}T00:00:00Z`);
-        const end = new Date(`${rawEndDate}T00:00:00Z`);
-        const isLatestDetectedSeason = idx === seasons.length - 1;
-        const isValidRange = !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime());
-
-        // If the newest season only spills into Jan/Feb of the following year,
-        // treat it as an incomplete carry-over and cap display at Dec 31.
-        if (isLatestDetectedSeason && isValidRange) {
-          const startYear = start.getUTCFullYear();
-          const endYear = end.getUTCFullYear();
-          const endMonth = end.getUTCMonth() + 1;
-          const crossesToNextYear = endYear === startYear + 1;
-          if (crossesToNextYear && endMonth <= 2) {
-            endDate = `${startYear}-12-31`;
-          }
-        }
-
-        return { startDate, endDate, rawEndDate };
+        return { startDate, endDate: rawEndDate, rawEndDate };
       })
       .filter((s) => s.startDate && s.endDate)
       .sort((a, b) => a.startDate.localeCompare(b.startDate));
@@ -425,56 +407,43 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
     return { firstDate: sorted[0], lastDate: sorted[sorted.length - 1] };
   })();
 
-  const selectedYearDetectedSeasonRange = (() => {
-    if (!selectedYearDateRange || detectedSeasonRanges.length === 0) return null;
-    const toUtcMs = (iso) => new Date(`${iso}T00:00:00Z`).getTime();
-    const blockStartMs = toUtcMs(selectedYearDateRange.firstDate);
-    const blockEndMs = toUtcMs(selectedYearDateRange.lastDate);
-    let best = null;
-    let bestOverlapMs = -1;
-    detectedSeasonRanges.forEach((range) => {
-      const rangeStartMs = toUtcMs(range.startDate);
-      const rangeEndMs = toUtcMs(range.endDate);
-      const overlapStart = Math.max(blockStartMs, rangeStartMs);
-      const overlapEnd = Math.min(blockEndMs, rangeEndMs);
-      const overlapMs = Math.max(0, overlapEnd - overlapStart);
-      if (overlapMs > bestOverlapMs) {
-        bestOverlapMs = overlapMs;
-        best = range;
-      }
-    });
-    return best;
-  })();
+  const formatSeasonRangeLabel = (startIso, endIso) => {
+    if (!startIso || !endIso) return '';
+    const start = new Date(`${String(startIso).slice(0, 10)}T00:00:00`);
+    const end = new Date(`${String(endIso).slice(0, 10)}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
+    const startMo = start.toLocaleDateString('en-US', { month: 'short' });
+    const endMo = end.toLocaleDateString('en-US', { month: 'short' });
+    const startYr = start.getFullYear();
+    const endYr = end.getFullYear();
+    return startYr === endYr ? `${startMo} – ${endMo} ${startYr}` : `${startMo} ${startYr} – ${endMo} ${endYr}`;
+  };
 
   const selectedSeasonLabel = (() => {
     const yr = Number(selectedYear);
     if (!Number.isFinite(yr) || selectedYear === 'all') return '';
     const statusText = hasCompletedMatches ? 'Results available' : 'Results pending';
-    const formatRange = (startIso, endIso) => {
-      const start = new Date(`${startIso}T00:00:00`);
-      const end = new Date(`${endIso}T00:00:00`);
-      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
-      const startMo = start.toLocaleDateString('en-US', { month: 'short' });
-      const endMo = end.toLocaleDateString('en-US', { month: 'short' });
-      const startYr = start.getFullYear();
-      const endYr = end.getFullYear();
-      return startYr === endYr ? `${startMo} – ${endMo} ${startYr}` : `${startMo} ${startYr} – ${endMo} ${endYr}`;
-    };
-    if (selectedYearDetectedSeasonRange) {
-      const startYear = new Date(`${selectedYearDetectedSeasonRange.startDate}T00:00:00`).getFullYear();
-      const endYear = new Date(`${selectedYearDetectedSeasonRange.endDate}T00:00:00`).getFullYear();
-      const isAlignedToSelectedYear = isRugbyWorldCup
-        ? (startYear === yr || endYear === yr)
-        : endYear === yr;
-      const windowLabel = formatRange(selectedYearDetectedSeasonRange.startDate, selectedYearDetectedSeasonRange.endDate);
-      if (windowLabel && isAlignedToSelectedYear) {
-        return isRugbyWorldCup
-          ? `Tournament window: ${windowLabel} • ${statusText}`
-          : `Season window: ${windowLabel} • ${statusText}`;
-      }
+    const touching = detectedSeasonRanges.filter((range) => {
+      const startY = Number(String(range.startDate).slice(0, 4));
+      const endY = Number(String(range.rawEndDate || range.endDate).slice(0, 4));
+      return startY === yr || endY === yr;
+    });
+    if (touching.length > 0) {
+      const labels = [...new Set(
+        touching
+          .map((range) => formatSeasonRangeLabel(range.startDate, range.rawEndDate || range.endDate))
+          .filter(Boolean)
+      )];
+      const prefix = isRugbyWorldCup
+        ? (labels.length > 1 ? 'Tournament windows' : 'Tournament window')
+        : (labels.length > 1 ? 'Season windows' : 'Season window');
+      return `${prefix}: ${labels.join(' • ')} • ${statusText}`;
     }
-    if (isRugbyWorldCup) return `Tournament year: ${yr} • ${statusText}`;
-    return `Season: Sep ${yr - 1} - Jun ${yr} • ${statusText}`;
+    if (selectedYearDateRange) {
+      const windowLabel = formatSeasonRangeLabel(selectedYearDateRange.firstDate, selectedYearDateRange.lastDate);
+      return windowLabel ? `Matches: ${windowLabel} • ${statusText}` : statusText;
+    }
+    return isRugbyWorldCup ? `Tournament year: ${yr} • ${statusText}` : statusText;
   })();
 
   const titleMonogram = (() => {
@@ -493,52 +462,62 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
         width: '100%',
         maxWidth: '100%',
         mx: 0,
-        p: { xs: 1.25, sm: 2.5, md: 3.5 },
+        // Wrapper already supplies top gap — avoid stacking extra space under the header
+        p: 0,
         boxSizing: 'border-box',
         overflowX: 'hidden', // avoid tiny-screen horizontal scroll
       }}
     >
-      {/* Luxury header + summary */}
+      {/* Premium header + summary — matches Teams / News gold chrome */}
       <Paper
         elevation={0}
         sx={{
           position: 'relative',
           overflow: 'hidden',
-          borderRadius: { xs: 2.5, sm: 3 },
-          p: { xs: 1.5, sm: 2.25, md: 2.75 },
-          mb: { xs: 2, sm: 2.5, md: 3 },
+          borderRadius: 3,
+          p: { xs: 1.25, sm: 1.6 },
+          mb: { xs: 2, sm: 2.5 },
+          border: `1px solid ${LUX.goldSoft}`,
           background:
-            'radial-gradient(1200px circle at 12% -10%, rgba(251,191,36,0.18), transparent 45%), linear-gradient(135deg, rgba(15,23,42,0.82) 0%, rgba(17,24,39,0.78) 70%)',
-          border: `1px solid ${LUX.borderStrong}`,
-          boxShadow: '0 18px 70px rgba(0,0,0,0.40)',
-          '&::after': {
+            'linear-gradient(165deg, rgba(15,23,42,0.94) 0%, rgba(17,24,39,0.96) 48%, rgba(2,6,23,0.98) 100%)',
+          boxShadow:
+            '0 2px 0 rgba(255,240,212,0.12), 0 12px 28px rgba(2,6,23,0.45), inset 0 1px 0 rgba(255,250,236,0.08)',
+          '&::before': {
             content: '""',
             position: 'absolute',
-            inset: -1,
-            borderRadius: 'inherit',
-            padding: '1px',
-            background: 'linear-gradient(135deg, rgba(251,191,36,0.48), rgba(255,255,255,0.08), rgba(251,191,36,0.22))',
-            WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-            WebkitMaskComposite: 'xor',
-            maskComposite: 'exclude',
-            pointerEvents: 'none',
-            opacity: 0.85,
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 3,
+            background: `linear-gradient(90deg, rgba(214,185,122,0.08), ${LUX.goldLine}, rgba(214,185,122,0.08))`,
           },
         }}
       >
-        <Box sx={{ display: 'flex', gap: 1.25, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: { xs: 1, sm: 1.25 },
+            flexWrap: 'nowrap',
+            minWidth: 0,
+          }}
+        >
           <Box
             sx={{
-              width: 42,
-              height: 42,
+              width: { xs: 42, sm: 46 },
+              height: { xs: 42, sm: 46 },
+              flexShrink: 0,
               borderRadius: 2.2,
               display: 'grid',
               placeItems: 'center',
-              background: 'linear-gradient(135deg, rgba(251,191,36,0.26) 0%, rgba(255,255,255,0.08) 100%)',
+              background:
+                'linear-gradient(135deg, rgba(251,191,36,0.26) 0%, rgba(255,255,255,0.08) 100%)',
               border: '1px solid rgba(255,255,255,0.14)',
               color: '#fef3c7',
               fontWeight: 1000,
               letterSpacing: 0.7,
+              fontSize: { xs: '0.78rem', sm: '0.85rem' },
+              boxShadow: 'inset 0 1px 0 rgba(255,250,236,0.18)',
             }}
             title={leagueName || 'History'}
           >
@@ -547,71 +526,74 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
 
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography
+              component="h2"
               sx={{
-                color: 'white',
-                fontWeight: 1100,
+                color: '#f8fafc',
+                fontWeight: 900,
+                fontSize: { xs: '1.05rem', sm: '1.2rem' },
                 letterSpacing: 0.2,
-                fontSize: { xs: '1.15rem', sm: '1.55rem', md: '1.75rem' },
+                lineHeight: 1.2,
               }}
-              noWrap
             >
-              Historical Performance
+              <Box
+                component="span"
+                sx={{
+                  background:
+                    'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(251,191,36,0.86) 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                }}
+              >
+                History
+              </Box>
             </Typography>
-            <Typography sx={{ color: LUX.sub, mt: 0.35, fontSize: '0.86rem' }}>
-              {leagueName || 'League'} • Past predictions vs actual results
+            <Typography
+              sx={{
+                color: '#a7b2c7',
+                fontSize: { xs: '0.72rem', sm: '0.8rem' },
+                mt: 0.2,
+                lineHeight: 1.25,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {leagueName ? `${leagueName} · past vs actual` : 'Past predictions vs actual results'}
             </Typography>
           </Box>
 
-          <Box
-            sx={{
-              display: 'flex',
-              gap: 1,
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              width: '100%',
-              justifyContent: 'center',
-              mt: { xs: 0.75, sm: 0.25 },
+          <Chip
+            label="Results"
+            size="small"
+            onClick={() => {
+              setEvaluationMode('replay');
+              setExpandedWeeks(new Set());
+              fetchHistoricalData(selectedYear, 'replay');
             }}
-          >
-            <Button
-              variant={evaluationMode === 'replay' ? 'contained' : 'outlined'}
-              size="small"
-              onClick={() => {
-                const newMode = 'replay';
-                setEvaluationMode(newMode);
-                setExpandedWeeks(new Set());
-                fetchHistoricalData(selectedYear, newMode);
-              }}
-              sx={{
-                textTransform: 'none',
-                fontWeight: 900,
-                borderRadius: 999,
-                ...(evaluationMode === 'replay'
-                  ? {
-                      backgroundColor: 'rgba(251,191,36,0.16)',
-                      color: LUX.gold,
-                      boxShadow: 'none',
-                      border: '1px solid rgba(251,191,36,0.22)',
-                      '&:hover': { backgroundColor: 'rgba(251,191,36,0.22)' },
-                    }
-                  : {
-                      borderColor: 'rgba(255,255,255,0.14)',
-                      color: 'rgba(255,255,255,0.82)',
-                      '&:hover': { borderColor: 'rgba(255,255,255,0.22)', backgroundColor: 'rgba(255,255,255,0.04)' },
-                    }),
-              }}
-            >
-              Past Results
-            </Button>
-          </Box>
+            sx={{
+              flexShrink: 0,
+              background:
+                'linear-gradient(135deg, rgba(193,154,79,0.2), rgba(245,225,170,0.14))',
+              border: '1px solid rgba(214,185,122,0.45)',
+              color: LUX.gold,
+              fontWeight: 800,
+              cursor: 'pointer',
+              '& .MuiChip-label': { px: 1.1 },
+              '&:hover': {
+                background:
+                  'linear-gradient(135deg, rgba(193,154,79,0.28), rgba(245,225,170,0.2))',
+              },
+            }}
+          />
         </Box>
 
         <Box
           sx={{
-            mt: 1.75,
+            mt: 1.5,
             display: 'grid',
             gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(4, 1fr)' },
-            gap: { xs: 1, sm: 1.25, md: 1.5 },
+            gap: { xs: 0.9, sm: 1.1 },
             width: '100%',
           }}
         >
@@ -624,11 +606,13 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
             <Box
               key={m.label}
               sx={{
-                p: { xs: 1, sm: 1.25, md: 1.5 },
+                p: { xs: 1, sm: 1.15 },
                 borderRadius: 2,
-                border: `1px solid ${LUX.border}`,
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.10) 100%)',
-                minHeight: { xs: 72, sm: 80, md: 88 },
+                border: '1px solid rgba(214,185,122,0.2)',
+                background:
+                  'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.16) 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,250,236,0.06)',
+                minHeight: { xs: 68, sm: 76 },
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'center',
@@ -638,9 +622,9 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
             >
               <Typography
                 sx={{
-                  color: LUX.muted,
-                  fontSize: { xs: '0.7rem', sm: '0.75rem', md: '0.8rem' },
-                  letterSpacing: 0.12,
+                  color: 'rgba(244,228,188,0.65)',
+                  fontSize: { xs: '0.65rem', sm: '0.7rem' },
+                  letterSpacing: 0.6,
                   textTransform: 'uppercase',
                   fontWeight: 800,
                   lineHeight: 1.3,
@@ -650,10 +634,10 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
               </Typography>
               <Typography
                 sx={{
-                  color: 'white',
-                  fontWeight: 1100,
-                  fontSize: { xs: '1.25rem', sm: '1.4rem', md: '1.5rem' },
-                  mt: 0.5,
+                  color: '#f8fafc',
+                  fontWeight: 900,
+                  fontSize: { xs: '1.15rem', sm: '1.3rem' },
+                  mt: 0.35,
                   lineHeight: 1.2,
                 }}
               >
@@ -671,9 +655,10 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           p: { xs: 1.25, sm: 1.5 },
           mb: { xs: 1.75, sm: 2 },
           borderRadius: 3,
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(0,0,0,0.12) 100%)',
-          border: `1px solid ${LUX.border}`,
-          boxShadow: '0 14px 46px rgba(0,0,0,0.26)',
+          background:
+            'linear-gradient(165deg, rgba(15,23,42,0.9) 0%, rgba(17,24,39,0.92) 50%, rgba(2,6,23,0.95) 100%)',
+          border: '1px solid rgba(214,185,122,0.18)',
+          boxShadow: '0 10px 28px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,250,236,0.05)',
         }}
       >
         <Box
@@ -908,54 +893,8 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           return baseEntries;
         };
 
-        const formatSeasonLabel = (firstDate, lastDate, opts = {}) => {
-          if (!firstDate || !lastDate) return 'Season';
-          const firstIso = String(firstDate).slice(0, 10);
-          const lastIso = String(lastDate).slice(0, 10);
-          const toLabel = (startIso, endIso) => {
-            const start = new Date(`${startIso}T00:00:00`);
-            const end = new Date(`${endIso}T00:00:00`);
-            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'Season';
-            const startMo = start.toLocaleDateString('en-US', { month: 'short' });
-            const endMo = end.toLocaleDateString('en-US', { month: 'short' });
-            const startYr = start.getFullYear();
-            const endYr = end.getFullYear();
-            if (startYr === endYr) return `${startMo} – ${endMo} ${startYr}`;
-            return `${startMo} ${startYr} – ${endMo} ${endYr}`;
-          };
-
-          // Use detected season windows when possible so widget labels match real league seasons.
-          if (detectedSeasonRanges.length > 0) {
-            const toUtcMs = (iso) => new Date(`${iso}T00:00:00Z`).getTime();
-            const blockStartMs = toUtcMs(firstIso);
-            const blockEndMs = toUtcMs(lastIso);
-            let best = null;
-            let bestOverlapMs = -1;
-
-            detectedSeasonRanges.forEach((range) => {
-              const rangeStartMs = toUtcMs(range.startDate);
-              const rangeEndMs = toUtcMs(range.endDate);
-              const overlapStart = Math.max(blockStartMs, rangeStartMs);
-              const overlapEnd = Math.min(blockEndMs, rangeEndMs);
-              const overlapMs = Math.max(0, overlapEnd - overlapStart);
-              if (overlapMs > bestOverlapMs) {
-                bestOverlapMs = overlapMs;
-                best = range;
-              }
-            });
-
-            if (best) {
-              const touches = firstIso <= best.endDate && lastIso >= best.startDate;
-              if (touches) {
-                const detectedEndForLabel = opts.useActualDetectedEnd
-                  ? (best.rawEndDate || best.endDate)
-                  : best.endDate;
-                return toLabel(best.startDate, detectedEndForLabel);
-              }
-            }
-          }
-
-          return toLabel(firstIso, lastIso);
+        const formatSeasonLabel = (firstDate, lastDate) => {
+          return formatSeasonRangeLabel(firstDate, lastDate) || 'Season';
         };
 
         const merged = [...prevYrMatches, ..._allMatchesGlobal].filter((m) => m.date);
@@ -969,19 +908,6 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           })
           .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         const seasons = splitIntoSeasons(allForSplit);
-        const seasonBoundaryMeta = new Map(
-          seasons.map((season, seasonIdx) => {
-            const seasonFirstDate = season.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
-            const seasonLastDate = season.reduce((max, m) => (!max || m.date > max ? m.date : max), null);
-            const hasNextSeason = seasonIdx < seasons.length - 1;
-            const daysSinceSeasonLast = seasonLastDate
-              ? (Date.now() - new Date(seasonLastDate).getTime()) / (1000 * 60 * 60 * 24)
-              : Number.POSITIVE_INFINITY;
-            // Closed season if another season already started, or if it's stale beyond the split gap.
-            const isSeasonClosed = hasNextSeason || daysSinceSeasonLast >= SEASON_GAP_DAYS;
-            return [`${seasonFirstDate || ''}|${seasonLastDate || ''}`, { isSeasonClosed }];
-          })
-        );
         const seasonsFiltered = selYr
           ? seasons.filter((s) => s.some((m) => {
               const y = String((m.year || (m.date || '').slice(0, 4)));
@@ -1089,12 +1015,66 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           );
           return isShort2018Window || isShort2020Window;
         };
-        const isSeasonClosedByGap = (seasonLastDate, hasNewerSeason = false) => {
-          if (hasNewerSeason) return true;
-          if (!seasonLastDate) return false;
-          const daysSinceSeasonLast = (Date.now() - new Date(seasonLastDate).getTime()) / (1000 * 60 * 60 * 24);
-          return daysSinceSeasonLast >= SEASON_GAP_DAYS;
+        const DATE_SLACK_DAYS = 3;
+        const matchIso = (m) => String(m?.date || '').slice(0, 10);
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const blockHasIso = (matches, targetIso) => {
+          if (!targetIso || !Array.isArray(matches) || matches.length === 0) return false;
+          return matches.some((m) => Math.abs(daysBetweenIsoDates(matchIso(m), targetIso)) <= DATE_SLACK_DAYS);
         };
+        const resolvedSeasons = (() => {
+          if (detectedSeasonRanges.length === 0) {
+            return seasons.map((cluster, idx, arr) => {
+              const actualStart = matchIso(cluster[0]);
+              const actualEnd = matchIso(cluster[cluster.length - 1]);
+              const isLatest = idx === arr.length - 1;
+              const yearTruncated = Boolean(selYr)
+                && isLatest
+                && actualEnd.startsWith(selYr)
+                && actualStart.slice(5, 7) >= '08';
+              const closed = (!isLatest || daysBetweenIsoDates(actualEnd, todayIso) >= SEASON_GAP_DAYS) && !yearTruncated;
+              return { actualStart, actualEnd, closed };
+            });
+          }
+          const resolved = detectedSeasonRanges.map((range, idx) => ({
+            actualStart: range.startDate,
+            actualEnd: range.rawEndDate || range.endDate,
+            isLatest: idx === detectedSeasonRanges.length - 1,
+          }));
+          if (resolved.length && allForSplit.length) {
+            const last = resolved[resolved.length - 1];
+            let prev = last.actualEnd;
+            for (const m of allForSplit) {
+              const d = matchIso(m);
+              if (!d || d <= last.actualEnd) continue;
+              if (daysBetweenIsoDates(prev, d) >= SEASON_GAP_DAYS) {
+                last.isLatest = false;
+                let liveEnd = d;
+                let p = d;
+                for (const m2 of allForSplit) {
+                  const d2 = matchIso(m2);
+                  if (!d2 || d2 < d) continue;
+                  if (daysBetweenIsoDates(p, d2) >= SEASON_GAP_DAYS) break;
+                  liveEnd = d2;
+                  p = d2;
+                }
+                resolved.push({ actualStart: d, actualEnd: liveEnd, isLatest: true });
+                break;
+              }
+              last.actualEnd = d;
+              prev = d;
+            }
+          }
+          return resolved.map((r, idx, arr) => {
+            const isLatest = idx === arr.length - 1;
+            const closed = !isLatest || daysBetweenIsoDates(r.actualEnd, todayIso) >= SEASON_GAP_DAYS;
+            return { actualStart: r.actualStart, actualEnd: r.actualEnd, closed };
+          });
+        })();
+        const seasonsTouchingBlock = (matches) => ({
+          starting: resolvedSeasons.find((s) => blockHasIso(matches, s.actualStart)) || null,
+          ending: resolvedSeasons.find((s) => s.closed && blockHasIso(matches, s.actualEnd)) || null,
+        });
 
         if (seasonsFiltered.length > 0) {
           let seasonsOrdered = [...seasonsFiltered].reverse();
@@ -1110,25 +1090,6 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
               return (aFirst || '').localeCompare(bFirst || '');
             });
           }
-          const splitDisplayByGap = (matches, gapDays = 90) => {
-            if (!matches.length) return [];
-            const sorted = [...matches].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-            const groups = [];
-            let current = [sorted[0]];
-            for (let i = 1; i < sorted.length; i++) {
-              const prev = sorted[i - 1].date?.slice(0, 10) || '';
-              const curr = sorted[i].date?.slice(0, 10) || '';
-              const daysDiff = daysBetweenIsoDates(prev, curr);
-              if (daysDiff >= gapDays) {
-                groups.push(current);
-                current = [sorted[i]];
-              } else {
-                current.push(sorted[i]);
-              }
-            }
-            groups.push(current);
-            return groups;
-          };
 
           const blocksToRender = [];
           seasonsOrdered.forEach((seasonMatches, idx) => {
@@ -1136,74 +1097,31 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
             if (displayMatches.length === 0) return;
             const seasonFirstDate = seasonMatches.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
             const seasonLastDate = seasonMatches.reduce((max, m) => (!max || m.date > max ? m.date : max), null);
-            const seasonFirstMo = seasonFirstDate ? new Date(seasonFirstDate).getMonth() : -1;
-            const seasonLastMo = seasonLastDate ? new Date(seasonLastDate).getMonth() : -1;
-            const isPartialStart = seasonFirstMo >= 7 && seasonFirstMo <= 9 && seasonFirstDate && seasonLastDate && seasonFirstDate.slice(0, 4) === seasonLastDate.slice(0, 4) && seasonLastMo >= 9 && seasonLastMo <= 11;
-            const isPartialEnd = seasonFirstMo >= 0 && seasonFirstMo <= 5 && seasonLastMo >= 0 && seasonLastMo <= 5 && seasonFirstDate && seasonLastDate && seasonFirstDate.slice(0, 4) === seasonLastDate.slice(0, 4);
-            const seasonMetaKey = `${seasonFirstDate || ''}|${seasonLastDate || ''}`;
-            const isSeasonClosed = seasonBoundaryMeta.get(seasonMetaKey)?.isSeasonClosed ?? false;
-            const startSeasonLabel = formatSeasonLabel(seasonFirstDate, seasonLastDate, {
-              isPartialStart,
-              isPartialEnd,
-              useActualDetectedEnd: true,
-            });
-            const endSeasonLabel = formatSeasonLabel(seasonFirstDate, seasonLastDate, { isPartialStart, isPartialEnd });
-            const matchedDetectedRange = (() => {
-              if (!seasonFirstDate || !seasonLastDate || detectedSeasonRanges.length === 0) return null;
-              const seasonFirstIso = String(seasonFirstDate).slice(0, 10);
-              const seasonLastIso = String(seasonLastDate).slice(0, 10);
-              const toUtcMs = (iso) => new Date(`${iso}T00:00:00Z`).getTime();
-              const blockStartMs = toUtcMs(seasonFirstIso);
-              const blockEndMs = toUtcMs(seasonLastIso);
-              let best = null;
-              let bestOverlapMs = -1;
-              detectedSeasonRanges.forEach((range) => {
-                const rangeStartMs = toUtcMs(range.startDate);
-                const rangeEndMs = toUtcMs(range.endDate);
-                const overlapStart = Math.max(blockStartMs, rangeStartMs);
-                const overlapEnd = Math.min(blockEndMs, rangeEndMs);
-                const overlapMs = Math.max(0, overlapEnd - overlapStart);
-                if (overlapMs > bestOverlapMs) {
-                  bestOverlapMs = overlapMs;
-                  best = range;
-                }
-              });
-              return best;
-            })();
-            const seasonIsSameYear = Boolean(
-              seasonFirstDate &&
-              seasonLastDate &&
-              String(seasonFirstDate).slice(0, 4) === String(seasonLastDate).slice(0, 4)
-            );
             const subBlocks = [displayMatches];
             subBlocks.forEach((subMatches, subIdx) => {
               const displayFirstDate = subMatches.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
-              const displayLastDate = subMatches.reduce((max, m) => (!max || m.date > max ? m.date : max), null);
-              const includesSeasonStart = Boolean(displayFirstDate && seasonFirstDate && displayFirstDate === seasonFirstDate);
-              const includesSeasonEnd = Boolean(
-                displayLastDate &&
-                seasonLastDate &&
-                displayLastDate === seasonLastDate &&
-                isSeasonClosed
-              );
+              const { starting, ending } = seasonsTouchingBlock(subMatches);
+              const startSeasonLabel = starting
+                ? formatSeasonLabel(starting.actualStart, starting.actualEnd)
+                : '';
+              const endSeasonLabel = ending
+                ? formatSeasonLabel(ending.actualStart, ending.actualEnd)
+                : '';
               blocksToRender.push({
                 seasonMatches,
                 subMatches,
                 startSeasonLabel,
                 endSeasonLabel,
-                includesSeasonStart,
-                includesSeasonEnd,
-                seasonIsSameYear,
+                includesSeasonStart: Boolean(starting),
+                includesSeasonEnd: Boolean(ending),
                 idx,
                 subIdx,
                 displayFirstDate,
-                matchedDetectedRange,
               });
             });
           });
 
           blocksToRender.sort((a, b) => (b.displayFirstDate || '').localeCompare(a.displayFirstDate || ''));
-          const hasAnySeasonStartBlock = blocksToRender.some((b) => b.includesSeasonStart);
 
           return blocksToRender.map(({
             seasonMatches,
@@ -1212,11 +1130,9 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
             endSeasonLabel,
             includesSeasonStart,
             includesSeasonEnd,
-            seasonIsSameYear,
             idx,
             subIdx,
             displayFirstDate,
-            matchedDetectedRange,
           }, blockIdx) => {
             const displayYear = subMatches.length > 0 ? matchYear(subMatches[0]) : null;
             const roundEntriesRaw = buildRoundEntriesForSeason(seasonMatches);
@@ -1234,19 +1150,8 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
               seasonMatches.reduce((min, m) => (!min || m.date < min ? m.date : min), null),
               seasonMatches.reduce((max, m) => (!max || m.date > max ? m.date : max), null),
             );
-            const shouldShowStartHeader = includesSeasonStart && roundEntriesFiltered.length > 0 && !suppressSeasonHeader;
-            const displayLastIso = subMatches.reduce((max, m) => (!max || m.date > max ? m.date : max), null)?.slice(0, 10) || '';
-            const reachesDetectedSeasonEnd = Boolean(
-              !matchedDetectedRange ||
-              (displayLastIso && displayLastIso >= matchedDetectedRange.endDate)
-            );
-            // Top block can show End only for same-year seasons (short tournaments).
-            const shouldShowEndHeader =
-              includesSeasonEnd &&
-              roundEntriesFiltered.length > 0 &&
-              reachesDetectedSeasonEnd &&
-              !suppressSeasonHeader &&
-              (blockIdx > 0 || seasonIsSameYear || !hasAnySeasonStartBlock);
+            const shouldShowStartHeader = includesSeasonStart && roundEntriesFiltered.length > 0 && !suppressSeasonHeader && Boolean(startSeasonLabel);
+            const shouldShowEndHeader = includesSeasonEnd && roundEntriesFiltered.length > 0 && !suppressSeasonHeader && Boolean(endSeasonLabel);
 
             return (
               <React.Fragment key={`season-${idx}-${subIdx}-${displayFirstDate}`}>
@@ -1436,37 +1341,20 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
               if (displayMatches.length === 0) return null;
               const seasonFirstDate = seasonMatches.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
               const seasonLastDate = seasonMatches.reduce((max, m) => (!max || m.date > max ? m.date : max), null);
-              const firstMo = seasonFirstDate ? new Date(seasonFirstDate).getMonth() : -1;
-              const lastMo = seasonLastDate ? new Date(seasonLastDate).getMonth() : -1;
-              const isStartBlock = firstMo >= 6 && firstMo <= 11;
-              const isEndBlock = lastMo >= 3 && lastMo <= 5;
-              const isPartialStart = isStartBlock && sIdx === 0 && firstMo >= 7 && firstMo <= 9 && seasonFirstDate && seasonLastDate && seasonFirstDate.slice(0, 4) === seasonLastDate.slice(0, 4);
-              const isPartialEnd = isEndBlock && lastMo >= 0 && lastMo <= 5 && seasonFirstDate && seasonLastDate && seasonFirstDate.slice(0, 4) === seasonLastDate.slice(0, 4);
-              const startSeasonLabel = formatSeasonLabel(seasonFirstDate, seasonLastDate, {
-                isPartialStart,
-                isPartialEnd,
-                useActualDetectedEnd: true,
-              });
-              const endSeasonLabel = formatSeasonLabel(seasonFirstDate, seasonLastDate, { isPartialStart, isPartialEnd });
-              const blockVariant = isEndBlock ? 'end' : 'start';
+              const { starting, ending } = seasonsTouchingBlock(displayMatches);
+              const startSeasonLabel = starting
+                ? formatSeasonLabel(starting.actualStart, starting.actualEnd)
+                : '';
+              const endSeasonLabel = ending
+                ? formatSeasonLabel(ending.actualStart, ending.actualEnd)
+                : '';
               const roundEntriesRaw = buildRoundEntriesForSeason(seasonMatches);
               const roundEntries = roundEntriesRaw
                 .map((re) => ({ ...re, matches: re.matches.filter((m) => matchYear(m) === year) }))
                 .filter((re) => re.matches.length > 0);
-              const hasNewerSeason = sIdx > 0;
               const suppressSeasonHeader = shouldSuppressPremiershipShortSeasonHeader(seasonFirstDate, seasonLastDate);
-              const shouldShowStartHeader = roundEntries.length > 0 && !suppressSeasonHeader;
-              const isSameYearSeason = Boolean(
-                seasonFirstDate &&
-                seasonLastDate &&
-                String(seasonFirstDate).slice(0, 4) === String(seasonLastDate).slice(0, 4)
-              );
-              // Top block can show End only for same-year seasons (short tournaments).
-              const shouldShowEndHeader =
-                roundEntries.length > 0 &&
-                isSeasonClosedByGap(seasonLastDate, hasNewerSeason) &&
-                !suppressSeasonHeader &&
-                (sIdx > 0 || isSameYearSeason);
+              const shouldShowStartHeader = Boolean(starting) && roundEntries.length > 0 && !suppressSeasonHeader && Boolean(startSeasonLabel);
+              const shouldShowEndHeader = Boolean(ending) && roundEntries.length > 0 && !suppressSeasonHeader && Boolean(endSeasonLabel);
               return (
                 <React.Fragment key={`${year}-s${sIdx}`}>
                 <Box sx={{ mb: sIdx < yearSeasons.length - 1 ? 0 : 0 }}>
