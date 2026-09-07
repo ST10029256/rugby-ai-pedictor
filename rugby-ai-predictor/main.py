@@ -4466,6 +4466,69 @@ def generate_license_key_with_email(req: https_fn.CallableRequest) -> Dict[str, 
         return {'error': f'Error processing subscription: {str(e)}'}
 
 
+@https_fn.on_call()
+def get_billing_plans(req: https_fn.CallableRequest) -> Dict[str, Any]:
+    """Public pricing for the subscription page (ZAR, sandbox/live mode flag)."""
+    try:
+        from billing.pipeline import list_public_plans
+        return list_public_plans()
+    except Exception as e:
+        logging.getLogger(__name__).exception("get_billing_plans failed")
+        return {'error': str(e)}
+
+
+@https_fn.on_call(secrets=["GMAIL_USER", "GMAIL_APP_PASSWORD"])
+def process_sandbox_checkout(req: https_fn.CallableRequest) -> Dict[str, Any]:
+    """
+    Full Option A test pipeline (no real money):
+    sandbox card/Apple Pay → ledger tax invoice + PDF → license key → email with PDF.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        from billing.pipeline import process_sandbox_checkout as run_checkout
+
+        data = req.data or {}
+        db = get_firestore_client()
+        return run_checkout(
+            db,
+            email=data.get('email', ''),
+            name=data.get('name', ''),
+            plan_id=data.get('plan_id') or data.get('subscription_type', ''),
+            payment_method=data.get('payment_method', 'card'),
+            card=data.get('card'),
+            customer_address=data.get('address'),
+            customer_vat_number=data.get('vat_number'),
+            gmail_credentials_fn=_gmail_smtp_credentials,
+        )
+    except Exception as e:
+        import traceback
+        logger.error(f"process_sandbox_checkout failed: {e}")
+        logger.error(traceback.format_exc())
+        return {'error': f'Checkout failed: {str(e)}'}
+
+
+@https_fn.on_call()
+def get_tax_invoice(req: https_fn.CallableRequest) -> Dict[str, Any]:
+    """Fetch a stored tax invoice + PDF (sandbox/live ledger)."""
+    try:
+        from billing.pipeline import get_invoice_record
+
+        data = req.data or {}
+        invoice_id = (data.get('invoice_id') or '').strip()
+        if not invoice_id:
+            return {'error': 'invoice_id is required'}
+        db = get_firestore_client()
+        return get_invoice_record(
+            db,
+            invoice_id,
+            include_pdf=bool(data.get('include_pdf', True)),
+        )
+    except Exception as e:
+        logging.getLogger(__name__).exception("get_tax_invoice failed")
+        return {'error': str(e)}
+
+
 def send_license_key_email(email: str, name: str, license_key: str, subscription_type: str, duration_days: int, expires_at: datetime) -> bool:
     """
     Send license key email to user.
@@ -5782,6 +5845,7 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
             CROSS_YEAR_LOCAL_IDS,
             NO_STANDINGS_LOCAL_IDS,
             STANDINGS_CACHE_VERSION,
+            apply_nations_championship_hemisphere_groups,
             candidate_season_years,
             compute_standings_from_db,
             count_standings_logos,
@@ -5904,6 +5968,9 @@ def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
                     logger.warning("Highlightly standings failed season=%s: %s", year, hl_err)
 
         logger.info("=== FINAL RESULT season=%s source=%s ===", successful_season, standings_source)
+
+        if local_league_id == 5480 and standings:
+            standings = apply_nations_championship_hemisphere_groups(standings)
         
         if standings and successful_season:
             if isinstance(standings, dict):

@@ -36,7 +36,7 @@ const LUX = {
   muted: 'rgba(255,255,255,0.55)',
 };
 
-const NO_STANDINGS_LEAGUES = new Set([5479, 5480]);
+const NO_STANDINGS_LEAGUES = new Set([5479]);
 
 const normKey = canonicalTeamKey;
 

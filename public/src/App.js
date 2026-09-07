@@ -27,7 +27,7 @@ import { getDeviceId } from './utils/deviceId';
 import { ensureProfileFromAuth } from './utils/userProfile';
 import { predictionsWidgetSx } from './utils/predictionsLayout';
 import { applyLeagueDisplayNames, modelTeamNameForPrediction } from './utils/teamDisplayNames';
-import { hasUsableOdds, oddsAdjustedView } from './utils/oddsAdjustment';
+import { hasUsableOdds, impliedHomeProbability, oddsAdjustedView } from './utils/oddsAdjustment';
 
 const darkTheme = createTheme({
   palette: {
@@ -623,9 +623,11 @@ function App() {
   const [leagues, setLeagues] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState(null);
   const [upcomingMatches, setUpcomingMatches] = useState([]);
+  const [generatedPredictions, setGeneratedPredictions] = useState([]);
   const [manualOdds, setManualOdds] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeView, setActiveView] = useState('predictions'); // 'predictions', 'news', 'standings', 'history', or 'profile'
   const [profileRevision, setProfileRevision] = useState(0);
@@ -664,30 +666,30 @@ function App() {
     });
   }, [upcomingWindowMatches]);
 
-  const predictions = useMemo(() => {
-    if (!selectedLeague || upcomingWindowMatches.length === 0) return [];
-    const seenEventIds = new Set();
-    const seenMatchups = new Set();
-    const cards = [];
-    for (const match of upcomingWindowMatches) {
-      const matchDate = extractMatchDateIso(match) || getLocalYYYYMMDD();
-      const eventIdKey = String(match.event_id || match.id || '').trim();
-      if (eventIdKey) {
-        if (seenEventIds.has(eventIdKey)) continue;
-        seenEventIds.add(eventIdKey);
-      }
-      const homeKey = match.home_team_id || normalizeTeamNameForDedupe(match.home_team);
-      const awayKey = match.away_team_id || normalizeTeamNameForDedupe(match.away_team);
-      const matchupKey = `${homeKey}::${awayKey}::${matchDate}`;
-      if (seenMatchups.has(matchupKey)) continue;
-      seenMatchups.add(matchupKey);
-      const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
-      const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
-      const odds = manualOdds[idKey] || manualOdds[nameKey];
-      cards.push(cardFromFrozenMatch(match, selectedLeague, odds));
-    }
-    return cards;
+  const postGameCards = useMemo(() => {
+    if (!selectedLeague) return [];
+    const todayIso = getLocalYYYYMMDD();
+    const yesterdayIso = addDaysIso(todayIso, -1);
+    return upcomingWindowMatches
+      .filter((match) => extractMatchDateIso(match) === yesterdayIso)
+      .map((match) => {
+        const matchDate = extractMatchDateIso(match) || yesterdayIso;
+        const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
+        const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
+        return cardFromFrozenMatch(match, selectedLeague, manualOdds[idKey] || manualOdds[nameKey]);
+      })
+      .filter((card) => card.predicted_home_score != null || card.home_score != null);
   }, [selectedLeague, upcomingWindowMatches, manualOdds]);
+
+  const predictions = useMemo(() => {
+    const generatedKeys = new Set(
+      generatedPredictions.map((p) => `${p.home_team}::${p.away_team}::${p.date}`)
+    );
+    const extras = postGameCards.filter(
+      (card) => !generatedKeys.has(`${card.home_team}::${card.away_team}::${card.date}`)
+    );
+    return [...extras, ...generatedPredictions];
+  }, [postGameCards, generatedPredictions]);
 
   // Check authentication on mount — skip silent auto-login when biometric is enabled.
   useEffect(() => {
@@ -804,6 +806,7 @@ function App() {
     setLeagues([]);
     setSelectedLeague(null);
     setUpcomingMatches([]);
+    setGeneratedPredictions([]);
     setMobileOpen(false);
     setActiveView('predictions');
 
@@ -1089,6 +1092,7 @@ function App() {
 
     // Clear old matches immediately to prevent showing wrong games
     setUpcomingMatches([]);
+    setGeneratedPredictions([]);
     setLoadingMatches(true);
 
     const fetchUpcoming = async () => {
@@ -1218,6 +1222,281 @@ function App() {
     };
   }, [selectedLeague, upcomingWindowMatches]);
 
+
+  const handleGeneratePredictions = async () => {
+    if (!selectedLeague || oddsInputMatches.length === 0) {
+      return;
+    }
+
+    setGenerating(true);
+    const newPredictions = [];
+    const seenMatchups = new Set();
+    const seenEventIds = new Set();
+    const { predictMatch, predictMatchesBatch } = await import('./firebase');
+
+    const tasks = [];
+    for (const match of oddsInputMatches) {
+      const matchDate = extractMatchDateIso(match) || getLocalYYYYMMDD();
+      const eventIdKey = String(match.event_id || match.id || '').trim();
+      if (eventIdKey) {
+        if (seenEventIds.has(eventIdKey)) continue;
+        seenEventIds.add(eventIdKey);
+      }
+      const homeKey = match.home_team_id || normalizeTeamNameForDedupe(match.home_team);
+      const awayKey = match.away_team_id || normalizeTeamNameForDedupe(match.away_team);
+      const matchupKey = `${homeKey}::${awayKey}::${matchDate}`;
+      if (seenMatchups.has(matchupKey)) continue;
+      seenMatchups.add(matchupKey);
+      const idKey = `manual_odds_by_ids::${match.home_team_id || ''}::${match.away_team_id || ''}::${matchDate}`;
+      const nameKey = `${match.home_team}::${match.away_team}::${matchDate}`;
+      tasks.push({ match, matchDate, odds: manualOdds[idKey] || manualOdds[nameKey] });
+    }
+
+    const batchByEventId = new Map();
+    const batchByNameKey = new Map();
+    try {
+      const batchResult = await predictMatchesBatch({
+        league_id: selectedLeague,
+        matches: tasks.map(({ match, matchDate }) => ({
+          event_id: match.id || match.event_id || null,
+          home_team: predictionTeamName(match, 'home'),
+          away_team: predictionTeamName(match, 'away'),
+          match_date: matchDate,
+        })),
+      });
+      for (const p of batchResult?.data?.predictions || []) {
+        if (p && !p.error) {
+          if (p.event_id !== null && p.event_id !== undefined) {
+            batchByEventId.set(String(p.event_id), p);
+          }
+          batchByNameKey.set(`${p.home_team}::${p.away_team}::${p.match_date}`, p);
+        }
+      }
+    } catch (batchErr) {
+      console.warn('Batch prediction unavailable, using per-match fallback:', batchErr?.message);
+    }
+
+    const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 1000) => {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          return await fn();
+        } catch (error) {
+          const isLastAttempt = attempt === maxRetries - 1;
+          const isCorsError = error.message?.includes('CORS') || error.code === 'functions/internal';
+          const is503Error = error.message?.includes('503') || error.code === 'functions/unavailable';
+          if (isLastAttempt || !(isCorsError || is503Error)) throw error;
+          await new Promise((resolve) => setTimeout(resolve, initialDelay * Math.pow(2, attempt)));
+        }
+      }
+    };
+
+    let taskIndex = 0;
+    const concurrency = Math.min(2, tasks.length || 1);
+    const runTask = async () => {
+      while (taskIndex < tasks.length) {
+        const currentIndex = taskIndex++;
+        const { match, matchDate, odds } = tasks[currentIndex];
+        const kickoffAt = getKickoffAtFromMatch(match, selectedLeague);
+        try {
+          const result = await retryWithBackoff(async () => {
+            const eid = String(match.id || match.event_id || '');
+            const nameKey = `${predictionTeamName(match, 'home')}::${predictionTeamName(match, 'away')}::${matchDate}`;
+            const fromBatch = (eid && batchByEventId.get(eid)) || batchByNameKey.get(nameKey);
+            if (fromBatch) return { data: fromBatch };
+            return await predictMatch({
+              home_team: predictionTeamName(match, 'home'),
+              away_team: predictionTeamName(match, 'away'),
+              league_id: selectedLeague,
+              match_date: matchDate,
+              event_id: match.id || match.event_id || null,
+              enhanced: false,
+            });
+          });
+
+          if (!result?.data || result.data.error) {
+            if (result?.data?.error) console.error('Prediction error:', result.data.error);
+            continue;
+          }
+          const pred = result.data;
+          if (pred.prediction_unavailable) {
+            newPredictions.push(withMatchActuals({
+              home_team: match.home_team,
+              away_team: match.away_team,
+              date: matchDate,
+              kickoff_at: kickoffAt,
+              league_id: selectedLeague,
+              home_team_id: match.home_team_id,
+              away_team_id: match.away_team_id,
+              prediction_unavailable: true,
+              unavailable_reason: pred.unavailable_reason || 'No pre-kickoff forecast was recorded',
+              winner: null,
+              predicted_winner: null,
+              confidence: null,
+              home_score: null,
+              away_score: null,
+              show_scores: false,
+              model_available: false,
+              manual_odds: odds,
+            }, match));
+            continue;
+          }
+
+          const modelAvailable = pred.model_available !== false && pred.show_scores !== false;
+          const bookmakerHomeWinProb = pred.bookmaker_home_win_prob ?? null;
+          const bookmakerCount = pred.bookmaker_count ?? 0;
+
+          if (!modelAvailable) {
+            const userImplied = hasUsableOdds(odds) ? impliedHomeProbability(odds.home, odds.away) : null;
+            const homeWinProb = userImplied ?? pred.home_win_prob ?? bookmakerHomeWinProb ?? 0.5;
+            const apiWinner = pred.predicted_winner || pred.winner;
+            let winner;
+            let finalConfidence;
+            if (apiWinner === 'Draw' || apiWinner === 'draw') {
+              winner = 'Draw';
+              finalConfidence = 0.5;
+            } else if (apiWinner === 'Home' || apiWinnerMatchesSide(apiWinner, match, 'home')) {
+              winner = match.home_team;
+              finalConfidence = homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb;
+            } else if (apiWinner === 'Away' || apiWinnerMatchesSide(apiWinner, match, 'away')) {
+              winner = match.away_team;
+              finalConfidence = homeWinProb < 0.5 ? 1 - homeWinProb : homeWinProb;
+            } else if (homeWinProb > 0.5) {
+              winner = match.home_team;
+              finalConfidence = homeWinProb;
+            } else if (homeWinProb < 0.5) {
+              winner = match.away_team;
+              finalConfidence = 1 - homeWinProb;
+            } else {
+              winner = 'Draw';
+              finalConfidence = 0.5;
+            }
+            newPredictions.push(withMatchActuals({
+              home_team: match.home_team,
+              away_team: match.away_team,
+              date: matchDate,
+              kickoff_at: kickoffAt,
+              winner,
+              predicted_winner: winner,
+              confidence: `${(finalConfidence * 100).toFixed(1)}%`,
+              home_score: null,
+              away_score: null,
+              show_scores: false,
+              model_available: false,
+              home_win_prob: homeWinProb,
+              league_id: selectedLeague,
+              intensity: 'Odds-based pick (no AI score yet)',
+              confidence_level: finalConfidence >= 0.8 ? 'High Confidence' : finalConfidence >= 0.65 ? 'Moderate Confidence' : 'Close Match Expected',
+              score_diff: null,
+              prediction_type: userImplied !== null ? 'Your Odds Only' : (pred.prediction_type || 'Bookmaker Odds Only'),
+              ai_probability: null,
+              hybrid_probability: homeWinProb,
+              bookmaker_probability: bookmakerHomeWinProb ?? homeWinProb,
+              bookmaker_count: bookmakerCount,
+              confidence_boost: 0,
+              home_team_id: match.home_team_id,
+              away_team_id: match.away_team_id,
+              live_odds_available: bookmakerCount > 0 || hasUsableOdds(odds),
+              manual_odds: odds,
+            }, match));
+            continue;
+          }
+
+          const aiHomeWinProb = pred.ai_home_win_prob ?? pred.home_win_prob ?? 0.5;
+          const homeWinProb = pred.hybrid_home_win_prob ?? pred.home_win_prob ?? aiHomeWinProb;
+          const predictedHomeScore = parseFloat(pred.predicted_home_score ?? 0);
+          const predictedAwayScore = parseFloat(pred.predicted_away_score ?? 0);
+          const displayHomeScore = Math.round(predictedHomeScore);
+          const displayAwayScore = Math.round(predictedAwayScore);
+          const yourOddsView = oddsAdjustedView(aiHomeWinProb, odds, match.home_team, match.away_team);
+          const apiWinner = pred.predicted_winner || pred.winner;
+          let winner;
+          let finalConfidence;
+          if (apiWinner === 'Draw' || apiWinner === 'draw') {
+            winner = 'Draw';
+            finalConfidence = 0.5;
+          } else if (apiWinner === 'Home' || apiWinnerMatchesSide(apiWinner, match, 'home')) {
+            winner = match.home_team;
+            finalConfidence = homeWinProb > 0.5 ? homeWinProb : 1 - homeWinProb;
+          } else if (apiWinner === 'Away' || apiWinnerMatchesSide(apiWinner, match, 'away')) {
+            winner = match.away_team;
+            finalConfidence = homeWinProb < 0.5 ? 1 - homeWinProb : homeWinProb;
+          } else if (displayHomeScore === displayAwayScore) {
+            winner = 'Draw';
+            finalConfidence = 0.5;
+          } else if (homeWinProb > 0.5) {
+            winner = match.home_team;
+            finalConfidence = homeWinProb;
+          } else if (homeWinProb < 0.5) {
+            winner = match.away_team;
+            finalConfidence = 1 - homeWinProb;
+          } else {
+            winner = 'Draw';
+            finalConfidence = 0.5;
+          }
+          const scoreDiff = Math.abs(displayHomeScore - displayAwayScore);
+          let intensity = 'Tight Margin (3-5 pts)';
+          if (scoreDiff <= 2) intensity = 'Narrow Margin (0-2 pts)';
+          else if (scoreDiff <= 5) intensity = 'Tight Margin (3-5 pts)';
+          else if (scoreDiff <= 10) intensity = 'Solid Margin (6-10 pts)';
+          else intensity = 'Wide Margin (11+ pts)';
+
+          newPredictions.push(withMatchActuals({
+            home_team: match.home_team,
+            away_team: match.away_team,
+            date: matchDate,
+            kickoff_at: kickoffAt,
+            winner,
+            predicted_winner: winner,
+            confidence: `${(finalConfidence * 100).toFixed(1)}%`,
+            home_score: displayHomeScore.toString(),
+            away_score: displayAwayScore.toString(),
+            predicted_home_score: displayHomeScore,
+            predicted_away_score: displayAwayScore,
+            home_win_prob: homeWinProb,
+            league_id: selectedLeague,
+            intensity,
+            confidence_level: finalConfidence >= 0.8 ? 'High Confidence' : finalConfidence >= 0.65 ? 'Moderate Confidence' : 'Close Match Expected',
+            score_diff: displayHomeScore - displayAwayScore,
+            prediction_type: pred.prediction_type || (bookmakerCount > 0 ? 'Hybrid AI + Live Odds' : 'AI Only (No Odds)'),
+            ai_probability: aiHomeWinProb,
+            hybrid_probability: homeWinProb,
+            bookmaker_probability: bookmakerHomeWinProb,
+            bookmaker_count: bookmakerCount,
+            confidence_boost: finalConfidence - Math.max(aiHomeWinProb, 1 - aiHomeWinProb),
+            home_team_id: match.home_team_id,
+            away_team_id: match.away_team_id,
+            live_odds_available: bookmakerCount > 0 || hasUsableOdds(odds),
+            manual_odds: odds,
+            show_scores: true,
+            model_available: true,
+            your_odds_home_win_prob: yourOddsView ? yourOddsView.home_win_prob : null,
+            your_odds_winner: yourOddsView ? yourOddsView.winner : null,
+            your_odds_confidence: yourOddsView ? yourOddsView.confidence : null,
+            your_odds_implied_home_win_prob: yourOddsView ? yourOddsView.odds_implied_home_win_prob : null,
+          }, match));
+        } catch (err) {
+          console.error('Exception predicting match:', err);
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => runTask()));
+    const dedupedPredictions = dedupeUpcomingMatches(
+      newPredictions.map((p) => ({
+        ...p,
+        date_event: p.date,
+        home_team: p.home_team,
+        away_team: p.away_team,
+        kickoff_at: p.kickoff_at,
+      })),
+      selectedLeague
+    ).map((p) => ({
+      ...p,
+      date: p.date_event || p.date,
+    }));
+    setGeneratedPredictions(dedupedPredictions);
+    setGenerating(false);
+  };
 
   const handleManualOddsChange = useCallback((matchKey, odds) => {
     setManualOdds(prev => ({
@@ -2317,6 +2596,30 @@ function App() {
                   </Typography>
                 </Box>
               ) : null}
+
+                <Box sx={{ ...predictionsWidgetSx, my: 4, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>
+                  {generating && (
+                    <Box sx={{
+                      width: '100%',
+                      minHeight: 220,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      py: 4,
+                      mb: 2,
+                    }}>
+                      <RugbyBallLoader size={100} color="#10b981" compact label="Generating predictions..." />
+                    </Box>
+                  )}
+                  <button
+                    className="generate-button"
+                    onClick={handleGeneratePredictions}
+                    disabled={generating || oddsInputMatches.length === 0}
+                  >
+                    🎯 Generate Expert Predictions
+                  </button>
+                </Box>
 
                 {predictions.length > 0 && (
                   <PredictionsDisplay

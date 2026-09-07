@@ -26,6 +26,8 @@ import { getHistoricalPredictions, getHistoricalBacktest } from '../firebase';
 import { TabLoadingScreen } from '../utils/viewLoader';
 import { hasMeaningfulTime, formatSASTDateYMD, formatSASTTimePM } from '../utils/date';
 import leagueSeasonWindows from '../data/leagueSeasonWindows.json';
+import { assignHistoryPlayoffStages, PLAYOFF_STAGE_ORDER, playoffStageSortVal, regularRoundLabel, getCompetitionFinalsFormat, seasonYearFromMatches, buildRankingRoundEntries } from '../utils/historyPlayoffRounds';
+import { resolveSeasonLabel, crossYearSeasonStartMonth } from '../utils/season';
 
 const HistoricalPredictions = ({ leagueId, leagueName }) => {
   const [loading, setLoading] = useState(true);
@@ -93,13 +95,6 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
       })
       .filter((s) => s.startDate && s.endDate)
       .sort((a, b) => a.startDate.localeCompare(b.startDate));
-  }, [leagueId]);
-  const seasonGapDays = useMemo(() => {
-    const overrides = leagueSeasonWindows?.league_gap_overrides || {};
-    const rawOverride = overrides[String(leagueId)] ?? overrides[Number(leagueId)];
-    const parsed = Number(rawOverride);
-    if (Number.isFinite(parsed) && parsed >= 1) return parsed;
-    return 90;
   }, [leagueId]);
   const shouldHidePremiershipSuppressedWindowMatch = (match) => {
     if (!isEnglishPremiership) return false;
@@ -751,7 +746,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
         </Box>
       </Paper>
 
-      {/* Matches grouped by season (Sept–Jun); 90-day gap = new season; clear dividers */}
+      {/* Matches grouped by season (calendar-year vs URC/Prem/Top 14 cross-year) */}
       {(() => {
         const _allMatchesGlobal = filterSuppressedMatches(
           Object.values(data.matches_by_year_week || {}).flatMap((yd) => Object.values(yd).flat())
@@ -761,7 +756,6 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
         const prevYrData = prevYr ? (data.matches_by_year_week || {})[prevYr] : null;
         const prevYrMatches = prevYrData ? filterSuppressedMatches(Object.values(prevYrData).flat()) : [];
 
-        const SEASON_GAP_DAYS = seasonGapDays;
         const daysBetweenIsoDates = (aIso, bIso) => {
           if (!aIso || !bIso) return 0;
           const [ay, am, ad] = String(aIso).slice(0, 10).split('-').map((v) => parseInt(v, 10));
@@ -775,21 +769,17 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
         const splitIntoSeasons = (matchList) => {
           const sorted = [...matchList].filter((m) => m.date).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
           if (sorted.length === 0) return [];
-          const seasons = [];
-          let current = [sorted[0]];
-          for (let i = 1; i < sorted.length; i++) {
-            const prev = sorted[i - 1].date?.slice(0, 10) || '';
-            const curr = sorted[i].date?.slice(0, 10) || '';
-            const daysDiff = daysBetweenIsoDates(prev, curr);
-            if (daysDiff >= SEASON_GAP_DAYS) {
-              seasons.push(current);
-              current = [sorted[i]];
-            } else {
-              current.push(sorted[i]);
+          const bySeason = new Map();
+          const order = [];
+          sorted.forEach((m) => {
+            const key = resolveSeasonLabel(leagueId, m.date);
+            if (!bySeason.has(key)) {
+              bySeason.set(key, []);
+              order.push(key);
             }
-          }
-          seasons.push(current);
-          return seasons;
+            bySeason.get(key).push(m);
+          });
+          return order.map((key) => bySeason.get(key));
         };
 
         const buildRoundEntriesForSeason = (matchList) => {
@@ -797,33 +787,13 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           if (!sorted.length) return [];
           const matchIdentity = (m) => m.match_id ?? `${(m.date || '').slice(0, 10)}-${m.home_team || ''}-${m.away_team || ''}`;
           const seasonAnchorIso = String(sorted[0].date || '').slice(0, 10) || '';
-          const knockoutById = {};
-          const knockoutIds = new Set();
-          if (isRugbyWorldCup && sorted.length >= 8) {
-            const last8 = sorted.slice(-8); // QF x4, SF x2, 3rd place x1, Final x1
-            if (last8.length === 8) {
-              const assignStage = (m, stage) => {
-                const id = matchIdentity(m);
-                knockoutById[id] = stage;
-                knockoutIds.add(id);
-              };
-              assignStage(last8[7], 'Final');
-              assignStage(last8[6], 'Third-place');
-              assignStage(last8[5], 'Semi-finals');
-              assignStage(last8[4], 'Semi-finals');
-              assignStage(last8[3], 'Quarter-finals');
-              assignStage(last8[2], 'Quarter-finals');
-              assignStage(last8[1], 'Quarter-finals');
-              assignStage(last8[0], 'Quarter-finals');
-            }
-          }
-
-          const poolMatches = sorted.filter((m) => !knockoutIds.has(matchIdentity(m)));
-          if (!poolMatches.length && knockoutIds.size > 0) {
-            const stageOrder = ['Final', 'Third-place', 'Semi-finals', 'Quarter-finals'];
-            return stageOrder
-              .map((stage, idx) => {
-                const matches = sorted.filter((m) => knockoutById[matchIdentity(m)] === stage);
+          const knockoutById = assignHistoryPlayoffStages(sorted, leagueId, matchIdentity);
+          const knockoutIds = new Set(Object.keys(knockoutById));
+          const stageOf = (m) => knockoutById[String(matchIdentity(m))];
+          const stageEntriesFor = (stageOrder) =>
+            stageOrder
+              .map((stage) => {
+                const matches = sorted.filter((m) => stageOf(m) === stage);
                 if (!matches.length) return null;
                 const earliestDate = matches.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
                 return {
@@ -831,63 +801,53 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
                   label: stage,
                   matches,
                   earliestDate,
-                  sortVal: 1000 - idx,
+                  sortVal: playoffStageSortVal(stage),
                 };
               })
               .filter(Boolean);
+
+          const poolMatches = sorted.filter((m) => !knockoutIds.has(String(matchIdentity(m))));
+          if (!poolMatches.length && knockoutIds.size > 0) {
+            return stageEntriesFor(PLAYOFF_STAGE_ORDER);
           }
 
-          const poolAnchorIso = String(poolMatches[0]?.date || seasonAnchorIso).slice(0, 10) || seasonAnchorIso;
-          const byRawWeekNum = {};
-          poolMatches.forEach((m) => {
-            const dateIso = String(m.date || '').slice(0, 10);
-            const daysFromStart = Math.max(0, daysBetweenIsoDates(poolAnchorIso, dateIso));
-            // Week numbering is anchored to actual season start:
-            // days 0-6 => Week 1, days 7-13 => Week 2, etc.
-            const rawWeekNum = Math.floor(daysFromStart / 7) + 1;
-            const key = String(rawWeekNum);
-            if (!byRawWeekNum[key]) byRawWeekNum[key] = [];
-            byRawWeekNum[key].push(m);
-          });
-
-          // Prevent skipped numbering (Week 1, Week 3) by reindexing only observed fixture weeks.
-          const orderedRawWeeks = Object.keys(byRawWeekNum)
-            .map((k) => parseInt(k, 10))
-            .filter((n) => Number.isFinite(n))
-            .sort((a, b) => a - b);
-
-          const baseEntries = orderedRawWeeks
-            .map((rawWeekNum, idx) => {
-              const matches = byRawWeekNum[String(rawWeekNum)] || [];
-              const displayWeekNum = idx + 1;
-              const earliestDate = matches.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
-              return {
-                key: `week-${seasonAnchorIso}-${displayWeekNum}`,
-                label: `Week ${displayWeekNum}`,
-                matches,
-                earliestDate,
-                sortVal: displayWeekNum,
-              };
-            })
-            .sort((a, b) => b.sortVal - a.sortVal || (b.earliestDate || '').localeCompare(a.earliestDate || ''));
+          const seasonYear = seasonYearFromMatches(sorted, leagueId);
+          const finalsFormat = getCompetitionFinalsFormat(leagueId, seasonYear);
+          const baseEntries = finalsFormat.poolLabel === 'Round'
+            ? buildRankingRoundEntries(poolMatches, leagueId, seasonAnchorIso)
+            : (() => {
+              const poolAnchorIso = String(poolMatches[0]?.date || seasonAnchorIso).slice(0, 10) || seasonAnchorIso;
+              const byRawWeekNum = {};
+              poolMatches.forEach((m) => {
+                const dateIso = String(m.date || '').slice(0, 10);
+                const daysFromStart = Math.max(0, daysBetweenIsoDates(poolAnchorIso, dateIso));
+                const rawWeekNum = Math.floor(daysFromStart / 7) + 1;
+                const key = String(rawWeekNum);
+                if (!byRawWeekNum[key]) byRawWeekNum[key] = [];
+                byRawWeekNum[key].push(m);
+              });
+              const orderedRawWeeks = Object.keys(byRawWeekNum)
+                .map((k) => parseInt(k, 10))
+                .filter((n) => Number.isFinite(n))
+                .sort((a, b) => a - b);
+              return orderedRawWeeks
+                .map((rawWeekNum, idx) => {
+                  const matches = byRawWeekNum[String(rawWeekNum)] || [];
+                  const displayWeekNum = idx + 1;
+                  const earliestDate = matches.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
+                  return {
+                    key: `week-${seasonAnchorIso}-${displayWeekNum}`,
+                    label: regularRoundLabel(leagueId, displayWeekNum),
+                    matches,
+                    earliestDate,
+                    sortVal: displayWeekNum,
+                  };
+                })
+                .sort((a, b) => b.sortVal - a.sortVal || (b.earliestDate || '').localeCompare(a.earliestDate || ''));
+            })();
 
           if (knockoutIds.size > 0) {
-            const stageOrder = ['Final', 'Third-place', 'Semi-finals', 'Quarter-finals'];
-            const stageEntries = stageOrder
-              .map((stage, idx) => {
-                const matches = sorted.filter((m) => knockoutById[matchIdentity(m)] === stage);
-                if (!matches.length) return null;
-                const earliestDate = matches.reduce((min, m) => (!min || m.date < min ? m.date : min), null);
-                return {
-                  key: `stage-${seasonAnchorIso}-${stage.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-                  label: stage,
-                  matches,
-                  earliestDate,
-                  sortVal: 1000 - idx,
-                };
-              })
-              .filter(Boolean);
-            return [...stageEntries, ...baseEntries];
+            return [...stageEntriesFor(PLAYOFF_STAGE_ORDER), ...baseEntries];
           }
 
           return baseEntries;
@@ -1016,11 +976,22 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           return isShort2018Window || isShort2020Window;
         };
         const DATE_SLACK_DAYS = 3;
+        // Season splitting still uses the long gap (often 90 days). End-of-season
+        // headers must not wait that long: Super Rugby finishes in June, and by
+        // September the latest season is still "open" under a 90-day rule.
+        const END_HEADER_GRACE_DAYS = 21;
         const matchIso = (m) => String(m?.date || '').slice(0, 10);
         const todayIso = new Date().toISOString().slice(0, 10);
         const blockHasIso = (matches, targetIso) => {
           if (!targetIso || !Array.isArray(matches) || matches.length === 0) return false;
           return matches.some((m) => Math.abs(daysBetweenIsoDates(matchIso(m), targetIso)) <= DATE_SLACK_DAYS);
+        };
+        const seasonClosedForHeader = (actualEnd, isLatest, yearTruncated = false) => {
+          if (yearTruncated || !actualEnd) return false;
+          const endIso = String(actualEnd).slice(0, 10);
+          if (endIso >= todayIso) return false;
+          if (!isLatest) return true;
+          return daysBetweenIsoDates(endIso, todayIso) >= END_HEADER_GRACE_DAYS;
         };
         const resolvedSeasons = (() => {
           if (detectedSeasonRanges.length === 0) {
@@ -1028,11 +999,15 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
               const actualStart = matchIso(cluster[0]);
               const actualEnd = matchIso(cluster[cluster.length - 1]);
               const isLatest = idx === arr.length - 1;
+              const startMonth = crossYearSeasonStartMonth(leagueId);
+              const startMo = parseInt(String(actualStart).slice(5, 7), 10);
               const yearTruncated = Boolean(selYr)
                 && isLatest
                 && actualEnd.startsWith(selYr)
-                && actualStart.slice(5, 7) >= '08';
-              const closed = (!isLatest || daysBetweenIsoDates(actualEnd, todayIso) >= SEASON_GAP_DAYS) && !yearTruncated;
+                && Boolean(startMonth)
+                && Number.isFinite(startMo)
+                && startMo >= startMonth;
+              const closed = seasonClosedForHeader(actualEnd, isLatest, yearTruncated);
               return { actualStart, actualEnd, closed };
             });
           }
@@ -1043,31 +1018,30 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
           }));
           if (resolved.length && allForSplit.length) {
             const last = resolved[resolved.length - 1];
-            let prev = last.actualEnd;
+            const lastSeasonKey = resolveSeasonLabel(leagueId, last.actualStart);
             for (const m of allForSplit) {
               const d = matchIso(m);
               if (!d || d <= last.actualEnd) continue;
-              if (daysBetweenIsoDates(prev, d) >= SEASON_GAP_DAYS) {
+              const sameSeason = resolveSeasonLabel(leagueId, d) === lastSeasonKey;
+              if (!sameSeason) {
                 last.isLatest = false;
                 let liveEnd = d;
-                let p = d;
+                const newSeasonKey = resolveSeasonLabel(leagueId, d);
                 for (const m2 of allForSplit) {
                   const d2 = matchIso(m2);
                   if (!d2 || d2 < d) continue;
-                  if (daysBetweenIsoDates(p, d2) >= SEASON_GAP_DAYS) break;
+                  if (resolveSeasonLabel(leagueId, d2) !== newSeasonKey) break;
                   liveEnd = d2;
-                  p = d2;
                 }
                 resolved.push({ actualStart: d, actualEnd: liveEnd, isLatest: true });
                 break;
               }
               last.actualEnd = d;
-              prev = d;
             }
           }
           return resolved.map((r, idx, arr) => {
             const isLatest = idx === arr.length - 1;
-            const closed = !isLatest || daysBetweenIsoDates(r.actualEnd, todayIso) >= SEASON_GAP_DAYS;
+            const closed = seasonClosedForHeader(r.actualEnd, isLatest);
             return { actualStart: r.actualStart, actualEnd: r.actualEnd, closed };
           });
         })();
@@ -1112,6 +1086,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
                 subMatches,
                 startSeasonLabel,
                 endSeasonLabel,
+                endingActualEnd: ending?.actualEnd || null,
                 includesSeasonStart: Boolean(starting),
                 includesSeasonEnd: Boolean(ending),
                 idx,
@@ -1128,6 +1103,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
             subMatches,
             startSeasonLabel,
             endSeasonLabel,
+            endingActualEnd,
             includesSeasonStart,
             includesSeasonEnd,
             idx,
@@ -1152,6 +1128,9 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
             );
             const shouldShowStartHeader = includesSeasonStart && roundEntriesFiltered.length > 0 && !suppressSeasonHeader && Boolean(startSeasonLabel);
             const shouldShowEndHeader = includesSeasonEnd && roundEntriesFiltered.length > 0 && !suppressSeasonHeader && Boolean(endSeasonLabel);
+            const endRoundIdx = shouldShowEndHeader
+              ? roundEntriesFiltered.findIndex((re) => blockHasIso(re.matches, endingActualEnd))
+              : -1;
 
             return (
               <React.Fragment key={`season-${idx}-${subIdx}-${displayFirstDate}`}>
@@ -1169,9 +1148,10 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
                   const dates = matches.map((m) => m.date).filter(Boolean).sort();
                   const fmt = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                   const dl = dates.length ? (dates[0] === dates[dates.length - 1] ? fmt(dates[0]) : `${fmt(dates[0])} – ${fmt(dates[dates.length - 1])}`) : '';
+                  const showEndHeaderThisRound = shouldShowEndHeader && roundIdx === (endRoundIdx >= 0 ? endRoundIdx : 0);
                   return (
                     <React.Fragment key={accordionKey}>
-                      {shouldShowEndHeader && roundIdx === 0 && (
+                      {showEndHeaderThisRound && (
                         <SeasonSectionHeader
                           label={endSeasonLabel}
                           variant="end"
@@ -1355,6 +1335,9 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
               const suppressSeasonHeader = shouldSuppressPremiershipShortSeasonHeader(seasonFirstDate, seasonLastDate);
               const shouldShowStartHeader = Boolean(starting) && roundEntries.length > 0 && !suppressSeasonHeader && Boolean(startSeasonLabel);
               const shouldShowEndHeader = Boolean(ending) && roundEntries.length > 0 && !suppressSeasonHeader && Boolean(endSeasonLabel);
+              const endRoundIdx = shouldShowEndHeader
+                ? roundEntries.findIndex((re) => blockHasIso(re.matches, ending.actualEnd))
+                : -1;
               return (
                 <React.Fragment key={`${year}-s${sIdx}`}>
                 <Box sx={{ mb: sIdx < yearSeasons.length - 1 ? 0 : 0 }}>
@@ -1363,7 +1346,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
               const orderedMatches = [...matches].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
               const isExpanded = expandedWeeks.has(groupKey);
-              const showEndHeaderThisRound = shouldShowEndHeader && roundIdx === 0;
+              const showEndHeaderThisRound = shouldShowEndHeader && roundIdx === (endRoundIdx >= 0 ? endRoundIdx : 0);
 
               return (
                 <React.Fragment key={groupKey}>

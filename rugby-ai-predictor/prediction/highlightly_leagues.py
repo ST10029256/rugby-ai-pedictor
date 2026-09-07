@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from .highlightly_client import HighlightlyRugbyAPI
+from .season_years import CROSS_YEAR_LEAGUE_IDS, resolve_season_start_year
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ HIGHLIGHTLY_LEAGUE_MAPPINGS: Dict[int, Tuple[str, int]] = {
     5480: ("Nations Championship", 124179),
 }
 
-YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}
+YEAR_SPAN_LEAGUE_IDS = CROSS_YEAR_LEAGUE_IDS
 WOMEN_INDICATORS = (" w rugby", " women", " womens", " w ", " women's", " w's")
 
 
@@ -102,6 +103,9 @@ def season_candidates(now: datetime, our_league_id: int, include_history: bool) 
         seasons = [year, year - 1, year - 2]
     elif our_league_id == 5480:
         seasons = [year, year + 1, year - 1]
+    elif our_league_id in CROSS_YEAR_LEAGUE_IDS:
+        primary = resolve_season_start_year(our_league_id, now)
+        seasons = [primary, primary - 1, primary + 1]
     else:
         seasons = [year, year - 1, year - 2]
 

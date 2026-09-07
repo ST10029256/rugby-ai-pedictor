@@ -26,6 +26,11 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from .season_years import resolve_season_start_year, CROSS_YEAR_LEAGUE_IDS
+
+# Alias used by main.py / callers for cross-year display labels (URC, Prem, Top 14).
+CROSS_YEAR_LOCAL_IDS = set(CROSS_YEAR_LEAGUE_IDS)
+
 # Canonical keys for duplicate provider team names in the same competition.
 # Values are the preferred display label once aliases are merged.
 STANDINGS_TEAM_CANONICAL: Dict[str, str] = {
@@ -70,7 +75,7 @@ def _dedupe_fixtures(matches: List[tuple]) -> List[tuple]:
     return deduped
 
 
-def _estimate_try_bonus_points(points_scored: int) -> int:
+def _estimate_try_bonus_points(points_scored: int, min_points: int = 24) -> int:
     """Heuristic try bonus when try counts are unavailable.
 
     Official rugby awards +1 for scoring 4+ tries. Without try counts we
@@ -81,14 +86,33 @@ def _estimate_try_bonus_points(points_scored: int) -> int:
         scored = int(points_scored)
     except (TypeError, ValueError):
         return 0
-    return 1 if scored >= 24 else 0
+    return 1 if scored >= int(min_points) else 0
 
 # Competitions that are knockout tournaments or have multiple pools / no league
 # table - a single computed table would be meaningless, so we skip them.
 SKIP_COMPUTE_LEAGUE_IDS = {
     4574,  # Rugby World Cup (pools + knockout)
     5479,  # International Friendlies (no table)
-    5480,  # Nations Championship (no standings)
+}
+
+NATIONS_CHAMPIONSHIP_ID = 5480
+
+# Finals Weekend seeding is within each hemisphere, not a combined 1–12 table.
+NC_NORTH_KEYS = {
+    "france",
+    "scotland",
+    "england",
+    "ireland",
+    "wales",
+    "italy",
+}
+NC_SOUTH_KEYS = {
+    "south africa",
+    "new zealand",
+    "australia",
+    "argentina",
+    "japan",
+    "fiji",
 }
 
 
@@ -157,6 +181,100 @@ def _resolve_season(conn: sqlite3.Connection, league_id: int, season: Any) -> Op
             if _season_start_year(a) == target_year:
                 return a
     return _pick_latest_season(conn, league_id)
+
+
+def _exclude_nations_championship_finals(matches: List[tuple]) -> List[tuple]:
+    """Ranking tables ignore Finals Weekend (late November pairing matches)."""
+    kept: List[tuple] = []
+    for row in matches:
+        iso = str(row[0] or "")[:10]
+        if len(iso) >= 10 and iso[5:7] == "11" and int(iso[8:10]) >= 25:
+            continue
+        kept.append(row)
+    return kept
+
+
+def _nations_championship_hemisphere(team_name: Any) -> Optional[str]:
+    key = _normalize_team_key(team_name)
+    if key in NC_NORTH_KEYS:
+        return "north"
+    if key in NC_SOUTH_KEYS:
+        return "south"
+    return None
+
+
+def apply_nations_championship_hemisphere_groups(standings: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Split a 12-team NC table into Northern / Southern Hemisphere groups."""
+    if not isinstance(standings, dict):
+        return standings
+    groups = standings.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return standings
+
+    existing_names = [
+        str(g.get("name") or g.get("group_name") or "").lower()
+        for g in groups
+        if isinstance(g, dict)
+    ]
+    if any("north" in n for n in existing_names) and any("south" in n for n in existing_names):
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            name = str(group.get("name") or "").lower()
+            if "north" in name:
+                group["name"] = "Northern Hemisphere"
+            elif "south" in name:
+                group["name"] = "Southern Hemisphere"
+            rows = group.get("standings") or group.get("teams") or []
+            for idx, row in enumerate(rows):
+                if isinstance(row, dict):
+                    row["position"] = idx + 1
+        return standings
+
+    rows: List[Dict[str, Any]] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        rows.extend(group.get("standings") or group.get("teams") or [])
+    if len(rows) < 8:
+        return standings
+
+    north: List[Dict[str, Any]] = []
+    south: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        team_obj = row.get("team") if isinstance(row.get("team"), dict) else {}
+        name = team_obj.get("name") or row.get("name") or ""
+        side = _nations_championship_hemisphere(name)
+        if side == "north":
+            north.append(row)
+        elif side == "south":
+            south.append(row)
+
+    if len(north) < 4 or len(south) < 4:
+        return standings
+
+    def _rank(side_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        ordered = sorted(
+            side_rows,
+            key=lambda r: (
+                -int(r.get("points") or 0),
+                -int(r.get("pointsDifference") or r.get("pointsDiff") or 0),
+                -int(r.get("scoredPoints") or r.get("pointsFor") or 0),
+                -int(r.get("wins") or 0),
+                str((r.get("team") or {}).get("name") or r.get("name") or ""),
+            ),
+        )
+        for idx, row in enumerate(ordered):
+            row["position"] = idx + 1
+        return ordered
+
+    standings["groups"] = [
+        {"name": "Northern Hemisphere", "standings": _rank(north)},
+        {"name": "Southern Hemisphere", "standings": _rank(south)},
+    ]
+    return standings
 
 
 def _exclude_trailing_playoffs(matches: List[tuple], gap_days: int = 4) -> List[tuple]:
@@ -230,13 +348,10 @@ def _enrich_standings_row(row: Dict[str, Any]) -> None:
         row.setdefault("played", played)
 
 
-STANDINGS_CACHE_VERSION = 4
+STANDINGS_CACHE_VERSION = 6
 
 # Competitions with no meaningful league table in the app.
 NO_STANDINGS_LOCAL_IDS = {5479}
-
-# Aug–Jun competitions: season start-year flips in August.
-CROSS_YEAR_LOCAL_IDS = {4446, 4414, 4430}
 
 # Cache sources we still trust after SportRadar removal.
 ALLOWED_STANDINGS_CACHE_SOURCES = {"highlightly", "match_results"}
@@ -251,13 +366,7 @@ def candidate_season_years(
     """Latest season year first; if that table is empty, try the previous year only."""
     lid = int(local_league_id)
     now = now or datetime.utcnow()
-    year = now.year
-    month = now.month
-
-    if lid in CROSS_YEAR_LOCAL_IDS:
-        primary = year - 1 if month <= 7 else year
-    else:
-        primary = year
+    primary = resolve_season_start_year(lid, now)
 
     if requested_season is not None:
         try:
@@ -431,6 +540,8 @@ def fetch_highlightly_standings_for_year(
     normalized.pop("_computed", None)
     if not highlightly_standings_usable(normalized):
         return None
+    if int(highlightly_league_id) == 124179 or str(league_name or "").lower() == "nations championship":
+        normalized = apply_nations_championship_hemisphere_groups(normalized)
     return normalized
 
 
@@ -534,7 +645,10 @@ def compute_standings_from_db(
             return None
 
         matches = _dedupe_fixtures(matches)
-        matches = _exclude_trailing_playoffs(matches)
+        if int(our_league_id) == NATIONS_CHAMPIONSHIP_ID:
+            matches = _exclude_nations_championship_finals(matches)
+        else:
+            matches = _exclude_trailing_playoffs(matches)
         if not matches:
             return None
 
@@ -576,8 +690,9 @@ def compute_standings_from_db(
             away["pf"] += as_i
             away["pa"] += hs_i
 
+            try_bonus_floor = 28 if int(our_league_id) == NATIONS_CHAMPIONSHIP_ID else 24
             for side, scored in ((home, hs_i), (away, as_i)):
-                try_bonus = _estimate_try_bonus_points(scored)
+                try_bonus = _estimate_try_bonus_points(scored, try_bonus_floor)
                 if try_bonus:
                     side["pts"] += try_bonus
                     side["bp"] += try_bonus
@@ -648,7 +763,19 @@ def compute_standings_from_db(
             )
 
         start_year = _season_start_year(season_str)
-        return {
+        note = (
+            "Computed from regular-season match results (win 4 / draw 2 / "
+            "losing bonus for margin \u22647). Try-scoring bonus is estimated "
+            "(~4+ tries \u2248 24+ points) because try counts are not in the "
+            "data source — table may differ slightly from the official one."
+        )
+        if int(our_league_id) == NATIONS_CHAMPIONSHIP_ID:
+            note = (
+                "Hemisphere tables from ranking-round results (win 4 / draw 2 / "
+                "losing bonus \u22647). Finals Weekend matches are excluded. "
+                "Highlightly does not publish this table yet, so try bonus is estimated."
+            )
+        payload = {
             "league": {
                 "id": our_league_id,
                 "name": league_name,
@@ -658,12 +785,10 @@ def compute_standings_from_db(
             "groups": [{"name": None, "standings": standings_list}],
             "_computed": True,
             "_source": "match_results",
-            "note": (
-                "Computed from regular-season match results (win 4 / draw 2 / "
-                "losing bonus for margin \u22647). Try-scoring bonus is estimated "
-                "(~4+ tries \u2248 24+ points) because try counts are not in the "
-                "data source — table may differ slightly from the official one."
-            ),
+            "note": note,
         }
+        if int(our_league_id) == NATIONS_CHAMPIONSHIP_ID:
+            return apply_nations_championship_hemisphere_groups(payload)
+        return payload
     finally:
         conn.close()

@@ -10,6 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "rugby-ai-predictor"))
 
 from prediction.highlightly_client import HighlightlyRugbyAPI
+from prediction.season_years import resolve_season_start_year
 from prediction.standings_compute import (
     SKIP_COMPUTE_LEAGUE_IDS,
     compute_standings_from_db,
@@ -31,25 +32,18 @@ LEAGUES = {
     5480: (124179, "Nations Championship"),
 }
 
-NO_STANDINGS_UI = {5479, 5480}
-CROSS_YEAR = {65460, 11847, 14400}
+NO_STANDINGS_UI = {5479}
 RWC = 59503
 
 
-def seasons_for(hl_id: int) -> list[int]:
+def seasons_for(our_id: int, hl_id: int) -> list[int]:
     now = datetime.utcnow()
-    year, month = now.year, now.month
+    year = now.year
     if hl_id == RWC:
         return [2023, 2019, 2015]
-    if hl_id in CROSS_YEAR:
-        primary = year - 1 if month <= 6 else year
-        out: list[int] = []
-        for s in [primary, primary - 1, primary + 1, year, year - 1]:
-            if s not in out:
-                out.append(s)
-        return out
-    out = []
-    for s in [year, year - 1, year + 1, year - 2]:
+    primary = resolve_season_start_year(our_id, now)
+    out: list[int] = []
+    for s in [primary, primary - 1, primary + 1, year, year - 1]:
         if s not in out:
             out.append(s)
     return out
@@ -81,7 +75,7 @@ def main() -> None:
         hl_season = None
         rate_limited = False
 
-        for s in seasons_for(hl_id):
+        for s in seasons_for(our_id, hl_id):
             resp = api.get_standings(hl_id, s)
             if resp.get("_rate_limited"):
                 rate_limited = True
@@ -97,7 +91,7 @@ def main() -> None:
         compute_teams = 0
         compute_ok = False
         if our_id not in SKIP_COMPUTE_LEAGUE_IDS and our_id not in NO_STANDINGS_UI:
-            comp = compute_standings_from_db(db, our_id, season=seasons_for(hl_id)[0])
+            comp = compute_standings_from_db(db, our_id, season=seasons_for(our_id, hl_id)[0])
             if comp and comp.get("groups"):
                 compute_teams = team_count(comp)
                 compute_ok = True

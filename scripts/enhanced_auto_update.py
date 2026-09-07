@@ -55,6 +55,11 @@ from prediction.highlightly_leagues import (
     fetch_games_from_highlightly,
     parse_api_key,
 )
+from prediction.season_years import (
+    CALENDAR_YEAR_LEAGUE_IDS,
+    CROSS_YEAR_LEAGUE_IDS,
+    cross_year_season_start_month,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -73,8 +78,8 @@ LEAGUE_MAPPINGS = {
     for our_id, (name, hl_id) in HIGHLIGHTLY_LEAGUE_MAPPINGS.items()
 }
 
-YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}  # e.g. Premiership, Top 14, URC
-SINGLE_YEAR_LEAGUE_IDS = {4551, 4714, 4986, 5069, 5479, 5480}  # e.g. Super Rugby, Six Nations, etc.
+YEAR_SPAN_LEAGUE_IDS = CROSS_YEAR_LEAGUE_IDS
+SINGLE_YEAR_LEAGUE_IDS = CALENDAR_YEAR_LEAGUE_IDS
 
 # Max rounds to scan (used with --scan-rounds). These are conservative caps.
 MAX_ROUNDS_BY_LEAGUE: Dict[int, int] = {
@@ -87,7 +92,7 @@ MAX_ROUNDS_BY_LEAGUE: Dict[int, int] = {
     5069: 14,  # Currie Cup (varies)
     4574: 30,  # World Cup (placeholder cap)
     5479: 30,  # Friendlies (round scanning may not help much)
-    5480: 4,   # Nations Championship (short round-robin window)
+    5480: 7,   # Nations Championship: 6 ranking rounds + finals weekend
 }
 
 def compute_current_seasons(sportsdb_id: int, today: Optional[datetime] = None) -> List[str]:
@@ -112,13 +117,15 @@ def compute_current_seasons(sportsdb_id: int, today: Optional[datetime] = None) 
         is_single_year = True
 
     if is_year_span:
-        # Rugby seasons typically run Aug/Sept -> May/June. Use Aug (8) as boundary.
-        current_span = f"{year}-{year + 1}" if month >= 8 else f"{year - 1}-{year}"
+        # URC / Premiership flip in September; Top 14 flips in August.
+        start_month = cross_year_season_start_month(sportsdb_id) or 9
+        current_span = f"{year}-{year + 1}" if month >= start_month else f"{year - 1}-{year}"
         adjacent_span = f"{year - 1}-{year}" if current_span == f"{year}-{year + 1}" else f"{year}-{year + 1}"
         seasons.extend([current_span, adjacent_span])
 
     if is_single_year:
-        seasons.extend([str(year), str(year - 1)])
+        # Include next year so a published World Cup / Nations Championship edition is found early.
+        seasons.extend([str(year), str(year - 1), str(year + 1)])
 
     # Deduplicate while preserving order
     deduped: List[str] = []

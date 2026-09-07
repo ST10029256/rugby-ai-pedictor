@@ -415,6 +415,14 @@ h1,h2,h3,h4{font-family:var(--f-disp);font-weight:700;line-height:.9;text-transf
 .summary .total span:first-child{font-family:var(--f-body);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .err{display:none;border-left:2px solid var(--live);background:rgba(230,57,70,.1);color:#f0a9a8;padding:.7rem .9rem;font-size:.85rem;margin-bottom:1rem}
 .err.on{display:block}
+.pay-tabs{display:flex;gap:.5rem;margin:1rem 0 1.2rem}
+.pay-tab{flex:1;padding:.7rem;border:1px solid var(--line);background:transparent;color:var(--dim);border-radius:3px;cursor:pointer;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase}
+.pay-tab.on{border-color:var(--gold);color:var(--chalk);background:rgba(212,175,55,.08)}
+.card-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem}
+.sandbox-banner{margin:0 0 1rem;padding:.65rem .8rem;border:1px solid rgba(245,158,11,.45);background:rgba(245,158,11,.12);color:#fbbf24;font-size:.78rem;border-radius:3px}
+.invoice-box{margin-top:1rem;text-align:left;background:rgba(255,255,255,.96);color:#0f172a;border-radius:4px;padding:1rem;font-size:.82rem}
+.invoice-box code{display:block;margin-top:.35rem;font-size:1.05rem;letter-spacing:.08em;color:#15803d}
+.dl-btn{margin-top:.9rem;width:100%;padding:.85rem;border:0;border-radius:3px;background:#15803d;color:#fff;font-weight:700;cursor:pointer}
 .pay-btn{width:100%;padding:1.05rem;border:0;border-radius:2px;background:linear-gradient(165deg,var(--gold-light),var(--gold));color:var(--pitch-deep);font-family:var(--f-body);font-weight:700;font-size:.82rem;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;transition:background .3s,box-shadow .3s}
 .pay-btn:hover:not(:disabled){background:linear-gradient(165deg,#fff8dc,var(--gold-light));box-shadow:var(--shadow-gold)}
 .pay-btn:disabled{opacity:.55;cursor:not-allowed}
@@ -1479,8 +1487,8 @@ body{
         <div class="ticket-body">
           <div class="p-name">Monthly</div>
           <div class="p-dur">1 month access</div>
-          <div class="p-price tnum"><sup>$</sup>29</div>
-          <div class="p-sub">per month</div>
+          <div class="p-price tnum"><sup>R</sup>499</div>
+          <div class="p-sub">per month · incl. VAT</div>
           <ul>
             <li>Every prediction, every fixture</li>
             <li>AI match analysis &amp; reasoning</li>
@@ -1488,7 +1496,7 @@ body{
             <li>All 15 competitions</li>
             <li>Email support</li>
           </ul>
-          <button type="button" class="p-btn" data-plan="monthly" data-price="29" data-months="1">Choose monthly</button>
+          <button type="button" class="p-btn" data-plan="monthly" data-price="499" data-months="1">Choose monthly</button>
         </div>
       </div>
 
@@ -1499,8 +1507,8 @@ body{
         <div class="ticket-body">
           <div class="p-name">6 Months</div>
           <div class="p-dur">Half-season access</div>
-          <div class="p-price tnum"><sup>$</sup>149</div>
-          <div class="p-sub">Save $25</div>
+          <div class="p-price tnum"><sup>R</sup>2,499</div>
+          <div class="p-sub">Save vs monthly · incl. VAT</div>
           <ul>
             <li>Everything in Monthly</li>
             <li>Six months of predictions</li>
@@ -1508,7 +1516,7 @@ body{
             <li>Priority support</li>
             <li>Best value per month</li>
           </ul>
-          <button type="button" class="p-btn" data-plan="6months" data-price="149" data-months="6">Choose 6 months</button>
+          <button type="button" class="p-btn" data-plan="6months" data-price="2499" data-months="6">Choose 6 months</button>
         </div>
       </div>
 
@@ -1518,8 +1526,8 @@ body{
         <div class="ticket-body">
           <div class="p-name">Annual</div>
           <div class="p-dur">Full year access</div>
-          <div class="p-price tnum"><sup>$</sup>249</div>
-          <div class="p-sub">Save $99</div>
+          <div class="p-price tnum"><sup>R</sup>4,199</div>
+          <div class="p-sub">Maximum savings · incl. VAT</div>
           <ul>
             <li>Everything in 6 Months</li>
             <li>A full year of access</li>
@@ -1527,11 +1535,11 @@ body{
             <li>Premium support</li>
             <li>Maximum savings</li>
           </ul>
-          <button type="button" class="p-btn" data-plan="yearly" data-price="249" data-months="12">Choose annual</button>
+          <button type="button" class="p-btn" data-plan="yearly" data-price="4199" data-months="12">Choose annual</button>
         </div>
       </div>
     </div>
-    <p class="plans-note rv">7-day money-back guarantee · Licence key delivered by email</p>
+    <p class="plans-note rv">Sandbox checkout · no real charges · tax invoice + licence key</p>
   </div>
 </section>
 
@@ -1738,26 +1746,52 @@ body{
 <div class="modal" id="payModal" aria-hidden="true">
   <div class="modal-card">
     <button class="modal-close" id="payClose" aria-label="Close">&times;</button>
-    <h3>Complete your purchase</h3>
-    <p class="sub">Licence key delivered by email</p>
+    <h3>Sandbox checkout</h3>
+    <p class="sub">Card / Apple Pay · tax invoice · licence key</p>
+    <div class="sandbox-banner">Test mode — no real money. Use card 4242 4242 4242 4242</div>
     <form id="payForm">
       <label class="field" for="payEmail">Email address *</label>
       <input id="payEmail" type="email" class="input" placeholder="you@example.com" required autocomplete="email">
       <label class="field" for="payName">Full name *</label>
       <input id="payName" type="text" class="input" placeholder="Jane Doe" required autocomplete="name">
+
+      <div class="pay-tabs" role="tablist">
+        <button type="button" class="pay-tab on" id="tabCard" data-method="card">Card</button>
+        <button type="button" class="pay-tab" id="tabApple" data-method="apple_pay">Apple Pay</button>
+      </div>
+
+      <div id="cardFields">
+        <label class="field" for="payCard">Card number *</label>
+        <input id="payCard" type="text" class="input" placeholder="4242 4242 4242 4242" inputmode="numeric" autocomplete="cc-number">
+        <div class="card-row">
+          <div>
+            <label class="field" for="payMm">MM</label>
+            <input id="payMm" type="text" class="input" placeholder="12" maxlength="2" inputmode="numeric">
+          </div>
+          <div>
+            <label class="field" for="payYy">YY</label>
+            <input id="payYy" type="text" class="input" placeholder="30" maxlength="2" inputmode="numeric">
+          </div>
+          <div>
+            <label class="field" for="payCvc">CVC</label>
+            <input id="payCvc" type="text" class="input" placeholder="123" maxlength="4" inputmode="numeric">
+          </div>
+        </div>
+      </div>
+
       <div class="summary">
         <div><span>Plan</span><span id="sumPlan">—</span></div>
         <div><span>Duration</span><span id="sumDur">—</span></div>
-        <div class="total"><span>Total</span><span id="sumTotal" class="tnum">$0</span></div>
+        <div class="total"><span>Total</span><span id="sumTotal" class="tnum">R0</span></div>
       </div>
       <div class="err" id="payError"></div>
-      <button type="submit" class="pay-btn" id="payBtn">Complete purchase</button>
+      <button type="submit" class="pay-btn" id="payBtn">Pay (test)</button>
     </form>
     <div class="done" id="paySuccess">
-      <h4>Payment successful</h4>
-      <p>Your subscription is active.</p>
-      <p><strong>Your licence key has been sent to your email address.</strong></p>
-      <p>Check your inbox (and spam folder) for the key and activation instructions.</p>
+      <h4>Sandbox payment successful</h4>
+      <p>Your subscription is active. Tax invoice generated in the ledger.</p>
+      <div class="invoice-box" id="invoiceBox"></div>
+      <button type="button" class="dl-btn" id="dlInvoice" style="display:none">Download tax invoice PDF</button>
     </div>
   </div>
 </div>
@@ -1929,7 +1963,7 @@ body{
             projectId: "rugby-ai-61fd0"
           });
         }
-        fns = firebase.functions();
+        fns = firebase.app().functions('us-central1');
       }
     } catch (e) { console.warn('Firebase init failed', e); }
 
@@ -1937,8 +1971,28 @@ body{
         form = document.getElementById('payForm'),
         success = document.getElementById('paySuccess'),
         errBox = document.getElementById('payError'),
-        btn = document.getElementById('payBtn');
-    var plan = { type: 'monthly', price: 29, months: 1 };
+        btn = document.getElementById('payBtn'),
+        cardFields = document.getElementById('cardFields'),
+        invoiceBox = document.getElementById('invoiceBox'),
+        dlBtn = document.getElementById('dlInvoice');
+    var plan = { type: 'monthly', price: 499, months: 1 };
+    var method = 'card';
+    var lastPdf = null;
+    var lastInvoiceNo = null;
+
+    function money(n) {
+      return 'R' + Number(n).toLocaleString('en-ZA');
+    }
+
+    function setMethod(next) {
+      method = next;
+      document.getElementById('tabCard').classList.toggle('on', next === 'card');
+      document.getElementById('tabApple').classList.toggle('on', next === 'apple_pay');
+      cardFields.style.display = next === 'card' ? '' : 'none';
+      btn.textContent = next === 'apple_pay' ? 'Pay with Apple Pay (test)' : 'Pay (test)';
+    }
+    document.getElementById('tabCard').addEventListener('click', function () { setMethod('card'); });
+    document.getElementById('tabApple').addEventListener('click', function () { setMethod('apple_pay'); });
 
     function open(type, price, months) {
       plan = { type: type, price: price, months: months };
@@ -1946,9 +2000,11 @@ body{
         type === 'monthly' ? 'Monthly' : type === '6months' ? '6 Months' : 'Annual';
       document.getElementById('sumDur').textContent =
         months === 1 ? '1 month' : months === 6 ? '6 months' : '12 months';
-      document.getElementById('sumTotal').textContent = '$' + price;
+      document.getElementById('sumTotal').textContent = money(price);
       form.reset(); form.style.display = ''; success.classList.remove('on'); errBox.classList.remove('on');
-      btn.disabled = false; btn.textContent = 'Complete purchase';
+      invoiceBox.innerHTML = ''; dlBtn.style.display = 'none'; lastPdf = null;
+      setMethod('card');
+      btn.disabled = false;
       modal.classList.add('active'); modal.setAttribute('aria-hidden', 'false');
       if (lenis) lenis.stop();
       document.documentElement.style.overflow = 'hidden';
@@ -1970,6 +2026,14 @@ body{
     modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
     addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.classList.contains('active')) close(); });
 
+    dlBtn.addEventListener('click', function () {
+      if (!lastPdf) return;
+      var a = document.createElement('a');
+      a.href = 'data:application/pdf;base64,' + lastPdf;
+      a.download = (lastInvoiceNo || 'tax-invoice') + '.pdf';
+      a.click();
+    });
+
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var email = document.getElementById('payEmail').value.trim();
@@ -1981,29 +2045,44 @@ body{
         errBox.textContent = 'Payment service is unavailable right now. Please try again shortly.';
         errBox.classList.add('on'); return;
       }
+
+      var payload = {
+        email: email,
+        name: name,
+        plan_id: plan.type,
+        payment_method: method
+      };
+      if (method === 'card') {
+        payload.card = {
+          number: (document.getElementById('payCard').value || '').replace(/\s/g, ''),
+          exp_month: document.getElementById('payMm').value,
+          exp_year: document.getElementById('payYy').value,
+          cvc: document.getElementById('payCvc').value,
+          name: name
+        };
+      }
+
       btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Processing';
       errBox.classList.remove('on');
 
-      var days = plan.type === '6months' ? 180 : plan.type === 'yearly' ? 365 : 30;
-      fns.httpsCallable('generate_license_key_with_email')({
-        email: email, name: name, subscription_type: plan.type, duration_days: days, amount: plan.price
-      }).then(function (result) {
-        if (result.data && result.data.error) throw new Error(result.data.error);
+      fns.httpsCallable('process_sandbox_checkout')(payload).then(function (result) {
+        var data = result.data || {};
+        if (data.error) throw new Error(data.error);
         form.style.display = 'none';
         success.classList.add('on');
-        if (result.data && result.data.email_sent === false) {
-          var w = document.createElement('p');
-          w.style.color = '#f5e6a8';
-          w.style.marginTop = '1rem';
-          w.textContent = 'Email delivery failed — please contact support to retrieve your licence key.';
-          success.appendChild(w);
-        }
-        setTimeout(close, 9000);
+        lastPdf = data.invoice_pdf_base64 || null;
+        lastInvoiceNo = data.invoice_number || null;
+        invoiceBox.innerHTML =
+          '<div><strong>Licence key</strong><code>' + (data.license_key || '—') + '</code></div>' +
+          '<div style="margin-top:.75rem"><strong>Invoice</strong> ' + (data.invoice_number || '—') + '</div>' +
+          (data.email_sent ? '<div style="margin-top:.5rem">Email sent with PDF attached.</div>' :
+            '<div style="margin-top:.5rem">Email not configured — use the key above for testing.</div>');
+        if (lastPdf) dlBtn.style.display = '';
       }).catch(function (err) {
         console.error('Payment error', err);
         errBox.textContent = err.message || 'Payment failed. Please try again.';
         errBox.classList.add('on');
-        btn.disabled = false; btn.textContent = 'Complete purchase';
+        btn.disabled = false; setMethod(method);
       });
     });
   })();

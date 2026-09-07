@@ -5,17 +5,26 @@
       "codebase": "rugby-ai-predictor",
       "runtime": "python311",
       "ignore": [
-        "venv/",
+        "venv",
         "venv/**",
-        ".venv/",
+        ".venv",
         ".venv/**",
+        "**/venv/**",
+        "**/.venv/**",
+        ".env",
         ".env.local",
-        "__pycache__/",
+        "__pycache__",
         "__pycache__/**",
         "*.pyc",
         "*.pyo",
-        ".pytest_cache/",
-        ".pytest_cache/**"
+        ".pytest_cache",
+        ".pytest_cache/**",
+        "*.log",
+        "firebase-debug.log",
+        "artifacts",
+        "artifacts/**",
+        "artifacts_optimized",
+        "artifacts_optimized/**"
       ]
     }
   ],
@@ -39,11 +48,33 @@
     ],
     "headers": [
       {
+        "source": "/index.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
         "source": "/manifest.json",
         "headers": [
           {
             "key": "Content-Type",
             "value": "application/manifest+json"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
           }
         ]
       },
@@ -57,6 +88,19 @@
           {
             "key": "Service-Worker-Allowed",
             "value": "/"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/static/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
           }
         ]
       },

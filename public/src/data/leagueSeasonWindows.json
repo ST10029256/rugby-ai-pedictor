@@ -4,7 +4,8 @@
   "gap_days_rule": 90,
   "league_gap_overrides": {
     "4414": 70,
-    "4430": 60
+    "4430": 60,
+    "5480": 160
   },
   "scored_only": true,
   "league_count": 10,
@@ -1833,18 +1834,18 @@
     {
       "league_id": 5480,
       "league_name": "Nations Championship",
-      "gap_days_rule": 90,
+      "gap_days_rule": 160,
       "total_matches_considered": 18,
       "season_count": 1,
       "seasons": [
         {
           "season_index": 1,
           "start_utc": "2026-07-04T07:10:00Z",
-          "end_utc": "2026-07-18T19:10:00Z",
+          "end_utc": "2026-11-29T19:10:00Z",
           "start_date": "2026-07-04",
-          "end_date": "2026-07-18",
+          "end_date": "2026-11-29",
           "match_count": 18,
-          "duration_days": 14,
+          "duration_days": 148,
           "gap_from_prev_days": null,
           "first_event_id": 2599369,
           "last_event_id": 2599352

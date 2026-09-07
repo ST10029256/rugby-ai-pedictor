@@ -34,7 +34,10 @@ MAX_ROUNDS_BY_LEAGUE = {
 }
 
 YEAR_SPAN_LEAGUE_IDS = {4414, 4430, 4446}
-SINGLE_YEAR_LEAGUE_IDS = {4551, 4714, 4986, 5069, 5479}
+SINGLE_YEAR_LEAGUE_IDS = {4551, 4714, 4986, 5069, 5479, 5480, 4574}
+
+def _cross_year_start_month(league_id: int) -> int:
+    return 8 if league_id == 4430 else 9
 
 def compute_current_seasons(sportsdb_id: int) -> list:
     """Compute current season strings to try"""
@@ -47,7 +50,8 @@ def compute_current_seasons(sportsdb_id: int) -> list:
     is_single_year = sportsdb_id in SINGLE_YEAR_LEAGUE_IDS
     
     if is_year_span:
-        current_span = f"{year}-{year + 1}" if month >= 8 else f"{year - 1}-{year}"
+        start_month = _cross_year_start_month(sportsdb_id)
+        current_span = f"{year}-{year + 1}" if month >= start_month else f"{year - 1}-{year}"
         adjacent_span = f"{year - 1}-{year}" if current_span == f"{year}-{year + 1}" else f"{year}-{year + 1}"
         seasons.extend([current_span, adjacent_span])
     

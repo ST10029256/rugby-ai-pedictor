@@ -35,7 +35,7 @@ const LEAGUE_ID_MAPPING = {
   4414: 11847, // English Premiership Rugby (CORRECTED: was 5039 which was Austrian league)
   4714: 44185, // Six Nations Championship
   5479: 72268, // Rugby Union International Friendlies (Friendly International - no standings as friendlies don't have league tables)
-  5480: 124179, // Nations Championship (round-robin; no standings endpoint on Highlightly)
+  5480: 124179, // Nations Championship (hemisphere tables)
 };
 
 const PREM_LEAGUE_ID = 4414;
@@ -242,11 +242,6 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
           setLoading(false);
           return;
         }
-        if (leagueId === 5480) {
-          setError('Standings are not available for Nations Championship yet.');
-          setLoading(false);
-          return;
-        }
 
         const cacheKey = getLicenseCacheKey(leagueId, highlightlyLeagueId);
         const now = Date.now();
@@ -346,7 +341,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
   useEffect(() => {
     if (!leagueId) return;
     const highlightlyLeagueId = LEAGUE_ID_MAPPING[leagueId];
-    if (!highlightlyLeagueId || leagueId === 5479 || leagueId === 5480) return;
+    if (!highlightlyLeagueId || leagueId === 5479) return;
 
     const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
 
@@ -404,9 +399,9 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     );
   }
 
-  // Get the first group (most leagues have one group)
-  const group = standings.groups[0];
-  const teams = group.standings || group.teams || [];
+  const groups = Array.isArray(standings.groups) ? standings.groups : [];
+  const group = groups[0];
+  const teams = groups.flatMap((g) => g?.standings || g?.teams || []);
 
   if (teams.length === 0) {
     return (
@@ -417,8 +412,6 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
       </Card>
     );
   }
-
-  const groups = Array.isArray(standings.groups) ? standings.groups : [];
 
   const getTeamLogo = (teamData, row) => {
     const teamName = teamData?.name || teamData?.team_name || teamData?.strTeam || row?.teamName || '';

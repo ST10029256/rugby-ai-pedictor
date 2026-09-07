@@ -11,6 +11,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from .season_years import resolve_season_start_year
 try:
     from dotenv import load_dotenv
 except Exception:  # pragma: no cover
@@ -108,8 +109,6 @@ APISPORTS_LEAGUE_BY_LOCAL_ID: Dict[int, int] = {
     5479: 84,   # Friendlies
 }
 
-# Leagues where API season key follows start-year format (e.g. 2025-2026 => season 2025).
-YEAR_SPAN_LOCAL_LEAGUE_IDS = {4414, 4430, 4446}
 TEAM_NAME_ALIAS_BY_NORMALIZED: Dict[str, str] = {
     "newsouthwaleswaratahs": "waratahs",
     "wellingtonhurricanes": "hurricanes",
@@ -230,13 +229,10 @@ class SportDevsClient:
         if len(raw) < 10:
             return None
         try:
-            year = int(raw[:4])
-            month = int(raw[5:7])
             lid = int(league_id) if league_id is not None else None
-            if lid in YEAR_SPAN_LOCAL_LEAGUE_IDS:
-                # Typical rugby club season crosses years (Aug->Jun).
-                return year if month >= 8 else (year - 1)
-            return year
+            if lid is None:
+                return int(raw[:4])
+            return resolve_season_start_year(lid, raw)
         except Exception:
             return None
 

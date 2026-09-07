@@ -10,91 +10,146 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions,
   IconButton,
   Alert,
   CircularProgress,
   Paper,
-  useMediaQuery,
-  useTheme,
   Slide,
+  Tabs,
+  Tab,
+  Chip,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
+import AppleIcon from '@mui/icons-material/Apple';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import app from '../firebase';
 
+const FALLBACK_PLANS = [
+  {
+    id: 'monthly',
+    name: 'Monthly',
+    duration: '1 Month Access',
+    price_cents: 49900,
+    price_display: 'R499',
+    period: 'per month',
+    durationDays: 30,
+    features: [
+      'Full access to all predictions',
+      'AI-powered match analysis',
+      'Real-time updates',
+      'All leagues included',
+      'Email support',
+    ],
+  },
+  {
+    id: '6months',
+    name: '6 Months',
+    duration: '6 Months Access',
+    price_cents: 249900,
+    price_display: 'R2,499',
+    period: 'Save vs monthly',
+    durationDays: 180,
+    featured: true,
+    features: [
+      'Everything in Monthly',
+      '6 months of predictions',
+      'Priority support',
+      'Advanced analytics',
+      'Best value option',
+    ],
+  },
+  {
+    id: 'yearly',
+    name: 'Annual',
+    duration: '1 Year Access',
+    price_cents: 419900,
+    price_display: 'R4,199',
+    period: 'Maximum savings',
+    durationDays: 365,
+    features: [
+      'Everything in 6 Months',
+      'Full year of access',
+      'Premium support',
+      'Early access to features',
+      'Maximum savings',
+    ],
+  },
+];
+
+const formatCardNumber = (value) => {
+  const digits = value.replace(/\D/g, '').slice(0, 16);
+  return digits.replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+};
+
+const moneyFromCents = (cents) =>
+  `R${(Number(cents || 0) / 100).toLocaleString('en-ZA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
 const SubscriptionPage = ({ onBack }) => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [plans, setPlans] = useState(FALLBACK_PLANS);
+  const [billingMode, setBillingMode] = useState('sandbox');
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [openModal, setOpenModal] = useState(false);
+  const [paymentTab, setPaymentTab] = useState(0);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [expMonth, setExpMonth] = useState('');
+  const [expYear, setExpYear] = useState('');
+  const [cvc, setCvc] = useState('');
   const [loading, setLoading] = useState(false);
+  const [applePhase, setApplePhase] = useState('idle');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  const [licenseKey, setLicenseKey] = useState('');
-  const [expiresAt, setExpiresAt] = useState('');
+  const [result, setResult] = useState(null);
   const [emailError, setEmailError] = useState('');
-  const [emailSent, setEmailSent] = useState(true);
   const scrollLockRef = useRef(0);
 
-  const plans = [
-    {
-      id: 'monthly',
-      name: 'Monthly',
-      duration: '1 Month Access',
-      price: 29,
-      period: 'per month',
-      durationDays: 30,
-      features: [
-        'Full access to all predictions',
-        'AI-powered match analysis',
-        'Real-time updates',
-        'All leagues included',
-        'Email support',
-      ],
-    },
-    {
-      id: '6months',
-      name: '6 Months',
-      duration: '6 Months Access',
-      price: 149,
-      period: 'Save $25',
-      durationDays: 180,
-      featured: true,
-      features: [
-        'Everything in Monthly',
-        '6 months of predictions',
-        'Priority support',
-        'Advanced analytics',
-        'Best value option',
-      ],
-    },
-    {
-      id: 'yearly',
-      name: 'Annual',
-      duration: '1 Year Access',
-      price: 249,
-      period: 'Save $99',
-      durationDays: 365,
-      features: [
-        'Everything in 6 Months',
-        'Full year of access',
-        'Premium support',
-        'Early access to features',
-        'Maximum savings',
-      ],
-    },
-  ];
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const functions = getFunctions(app, 'us-central1');
+        const getPlans = httpsCallable(functions, 'get_billing_plans');
+        const res = await getPlans({});
+        if (cancelled || res?.data?.error) return;
+        if (Array.isArray(res.data.plans) && res.data.plans.length) {
+          setPlans(
+            res.data.plans.map((p) => ({
+              ...p,
+              durationDays: p.durationDays || p.duration_days,
+            }))
+          );
+        }
+        if (res.data.mode) setBillingMode(res.data.mode);
+      } catch (err) {
+        console.warn('Using fallback plans (get_billing_plans unavailable)', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSelectPlan = (plan) => {
     setSelectedPlan(plan);
     setOpenModal(true);
     setError('');
     setSuccess(false);
+    setResult(null);
     setEmail('');
     setName('');
+    setAddress('');
+    setCardNumber('');
+    setExpMonth('');
+    setExpYear('');
+    setCvc('');
+    setPaymentTab(0);
+    setApplePhase('idle');
   };
 
   const unlockScroll = useCallback(() => {
@@ -114,24 +169,26 @@ const SubscriptionPage = ({ onBack }) => {
     setSelectedPlan(null);
     setEmail('');
     setName('');
+    setAddress('');
+    setCardNumber('');
+    setExpMonth('');
+    setExpYear('');
+    setCvc('');
     setError('');
     setSuccess(false);
-    setLicenseKey('');
-    setExpiresAt('');
+    setResult(null);
     setEmailError('');
-    setEmailSent(true);
+    setApplePhase('idle');
+    setPaymentTab(0);
   }, []);
 
-  const handleCloseModal = () => {
-    setOpenModal(false);
-  };
+  const handleCloseModal = () => setOpenModal(false);
 
   const handleModalExited = () => {
     resetModalState();
     unlockScroll();
   };
 
-  // Lock background scroll while modal is open; unlock only after exit animation
   useEffect(() => {
     if (!openModal) return;
     scrollLockRef.current = window.scrollY;
@@ -146,11 +203,9 @@ const SubscriptionPage = ({ onBack }) => {
 
   useEffect(() => () => unlockScroll(), [unlockScroll]);
 
-  const handlePayment = async (e) => {
-    e.preventDefault();
+  const runCheckout = async (paymentMethod) => {
     setError('');
     setLoading(true);
-
     try {
       if (!email || !name) {
         setError('Please fill in all required fields');
@@ -159,62 +214,90 @@ const SubscriptionPage = ({ onBack }) => {
       }
 
       const functions = getFunctions(app, 'us-central1');
-      const generateLicenseKey = httpsCallable(functions, 'generate_license_key_with_email');
+      const checkout = httpsCallable(functions, 'process_sandbox_checkout');
 
-      const requestData = {
+      const payload = {
         email: email.trim().toLowerCase(),
         name: name.trim(),
-        subscription_type: selectedPlan.id,
-        duration_days: selectedPlan.durationDays,
-        amount: selectedPlan.price,
+        plan_id: selectedPlan.id,
+        payment_method: paymentMethod,
+        address: address.trim() || undefined,
       };
 
-      console.log('📤 Sending request to Firebase Function:', requestData);
-      const result = await generateLicenseKey(requestData);
+      if (paymentMethod === 'card') {
+        payload.card = {
+          number: cardNumber.replace(/\s/g, ''),
+          exp_month: expMonth,
+          exp_year: expYear,
+          cvc,
+          name: name.trim(),
+        };
+      }
 
-      if (result.data.error) {
-        setError(result.data.error);
+      const response = await checkout(payload);
+      const data = response.data || {};
+
+      if (data.error) {
+        setError(data.error);
         setLoading(false);
+        setApplePhase('idle');
         return;
       }
 
-      // Log email status
-      if (result.data.email_sent !== undefined) {
-        setEmailSent(result.data.email_sent);
-        if (result.data.email_sent) {
-          console.log('✅ Email sent successfully!');
-          console.log('📧 Sent to:', email);
-        } else {
-          console.warn('⚠️ Email was NOT sent!');
-          if (result.data.email_error) {
-            console.error('❌ Email error:', result.data.email_error);
-            setEmailError(result.data.email_error);
-          }
-          console.warn('⚠️ Check Firebase Functions logs for details');
-          console.warn('⚠️ License key was still generated:', result.data.license_key ? 'Yes' : 'No');
-        }
-      } else {
-        console.warn('⚠️ email_sent status not in response');
-        setEmailSent(true); // Default to true if not specified
-      }
-
-      if (result.data.license_key) {
-        setLicenseKey(result.data.license_key);
-        setExpiresAt(result.data.expires_at);
-        setSuccess(true);
-
-        // Log license key info (for debugging - not shown to user)
-        console.log('🔑 License Key Generated:', result.data.license_key);
-        console.log('📅 Expires At:', result.data.expires_at ? new Date(result.data.expires_at * 1000).toLocaleString() : 'N/A');
-      } else {
-        setError('Failed to generate license key. Please try again.');
-      }
+      setResult(data);
+      setSuccess(true);
+      setEmailError(data.email_error || '');
     } catch (err) {
-      console.error('❌ Payment error:', err);
-      setError(err.message || 'Payment failed. Please try again.');
+      console.error('Checkout error:', err);
+      const msg =
+        err?.code === 'functions/not-found'
+          ? 'Sandbox checkout function is not deployed yet. Deploy process_sandbox_checkout first.'
+          : err.message || 'Payment failed. Please try again.';
+      setError(msg);
+      setApplePhase('idle');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCardPay = (e) => {
+    e.preventDefault();
+    runCheckout('card');
+  };
+
+  const handleApplePay = async () => {
+    if (!email || !name) {
+      setError('Enter your name and email before Apple Pay');
+      return;
+    }
+    setError('');
+    setApplePhase('authenticating');
+    await new Promise((r) => setTimeout(r, 1400));
+    setApplePhase('processing');
+    await runCheckout('apple_pay');
+    setApplePhase('idle');
+  };
+
+  const fieldSx = {
+    '& .MuiOutlinedInput-root': {
+      background: 'rgba(2,6,23,0.8)',
+      color: '#f9fafb',
+      borderRadius: '12px',
+      '& fieldset': { borderColor: 'rgba(75,85,99,0.5)', borderWidth: '1.5px' },
+      '&:hover fieldset': { borderColor: 'rgba(75,85,99,0.7)' },
+      '&.Mui-focused fieldset': { borderColor: '#22c55e', borderWidth: '1.5px' },
+      '&.Mui-focused': { boxShadow: '0 0 0 3px rgba(34, 197, 94, 0.2)' },
+    },
+    '& .MuiInputBase-input': { fontSize: { xs: '0.875rem', md: '1rem' }, py: { xs: 1, md: 1.25 } },
+    '& .MuiInputBase-input::placeholder': { color: '#6b7280', opacity: 1 },
+  };
+
+  const labelSx = {
+    display: 'block',
+    color: '#d1d5db',
+    mb: 0.5,
+    fontWeight: 500,
+    fontSize: { xs: '0.875rem', md: '1rem' },
   };
 
   return (
@@ -230,7 +313,6 @@ const SubscriptionPage = ({ onBack }) => {
         px: { xs: 2, sm: 3 },
       }}
     >
-      {/* Back Button */}
       {onBack && (
         <Box sx={{ position: 'absolute', top: 16, left: { xs: 8, md: 16 }, zIndex: 10 }}>
           <Button
@@ -238,10 +320,7 @@ const SubscriptionPage = ({ onBack }) => {
             sx={{
               color: '#d1d5db',
               fontSize: { xs: '0.875rem', md: '1rem' },
-              '&:hover': {
-                color: '#86efac',
-                background: 'rgba(255, 255, 255, 0.1)',
-              },
+              '&:hover': { color: '#86efac', background: 'rgba(255, 255, 255, 0.1)' },
             }}
           >
             ← Back to Login
@@ -249,14 +328,10 @@ const SubscriptionPage = ({ onBack }) => {
         </Box>
       )}
 
-      {/* Background gradient overlay */}
       <Box
         sx={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
+          inset: 0,
           background: `
             radial-gradient(circle at 20% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%),
             radial-gradient(circle at 80% 50%, rgba(34, 197, 94, 0.1) 0%, transparent 50%)
@@ -265,36 +340,39 @@ const SubscriptionPage = ({ onBack }) => {
         }}
       />
 
-      <Container 
-        maxWidth="lg" 
-        disableGutters={false}
-        sx={{ 
-          position: 'relative', 
-          zIndex: 1, 
+      <Container
+        maxWidth="lg"
+        sx={{
+          position: 'relative',
+          zIndex: 1,
           mt: { xs: 4, md: 0 },
-          px: { xs: 2, sm: 3 },
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           width: '100%',
-          '&.MuiContainer-root': {
-            paddingLeft: { xs: '16px', sm: '24px' },
-            paddingRight: { xs: '16px', sm: '24px' },
-          },
         }}
       >
-        {/* Header */}
-        <Box sx={{ textAlign: 'center', mb: { xs: 3, md: 6 }, width: '100%' }}>
-          <Typography
+        <Box sx={{ textAlign: 'center', mb: { xs: 3, md: 4 }, width: '100%' }}>
+          <Chip
+            label={
+              billingMode === 'sandbox' || billingMode === 'test'
+                ? 'SANDBOX CHECKOUT v2 — card / Apple Pay · no real charges'
+                : 'LIVE PAYMENTS'
+            }
             sx={{
-              width: { xs: '80px', md: '120px' },
-              height: { xs: '80px', md: '120px' },
-              mb: 1,
-              filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))',
-              display: 'inline-block',
+              mb: 2,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              background:
+                billingMode === 'sandbox' || billingMode === 'test'
+                  ? 'rgba(245, 158, 11, 0.2)'
+                  : 'rgba(34, 197, 94, 0.2)',
+              color:
+                billingMode === 'sandbox' || billingMode === 'test' ? '#fbbf24' : '#86efac',
+              border: '1px solid rgba(251, 191, 36, 0.4)',
             }}
-            component="div"
-          >
+          />
+          <Typography component="div" sx={{ width: { xs: 80, md: 120 }, height: { xs: 80, md: 120 }, mb: 1, display: 'inline-block' }}>
             <img src="/rugby_emoji.png" alt="Rugby Ball" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </Typography>
           <Typography
@@ -303,88 +381,38 @@ const SubscriptionPage = ({ onBack }) => {
               fontSize: { xs: '2rem', md: '3rem' },
               fontWeight: 800,
               mb: 1,
-              color: '#f9fafb',
               background: 'linear-gradient(135deg, #f9fafb 0%, #86efac 100%)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
             }}
           >
             Choose Your Plan
           </Typography>
-          <Typography
-            sx={{
-              fontSize: { xs: '1rem', md: '1.25rem' },
-              color: '#d1d5db',
-              fontWeight: 300,
-            }}
-          >
-            Unlock premium AI-powered rugby predictions
+          <Typography sx={{ fontSize: { xs: '1rem', md: '1.25rem' }, color: '#d1d5db', fontWeight: 300 }}>
+            Card or Apple Pay · licence key by email
           </Typography>
         </Box>
 
-        {/* Plans Grid */}
-        <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-          <Grid 
-            container 
-            spacing={{ xs: 2, md: 3 }} 
-            sx={{ 
-              mb: { xs: 2, md: 3 },
-              justifyContent: 'center',
-              alignItems: 'stretch',
-              width: '100%',
-              maxWidth: '100%',
-              margin: 0,
-            }}
-          >
-            {plans.map((plan) => (
-              <Grid 
-                item 
-                xs={12} 
-                sm={6} 
-                md={4} 
-                key={plan.id} 
-                sx={{ 
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'stretch',
+        <Grid container spacing={{ xs: 2, md: 3 }} sx={{ mb: 3, justifyContent: 'center', width: '100%' }}>
+          {plans.map((plan) => (
+            <Grid item xs={12} sm={6} md={4} key={plan.id} sx={{ display: 'flex' }}>
+              <Card
+                sx={{
                   width: '100%',
-                  minWidth: 0,
-                }}
-              >
-                <Card
-                  sx={{
-                    width: '100%',
-                    maxWidth: { xs: '100%', sm: 'none', md: '100%' },
-                    background: 'linear-gradient(145deg, rgba(15,23,42,0.95), rgba(2,6,23,0.98))',
+                  background: 'linear-gradient(145deg, rgba(15,23,42,0.95), rgba(2,6,23,0.98))',
                   border: plan.featured
                     ? '1.5px solid rgba(34, 197, 94, 0.6)'
                     : '1.5px solid rgba(148,163,184,0.3)',
                   borderRadius: '20px',
-                  p: { xs: 2, md: 3.125 },
+                  p: { xs: 2, md: 3 },
                   textAlign: 'center',
                   position: 'relative',
-                  overflow: 'hidden',
                   transition: 'all 0.3s ease',
                   boxShadow: plan.featured ? '0 0 30px rgba(34, 197, 94, 0.3)' : 'none',
-                  '&::before': {
-                    content: '""',
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: '4px',
-                    background: 'linear-gradient(90deg, #16a34a 0%, #22c55e 100%)',
-                    transform: plan.featured ? 'scaleX(1)' : 'scaleX(0)',
-                    transition: 'transform 0.3s ease',
-                  },
                   '&:hover': {
                     transform: 'translateY(-8px)',
                     boxShadow: '0 20px 40px rgba(34, 197, 94, 0.2)',
                     borderColor: 'rgba(34, 197, 94, 0.5)',
-                    '&::before': {
-                      transform: 'scaleX(1)',
-                    },
                   },
                 }}
               >
@@ -392,99 +420,49 @@ const SubscriptionPage = ({ onBack }) => {
                   <Box
                     sx={{
                       position: 'absolute',
-                      top: { xs: '0.75rem', md: '1rem' },
-                      right: { xs: '0.75rem', md: '1rem' },
+                      top: '0.75rem',
+                      right: '0.75rem',
                       background: 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
                       color: 'white',
-                      px: { xs: 1, md: 1.25 },
-                      py: { xs: 0.5, md: 0.625 },
+                      px: 1.25,
+                      py: 0.5,
                       borderRadius: '20px',
-                      fontSize: { xs: '0.65rem', md: '0.75rem' },
+                      fontSize: '0.75rem',
                       fontWeight: 700,
                       textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
                     }}
                   >
                     Popular
                   </Box>
                 )}
-
-                <Typography
-                  sx={{
-                    fontSize: { xs: '1.25rem', md: '1.5rem' },
-                    fontWeight: 700,
-                    color: '#f9fafb',
-                    mb: 0.5,
-                  }}
-                >
+                <Typography sx={{ fontSize: { xs: '1.25rem', md: '1.5rem' }, fontWeight: 700, color: '#f9fafb', mb: 0.5 }}>
                   {plan.name}
                 </Typography>
-                <Typography
-                  sx={{
-                    color: '#9ca3af',
-                    fontSize: { xs: '0.85rem', md: '0.9rem' },
-                    mb: { xs: 1.5, md: 1.875 },
-                  }}
-                >
-                  {plan.duration}
+                <Typography sx={{ color: '#9ca3af', fontSize: '0.9rem', mb: 1.5 }}>{plan.duration}</Typography>
+                <Typography sx={{ fontSize: { xs: '2.4rem', md: '2.8rem' }, fontWeight: 800, color: '#22c55e', lineHeight: 1, mb: 0.5 }}>
+                  {plan.price_display || moneyFromCents(plan.price_cents)}
                 </Typography>
-                <Typography
-                  sx={{
-                    fontSize: { xs: '2.5rem', md: '3rem' },
-                    fontWeight: 800,
-                    color: '#22c55e',
-                    mb: 0.5,
-                    lineHeight: 1,
-                  }}
-                >
-                  ${plan.price}
-                </Typography>
-                <Typography
-                  sx={{
-                    color: '#9ca3af',
-                    fontSize: { xs: '0.85rem', md: '0.9rem' },
-                    mb: { xs: 2, md: 2.5 },
-                  }}
-                >
-                  {plan.period}
-                </Typography>
-
-                <Box
-                  component="ul"
-                  sx={{
-                    listStyle: 'none',
-                    p: 0,
-                    m: 0,
-                    mb: { xs: 2, md: 2.5 },
-                    textAlign: 'left',
-                  }}
-                >
-                  {plan.features.map((feature, idx) => (
+                <Typography sx={{ color: '#9ca3af', fontSize: '0.9rem', mb: 2 }}>{plan.period}</Typography>
+                <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0, mb: 2.5, textAlign: 'left' }}>
+                  {(plan.features || []).map((feature, idx) => (
                     <Box
                       component="li"
                       key={idx}
                       sx={{
                         color: '#d1d5db',
-                        py: { xs: 0.625, md: 0.75 },
-                        borderBottom: idx < plan.features.length - 1 ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
+                        py: 0.7,
+                        borderBottom:
+                          idx < plan.features.length - 1 ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: { xs: 0.625, md: 0.75 },
-                        fontSize: { xs: '0.875rem', md: '1rem' },
-                        '&::before': {
-                          content: '"✓"',
-                          color: '#22c55e',
-                          fontWeight: 700,
-                          fontSize: { xs: '1rem', md: '1.2rem' },
-                          flexShrink: 0,
-                        },
+                        gap: 0.75,
+                        fontSize: '0.9rem',
+                        '&::before': { content: '"✓"', color: '#22c55e', fontWeight: 700 },
                       }}
                     >
                       {feature}
                     </Box>
                   ))}
                 </Box>
-
                 <Button
                   variant="contained"
                   fullWidth
@@ -492,22 +470,14 @@ const SubscriptionPage = ({ onBack }) => {
                   sx={{
                     background: 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
                     color: 'white',
-                    py: { xs: 1, md: 1.25 },
-                    px: { xs: 1.5, md: 2 },
-                    fontSize: { xs: '1rem', md: '1.1rem' },
+                    py: 1.25,
                     fontWeight: 700,
                     textTransform: 'uppercase',
                     letterSpacing: '0.05em',
                     borderRadius: '12px',
-                    border: 'none',
-                    transition: 'all 0.3s ease',
                     '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 8px 20px rgba(34, 197, 94, 0.4)',
                       background: 'linear-gradient(135deg, #22c55e 0%, #4ade80 100%)',
-                    },
-                    '&:active': {
-                      transform: 'translateY(0)',
+                      transform: 'translateY(-2px)',
                     },
                   }}
                 >
@@ -517,10 +487,23 @@ const SubscriptionPage = ({ onBack }) => {
             </Grid>
           ))}
         </Grid>
-        </Box>
+
+        <Alert
+          severity="info"
+          sx={{
+            maxWidth: 720,
+            width: '100%',
+            background: 'rgba(30, 41, 59, 0.9)',
+            color: '#cbd5e1',
+            border: '1px solid rgba(148,163,184,0.3)',
+            '& .MuiAlert-icon': { color: '#38bdf8' },
+          }}
+        >
+          Test cards: <strong>4242 4242 4242 4242</strong> (success) ·{' '}
+          <strong>4000 0000 0000 0002</strong> (decline) · Apple Pay is simulated Face ID.
+        </Alert>
       </Container>
 
-      {/* Payment Modal */}
       <Dialog
         open={openModal}
         onClose={handleCloseModal}
@@ -541,379 +524,239 @@ const SubscriptionPage = ({ onBack }) => {
             maxHeight: '90vh',
             m: { xs: 2, md: 2 },
             width: { xs: 'calc(100% - 32px)', md: 'auto' },
-            maxWidth: { xs: 'calc(100% - 32px)', md: '600px' },
+            maxWidth: { xs: 'calc(100% - 32px)', md: '640px' },
           },
         }}
         sx={{
           backdropFilter: 'blur(10px)',
-          '& .MuiBackdrop-root': {
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          },
+          '& .MuiBackdrop-root': { backgroundColor: 'rgba(0, 0, 0, 0.7)' },
         }}
       >
-        <DialogTitle
-          sx={{
-            color: '#f9fafb',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            p: { xs: 2, md: 3 },
-            pb: { xs: 1, md: 2 },
-            pr: { xs: 2, md: 10 }, // Add right padding to prevent overlap
-            position: 'relative',
-          }}
-        >
-          <Box sx={{ flex: 1, pr: { xs: 0, md: 2 } }}>
-            <Typography
-              sx={{
-                fontSize: { xs: '1.5rem', md: '2rem' },
-                fontWeight: 700,
-                color: '#f9fafb',
-                mb: 0.5,
-                pr: { xs: 0, md: 1 },
-              }}
-            >
-              Complete Your Purchase
-            </Typography>
-            <Typography
-              sx={{
-                color: '#9ca3af',
-                fontSize: { xs: '0.875rem', md: '1rem' },
-                pr: { xs: 0, md: 1 },
-              }}
-            >
-              Enter your details to receive your license key
-            </Typography>
-          </Box>
+        <DialogTitle sx={{ color: '#f9fafb', position: 'relative', p: { xs: 2, md: 3 }, pr: 8 }}>
+          <Typography sx={{ fontSize: { xs: '1.4rem', md: '1.8rem' }, fontWeight: 700, mb: 0.5 }}>
+            {success ? 'You\'re in' : 'Secure checkout'}
+          </Typography>
+          <Typography sx={{ color: '#9ca3af', fontSize: '0.9rem' }}>
+            {success
+              ? 'Save this licence key to sign in'
+              : 'Sandbox payment · invoice emailed · licence delivery'}
+          </Typography>
           <IconButton
             onClick={handleCloseModal}
             aria-label="Close"
             sx={{
               position: 'absolute',
-              top: { xs: 8, md: 16 },
-              right: { xs: 8, md: 16 },
-              background: 'rgba(255, 255, 255, 0.1)',
+              top: 12,
+              right: 12,
               color: '#f9fafb',
-              width: { xs: 36, md: 40 },
-              height: { xs: 36, md: 40 },
-              borderRadius: '12px',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              flexShrink: 0,
-              zIndex: 1,
-              WebkitTapHighlightColor: 'transparent',
-              touchAction: 'manipulation',
-              '&:hover': {
-                background: 'rgba(239, 68, 68, 0.2)',
-                borderColor: 'rgba(239, 68, 68, 0.4)',
-                color: '#fca5a5',
-              },
+              background: 'rgba(255,255,255,0.08)',
             }}
           >
             <CloseIcon />
           </IconButton>
         </DialogTitle>
 
-        <DialogContent sx={{ 
-          p: { xs: 2, md: 3 }, 
-          pt: { xs: 2, md: 2 },
-          overflowY: 'auto',
-          maxHeight: { xs: 'calc(90vh - 180px)', md: 'calc(90vh - 180px)' },
-        }}>
-          {success ? (
-            <Box
-              sx={{
-                background: 'rgba(34, 197, 94, 0.1)',
-                border: '1px solid rgba(34, 197, 94, 0.3)',
-                borderRadius: '12px',
-                padding: '1.5rem',
-                marginTop: '2rem',
-                textAlign: 'center',
-              }}
-            >
+        <DialogContent sx={{ p: { xs: 2, md: 3 }, pt: 1, overflowY: 'auto' }}>
+          {success && result ? (
+            <Box sx={{ textAlign: 'center', py: { xs: 2, md: 3 } }}>
               <Typography
                 sx={{
-                  color: '#22c55e',
-                  marginBottom: '1rem',
-                  fontSize: '1.5rem',
+                  color: '#9ca3af',
+                  fontSize: 12,
+                  letterSpacing: 2,
+                  textTransform: 'uppercase',
+                  mb: 1.5,
+                }}
+              >
+                Licence key
+              </Typography>
+              <Typography
+                sx={{
+                  color: '#86efac',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  fontSize: { xs: '1.35rem', md: '1.75rem' },
                   fontWeight: 700,
+                  letterSpacing: { xs: 2, md: 3 },
+                  lineHeight: 1.4,
+                  wordBreak: 'break-all',
                 }}
               >
-                ✅ Payment Successful!
+                {result.license_key}
               </Typography>
-              <Typography
-                sx={{
-                  color: '#d1d5db',
-                  marginBottom: '0.5rem',
-                }}
-              >
-                Your subscription has been activated!
-              </Typography>
-              <Typography
-                sx={{
-                  marginTop: '1rem',
-                  fontSize: '1rem',
-                  color: '#d1d5db',
-                }}
-              >
-                <strong>Your license key has been sent to your email address.</strong>
-              </Typography>
-              <Typography
-                sx={{
-                  marginTop: '1rem',
-                  fontSize: '0.9rem',
-                  color: '#9ca3af',
-                }}
-              >
-                Please check your inbox (and spam folder) for an email containing your license key and activation instructions.
-              </Typography>
-              <Typography
-                sx={{
-                  marginTop: '1rem',
-                  fontSize: '0.9rem',
-                  color: '#9ca3af',
-                }}
-              >
-                You can use the license key from the email to login to your account.
+              <Typography sx={{ color: '#94a3b8', fontSize: 13, mt: 2 }}>
+                {result.email_sent
+                  ? 'Also sent to your email.'
+                  : 'Copy this key — email was not sent.'}
               </Typography>
               {emailError && (
-                <Typography
-                  sx={{
-                    marginTop: '1rem',
-                    fontSize: '0.9rem',
-                    color: '#fbbf24',
-                  }}
-                >
-                  ⚠️ <strong>Email sending failed:</strong> {emailError}<br />
-                  Your license key was generated successfully. Please contact support if you need assistance.
-                </Typography>
-              )}
-              {!emailSent && !emailError && (
-                <Typography
-                  sx={{
-                    marginTop: '1rem',
-                    fontSize: '0.9rem',
-                    color: '#fbbf24',
-                  }}
-                >
-                  ⚠️ Email sending failed. Please check your email or contact support with your license key.
-                </Typography>
+                <Alert severity="warning" sx={{ mt: 2, textAlign: 'left' }}>
+                  {emailError}
+                </Alert>
               )}
             </Box>
           ) : (
-            <Box component="form" onSubmit={handlePayment}>
-              <Box sx={{ mb: { xs: 2, md: 2.5 } }}>
-                <Typography
-                  component="label"
-                  sx={{
-                    display: 'block',
-                    color: '#d1d5db',
-                    mb: 0.5,
-                    fontWeight: 500,
-                    fontSize: { xs: '0.875rem', md: '1rem' },
-                  }}
-                >
-                  Email Address *
-                </Typography>
-                <TextField
-                  fullWidth
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  placeholder="your.email@example.com"
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      background: 'rgba(2,6,23,0.8)',
-                      color: '#f9fafb',
-                      borderRadius: '12px',
-                      '& fieldset': {
-                        borderColor: 'rgba(75,85,99,0.5)',
-                        borderWidth: '1.5px',
-                      },
-                      '&:hover fieldset': {
-                        borderColor: 'rgba(75,85,99,0.7)',
-                      },
-                      '&.Mui-focused fieldset': {
-                        borderColor: '#22c55e',
-                        borderWidth: '1.5px',
-                      },
-                      '&.Mui-focused': {
-                        boxShadow: '0 0 0 3px rgba(34, 197, 94, 0.2)',
-                      },
-                    },
-                    '& .MuiInputBase-input': {
-                      fontSize: { xs: '0.875rem', md: '1rem' },
-                      py: { xs: 1, md: 1.25 },
-                    },
-                    '& .MuiInputBase-input::placeholder': {
-                      color: '#6b7280',
-                      opacity: 1,
-                    },
-                  }}
-                />
-              </Box>
-
-              <Box sx={{ mb: { xs: 2, md: 2.5 } }}>
-                <Typography
-                  component="label"
-                  sx={{
-                    display: 'block',
-                    color: '#d1d5db',
-                    mb: 0.5,
-                    fontWeight: 500,
-                    fontSize: { xs: '0.875rem', md: '1rem' },
-                  }}
-                >
-                  Full Name *
-                </Typography>
-                <TextField
-                  fullWidth
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  placeholder="John Doe"
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      background: 'rgba(2,6,23,0.8)',
-                      color: '#f9fafb',
-                      borderRadius: '12px',
-                      '& fieldset': {
-                        borderColor: 'rgba(75,85,99,0.5)',
-                        borderWidth: '1.5px',
-                      },
-                      '&:hover fieldset': {
-                        borderColor: 'rgba(75,85,99,0.7)',
-                      },
-                      '&.Mui-focused fieldset': {
-                        borderColor: '#22c55e',
-                        borderWidth: '1.5px',
-                      },
-                      '&.Mui-focused': {
-                        boxShadow: '0 0 0 3px rgba(34, 197, 94, 0.2)',
-                      },
-                    },
-                    '& .MuiInputBase-input': {
-                      fontSize: { xs: '0.875rem', md: '1rem' },
-                      py: { xs: 1, md: 1.25 },
-                    },
-                    '& .MuiInputBase-input::placeholder': {
-                      color: '#6b7280',
-                      opacity: 1,
-                    },
-                  }}
-                />
-              </Box>
-
+            <Box>
               {selectedPlan && (
                 <Paper
                   sx={{
                     mb: 2,
-                    p: { xs: 1.5, md: 2 },
+                    p: 1.75,
                     background: 'rgba(2,6,23,0.6)',
                     border: '1px solid rgba(75,85,99,0.3)',
                     borderRadius: '12px',
                   }}
                 >
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      color: '#d1d5db',
-                      mb: 0.75,
-                      fontSize: { xs: '0.875rem', md: '1rem' },
-                    }}
-                  >
-                    <span>Plan:</span>
-                    <span>
-                      {selectedPlan.id === 'monthly' ? 'Monthly Plan' : 
-                       selectedPlan.id === '6months' ? '6 Months Plan' : 'Annual Plan'}
-                    </span>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', color: '#d1d5db', mb: 0.5 }}>
+                    <span>{selectedPlan.name} plan</span>
+                    <span>{selectedPlan.durationDays || selectedPlan.duration_days} days</span>
                   </Box>
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      color: '#d1d5db',
-                      mb: 0.75,
-                      fontSize: { xs: '0.875rem', md: '1rem' },
-                    }}
-                  >
-                    <span>Duration:</span>
-                    <span>
-                      {selectedPlan.durationDays === 30 ? '1 Month' : 
-                       selectedPlan.durationDays === 180 ? '6 Months' : '12 Months'}
-                    </span>
-                  </Box>
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-                      pt: 1,
-                      mt: 1,
-                      fontSize: { xs: '1.1rem', md: '1.2rem' },
-                      fontWeight: 700,
-                      color: '#22c55e',
-                    }}
-                  >
-                    <span>Total:</span>
-                    <span>${selectedPlan.price}</span>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#22c55e', fontSize: '1.15rem' }}>
+                    <span>Total (incl. VAT)</span>
+                    <span>{selectedPlan.price_display || moneyFromCents(selectedPlan.price_cents)}</span>
                   </Box>
                 </Paper>
               )}
 
-              {error && (
-                <Alert 
-                  severity="error" 
-                  sx={{ 
-                    mb: 2,
-                    background: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    color: '#fca5a5',
-                  }}
-                >
-                  {error}
-                </Alert>
-              )}
+              <Box sx={{ mb: 2 }}>
+                <Typography component="label" sx={labelSx}>Email *</Typography>
+                <TextField fullWidth type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" sx={fieldSx} />
+              </Box>
+              <Box sx={{ mb: 2 }}>
+                <Typography component="label" sx={labelSx}>Full name *</Typography>
+                <TextField fullWidth value={name} onChange={(e) => setName(e.target.value)} required placeholder="Jane Citizen" sx={fieldSx} />
+              </Box>
+              <Box sx={{ mb: 2 }}>
+                <Typography component="label" sx={labelSx}>Billing address (optional)</Typography>
+                <TextField fullWidth value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, City, South Africa" sx={fieldSx} />
+              </Box>
 
-              <Button
-                type="submit"
-                fullWidth
-                variant="contained"
-                disabled={loading}
+              <Tabs
+                value={paymentTab}
+                onChange={(_, v) => setPaymentTab(v)}
                 sx={{
-                  background: loading
-                    ? 'rgba(55, 65, 81, 1)'
-                    : 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
-                  color: 'white',
-                  py: { xs: 1.25, md: 1.5 },
-                  fontSize: { xs: '1rem', md: '1.1rem' },
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  borderRadius: '12px',
-                  mt: { xs: 1, md: 1.25 },
-                  transition: 'all 0.3s ease',
-                  '&:hover:not(:disabled)': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: '0 8px 20px rgba(34, 197, 94, 0.4)',
-                    background: 'linear-gradient(135deg, #22c55e 0%, #4ade80 100%)',
-                  },
-                  '&:disabled': {
-                    opacity: 0.6,
-                    cursor: 'not-allowed',
-                  },
+                  mb: 2,
+                  minHeight: 42,
+                  '& .MuiTab-root': { color: '#94a3b8', textTransform: 'none', fontWeight: 600, minHeight: 42 },
+                  '& .Mui-selected': { color: '#86efac' },
+                  '& .MuiTabs-indicator': { backgroundColor: '#22c55e' },
                 }}
               >
-                {loading ? (
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                    <CircularProgress size={20} sx={{ color: 'white' }} />
-                    <span>Processing Payment...</span>
+                <Tab icon={<CreditCardIcon />} iconPosition="start" label="Card" />
+                <Tab icon={<AppleIcon />} iconPosition="start" label="Apple Pay" />
+              </Tabs>
+
+              {paymentTab === 0 ? (
+                <Box component="form" onSubmit={handleCardPay}>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography component="label" sx={labelSx}>Card number *</Typography>
+                    <TextField
+                      fullWidth
+                      value={cardNumber}
+                      onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+                      placeholder="4242 4242 4242 4242"
+                      inputProps={{ inputMode: 'numeric', autoComplete: 'cc-number' }}
+                      sx={fieldSx}
+                    />
                   </Box>
-                ) : (
-                  'Complete Purchase'
-                )}
-              </Button>
+                  <Grid container spacing={1.5} sx={{ mb: 2 }}>
+                    <Grid item xs={4}>
+                      <Typography component="label" sx={labelSx}>MM</Typography>
+                      <TextField fullWidth value={expMonth} onChange={(e) => setExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))} placeholder="12" sx={fieldSx} />
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Typography component="label" sx={labelSx}>YY</Typography>
+                      <TextField fullWidth value={expYear} onChange={(e) => setExpYear(e.target.value.replace(/\D/g, '').slice(0, 2))} placeholder="30" sx={fieldSx} />
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Typography component="label" sx={labelSx}>CVC</Typography>
+                      <TextField fullWidth value={cvc} onChange={(e) => setCvc(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="123" sx={fieldSx} />
+                    </Grid>
+                  </Grid>
+
+                  {error && (
+                    <Alert severity="error" sx={{ mb: 2, background: 'rgba(239,68,68,0.12)', color: '#fca5a5' }}>
+                      {error}
+                    </Alert>
+                  )}
+
+                  <Button
+                    type="submit"
+                    fullWidth
+                    disabled={loading}
+                    variant="contained"
+                    sx={{
+                      py: 1.4,
+                      fontWeight: 700,
+                      borderRadius: '12px',
+                      background: loading ? 'rgba(55,65,81,1)' : 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
+                    }}
+                  >
+                    {loading ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CircularProgress size={18} sx={{ color: 'white' }} />
+                        Processing…
+                      </Box>
+                    ) : (
+                      `Pay ${selectedPlan?.price_display || ''} (test)`
+                    )}
+                  </Button>
+                </Box>
+              ) : (
+                <Box>
+                  <Paper
+                    sx={{
+                      p: 2.5,
+                      mb: 2,
+                      borderRadius: '16px',
+                      background: '#000',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <AppleIcon sx={{ fontSize: 36, color: '#fff', mb: 1 }} />
+                    <Typography sx={{ color: '#fff', fontWeight: 600, mb: 0.5 }}>
+                      Apple Pay (sandbox)
+                    </Typography>
+                    <Typography sx={{ color: '#94a3b8', fontSize: 13, mb: 2 }}>
+                      Simulates Face ID confirmation, then runs the same invoice + license pipeline.
+                    </Typography>
+                    {applePhase === 'authenticating' && (
+                      <Typography sx={{ color: '#86efac', mb: 1 }}>Confirming with Face ID…</Typography>
+                    )}
+                    {error && (
+                      <Alert severity="error" sx={{ mb: 2, background: 'rgba(239,68,68,0.12)', color: '#fca5a5' }}>
+                        {error}
+                      </Alert>
+                    )}
+                    <Button
+                      fullWidth
+                      disabled={loading || applePhase !== 'idle'}
+                      onClick={handleApplePay}
+                      sx={{
+                        py: 1.4,
+                        borderRadius: '12px',
+                        background: '#fff',
+                        color: '#000',
+                        fontWeight: 700,
+                        textTransform: 'none',
+                        fontSize: '1.05rem',
+                        '&:hover': { background: '#e5e5e5' },
+                      }}
+                    >
+                      {loading || applePhase !== 'idle' ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <CircularProgress size={18} />
+                          {applePhase === 'authenticating' ? 'Face ID…' : 'Processing…'}
+                        </Box>
+                      ) : (
+                        <>
+                          <AppleIcon sx={{ mr: 1 }} /> Pay with Apple Pay
+                        </>
+                      )}
+                    </Button>
+                  </Paper>
+                </Box>
+              )}
             </Box>
           )}
         </DialogContent>
