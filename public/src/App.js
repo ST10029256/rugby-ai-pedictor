@@ -15,11 +15,13 @@ import NewsFeed from './components/NewsFeed';
 import LeagueStandings from './components/LeagueStandings';
 import MatchLineups from './components/MatchLineups';
 import LeagueTeams from './components/LeagueTeams';
+import LiveBroadcast from './components/LiveBroadcast';
 import RugbyBallLoader from './components/RugbyBallLoader';
 import HistoricalPredictions from './components/HistoricalPredictions';
 import { VIEW_CONTENT_WRAPPER_SX, clearViewLoadingScrollLock } from './utils/viewLoader';
 import { getLeagues, getUpcomingMatches, verifyLicenseKey } from './firebase';
 import { MEDIA_URLS } from './utils/storageUrls';
+import { attachSmoothVideo } from './utils/smoothVideo';
 import './App.css';
 import { getLocalYYYYMMDD, getKickoffAtFromMatch } from './utils/date';
 import { getBiometricRegistration, handleDeviceAuthFailure, saveDeviceSession } from './utils/biometricAuth';
@@ -28,6 +30,22 @@ import { ensureProfileFromAuth } from './utils/userProfile';
 import { predictionsWidgetSx } from './utils/predictionsLayout';
 import { applyLeagueDisplayNames, modelTeamNameForPrediction } from './utils/teamDisplayNames';
 import { hasUsableOdds, impliedHomeProbability, oddsAdjustedView } from './utils/oddsAdjustment';
+
+const PREDICTION_MODEL_OPTIONS = [
+  { id: 'v4', label: 'V4' },
+  { id: 'v5', label: 'V5' },
+  { id: 'killer', label: 'Killer' },
+];
+
+function readSavedPredictionModel() {
+  try {
+    const saved = String(localStorage.getItem('rugby_ai_prediction_model') || '').toLowerCase();
+    if (PREDICTION_MODEL_OPTIONS.some((opt) => opt.id === saved)) return saved;
+  } catch (_) {
+    /* ignore */
+  }
+  return 'v5';
+}
 
 const darkTheme = createTheme({
   palette: {
@@ -61,13 +79,14 @@ const DEBUG_UPCOMING_LEAGUES = new Set([4714]);
 const APP_DISPLAY_NAME = 'Rugby AI Predictor';
 const APP_NAV_VIEWS = [
   { id: 'predictions', label: 'Predictions', icon: '🎯' },
+  { id: 'broadcast', label: 'Live Broadcast', icon: '📡' },
   { id: 'news', label: 'News', icon: '📰' },
   { id: 'standings', label: 'Standings', icon: '🏆' },
   { id: 'teams', label: 'Teams', icon: '🏉' },
   { id: 'lineups', label: 'Lineups', icon: '👥' },
   { id: 'history', label: 'History', icon: '📜' },
 ];
-const CONTENT_TAB_VIEWS = new Set(['news', 'standings', 'teams', 'lineups', 'history']);
+const CONTENT_TAB_VIEWS = new Set(['news', 'standings', 'teams', 'lineups', 'history', 'broadcast']);
 
 function extractMatchDateIso(match) {
   const raw = String(
@@ -624,6 +643,8 @@ function App() {
   const [selectedLeague, setSelectedLeague] = useState(null);
   const [upcomingMatches, setUpcomingMatches] = useState([]);
   const [generatedPredictions, setGeneratedPredictions] = useState([]);
+  const [predictionModelFamily, setPredictionModelFamily] = useState(readSavedPredictionModel);
+  const [predictionModelError, setPredictionModelError] = useState('');
   const [manualOdds, setManualOdds] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -637,9 +658,14 @@ function App() {
   });
   const videoRef = useRef(null);
   const headerVideoRef = useRef(null);
+  const headerVideoDetachRef = useRef(null);
+  const [headerVideoReady, setHeaderVideoReady] = useState(false);
+  const [bgVideoReady, setBgVideoReady] = useState(false);
   const autoOddsFetchedKeysRef = useRef(new Set());
   const autoOddsRunRef = useRef(0);
   const autoOddsLastSignatureRef = useRef('');
+  const predictionsByFamilyRef = useRef({});
+  const generateRunRef = useRef(0);
   
   const isMobile = useMediaQuery('(max-width:899.95px)');
   const isMobileReelsViewport = useMediaQuery('(max-width:768px)');
@@ -682,13 +708,8 @@ function App() {
   }, [selectedLeague, upcomingWindowMatches, manualOdds]);
 
   const predictions = useMemo(() => {
-    const generatedKeys = new Set(
-      generatedPredictions.map((p) => `${p.home_team}::${p.away_team}::${p.date}`)
-    );
-    const extras = postGameCards.filter(
-      (card) => !generatedKeys.has(`${card.home_team}::${card.away_team}::${card.date}`)
-    );
-    return [...extras, ...generatedPredictions];
+    if (generatedPredictions.length > 0) return generatedPredictions;
+    return postGameCards;
   }, [postGameCards, generatedPredictions]);
 
   // Check authentication on mount — skip silent auto-login when biometric is enabled.
@@ -905,6 +926,7 @@ function App() {
         activeView === 'standings' ||
         activeView === 'teams' ||
         activeView === 'lineups' ||
+        activeView === 'broadcast' ||
         activeView === 'predictions' ||
         activeView === 'history' ||
         activeView === 'profile');
@@ -1093,6 +1115,8 @@ function App() {
     // Clear old matches immediately to prevent showing wrong games
     setUpcomingMatches([]);
     setGeneratedPredictions([]);
+    setPredictionModelError('');
+    predictionsByFamilyRef.current = {};
     setLoadingMatches(true);
 
     const fetchUpcoming = async () => {
@@ -1223,12 +1247,17 @@ function App() {
   }, [selectedLeague, upcomingWindowMatches]);
 
 
-  const handleGeneratePredictions = async () => {
+  const handleGeneratePredictions = async (familyOverride) => {
     if (!selectedLeague || oddsInputMatches.length === 0) {
       return;
     }
 
+    const modelFamily = PREDICTION_MODEL_OPTIONS.some((opt) => opt.id === familyOverride)
+      ? familyOverride
+      : predictionModelFamily;
+    const runId = ++generateRunRef.current;
     setGenerating(true);
+    setPredictionModelError('');
     const newPredictions = [];
     const seenMatchups = new Set();
     const seenEventIds = new Set();
@@ -1254,9 +1283,11 @@ function App() {
 
     const batchByEventId = new Map();
     const batchByNameKey = new Map();
+    let lastError = '';
     try {
       const batchResult = await predictMatchesBatch({
         league_id: selectedLeague,
+        model_family: modelFamily,
         matches: tasks.map(({ match, matchDate }) => ({
           event_id: match.id || match.event_id || null,
           home_team: predictionTeamName(match, 'home'),
@@ -1264,15 +1295,21 @@ function App() {
           match_date: matchDate,
         })),
       });
+      if (batchResult?.data?.error) {
+        lastError = String(batchResult.data.error);
+      }
       for (const p of batchResult?.data?.predictions || []) {
         if (p && !p.error) {
           if (p.event_id !== null && p.event_id !== undefined) {
             batchByEventId.set(String(p.event_id), p);
           }
           batchByNameKey.set(`${p.home_team}::${p.away_team}::${p.match_date}`, p);
+        } else if (p?.error) {
+          lastError = String(p.error);
         }
       }
     } catch (batchErr) {
+      lastError = batchErr?.message || lastError;
       console.warn('Batch prediction unavailable, using per-match fallback:', batchErr?.message);
     }
 
@@ -1310,11 +1347,15 @@ function App() {
               match_date: matchDate,
               event_id: match.id || match.event_id || null,
               enhanced: false,
+              model_family: modelFamily,
             });
           });
 
           if (!result?.data || result.data.error) {
-            if (result?.data?.error) console.error('Prediction error:', result.data.error);
+            if (result?.data?.error) {
+              lastError = String(result.data.error);
+              console.error('Prediction error:', result.data.error);
+            }
             continue;
           }
           const pred = result.data;
@@ -1473,14 +1514,17 @@ function App() {
             your_odds_winner: yourOddsView ? yourOddsView.winner : null,
             your_odds_confidence: yourOddsView ? yourOddsView.confidence : null,
             your_odds_implied_home_win_prob: yourOddsView ? yourOddsView.odds_implied_home_win_prob : null,
+            model_family: pred.model_family || modelFamily,
           }, match));
         } catch (err) {
+          lastError = err?.message || lastError;
           console.error('Exception predicting match:', err);
         }
       }
     };
 
     await Promise.all(Array.from({ length: concurrency }, () => runTask()));
+    if (runId !== generateRunRef.current) return;
     const dedupedPredictions = dedupeUpcomingMatches(
       newPredictions.map((p) => ({
         ...p,
@@ -1495,7 +1539,26 @@ function App() {
       date: p.date_event || p.date,
     }));
     setGeneratedPredictions(dedupedPredictions);
+    predictionsByFamilyRef.current[`${selectedLeague}::${modelFamily}`] = dedupedPredictions;
+    if (dedupedPredictions.length === 0) {
+      setPredictionModelError(
+        lastError || `No ${modelFamily.toUpperCase()} predictions were returned for this round.`
+      );
+    }
     setGenerating(false);
+  };
+
+  const handlePredictionModelChange = (family) => {
+    if (!PREDICTION_MODEL_OPTIONS.some((opt) => opt.id === family)) return;
+    setPredictionModelFamily(family);
+    try {
+      localStorage.setItem('rugby_ai_prediction_model', family);
+    } catch (_) {
+      /* ignore */
+    }
+    const cached = predictionsByFamilyRef.current[`${selectedLeague}::${family}`];
+    setPredictionModelError('');
+    setGeneratedPredictions(cached || []);
   };
 
   const handleManualOddsChange = useCallback((matchKey, odds) => {
@@ -1509,38 +1572,38 @@ function App() {
     return selectedLeague ? LEAGUE_CONFIGS[selectedLeague]?.name || 'Unknown' : '';
   }, [selectedLeague]);
 
-  // Setup video background loop
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const handleLoadedMetadata = () => {
-      video.play().catch(() => {
-        // Autoplay might be blocked, that's fine
-      });
-    };
-
-    const handleCanPlay = () => {
-      // Video ready to play
-    };
-
-    const handleError = (e) => {
-      console.error('Background video failed to load:', e);
-    };
-
-    video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('canplay', handleCanPlay);
-    video.addEventListener('error', handleError);
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-
-    return () => {
-      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('canplay', handleCanPlay);
-      video.removeEventListener('error', handleError);
-    };
+  const bindHeaderVideo = useCallback((node) => {
+    headerVideoRef.current = node;
+    if (headerVideoDetachRef.current) {
+      headerVideoDetachRef.current();
+      headerVideoDetachRef.current = null;
+    }
+    if (!node) {
+      setHeaderVideoReady(false);
+      return;
+    }
+    headerVideoDetachRef.current = attachSmoothVideo(node, {
+      onReady: () => setHeaderVideoReady(true),
+      localFallback: '/video_rugby_ball.mp4',
+    });
   }, []);
+
+  // Attach after login so the <video> nodes actually exist.
+  useEffect(() => {
+    if (!authenticated) return undefined;
+    return attachSmoothVideo(videoRef.current, {
+      onReady: () => setBgVideoReady(true),
+      localFallback: '/video_rugby.mp4',
+    });
+  }, [authenticated]);
+
+  useEffect(() => {
+    const video = headerVideoRef.current;
+    if (!video || !headerVideoReady) return;
+    if (activeView === 'predictions' && !document.hidden) {
+      video.play().catch(() => {});
+    }
+  }, [activeView, headerVideoReady]);
 
   const handleDrawerToggle = useCallback(() => {
     setMobileOpen(prev => !prev);
@@ -1578,7 +1641,7 @@ function App() {
             display: 'flex',
             placeContent: 'center',
             placeItems: 'center',
-            backgroundColor: '#020617',
+            backgroundColor: '#0e1117',
             zIndex: 40,
           }}
         >
@@ -1623,7 +1686,7 @@ function App() {
             display: 'flex',
             placeContent: 'center',
             placeItems: 'center',
-            backgroundColor: '#020617',
+            backgroundColor: '#0e1117',
             zIndex: 40,
           }}
         >
@@ -2035,21 +2098,11 @@ function App() {
         <Box
           component="video"
           ref={videoRef}
-          autoPlay
           muted
-          loop
           playsInline
+          autoPlay
+          loop
           preload="auto"
-          onError={() => {
-            const v = videoRef.current;
-            if (!v) return;
-            // Hard fallback for dev / CORS issues.
-            try {
-              v.src = '/video_rugby.mp4';
-              v.load();
-              v.play().catch(() => {});
-            } catch {}
-          }}
           sx={{
             position: 'fixed',
             top: 0,
@@ -2059,6 +2112,8 @@ function App() {
             objectFit: 'cover',
             zIndex: 0,
             pointerEvents: 'none',
+            opacity: bgVideoReady ? 1 : 0,
+            transition: 'opacity 0.6s ease',
           }}
         >
           <source src={MEDIA_URLS.videoRugby} type="video/mp4" />
@@ -2366,6 +2421,7 @@ function App() {
                   activeView === 'teams' ||
                   activeView === 'predictions' ||
                   activeView === 'lineups' ||
+                  activeView === 'broadcast' ||
             activeView === 'history' ||
                   activeView === 'profile')
                   ? 'main-news-page-scroll'
@@ -2402,7 +2458,7 @@ function App() {
                 height: '100svh',
                 maxHeight: '100svh',
               },
-            } : ((activeView === 'news' || activeView === 'standings' || activeView === 'teams' || activeView === 'lineups' || activeView === 'predictions' || activeView === 'history' || activeView === 'profile') ? {
+            } : ((activeView === 'news' || activeView === 'standings' || activeView === 'teams' || activeView === 'lineups' || activeView === 'broadcast' || activeView === 'predictions' || activeView === 'history' || activeView === 'profile') ? {
               // Grow with content only — forced minHeight was creating empty scroll
               overflow: 'visible',
               height: 'auto',
@@ -2437,6 +2493,68 @@ function App() {
             boxSizing: 'border-box',
             alignItems: 'stretch',
           }}>
+            <Box 
+              sx={{ 
+                display: 'block',
+                visibility: activeView === 'predictions' ? 'visible' : 'hidden',
+                pointerEvents: 'none',
+                mt: { xs: 0, sm: 0 },
+                width: '100%',
+                maxWidth: { xs: '100%', sm: '900px', md: '100%' },
+                height: { xs: 250, sm: 380, md: 530, lg: 600 },
+                mx: 'auto',
+                mb: activeView === 'predictions' ? { xs: 2, sm: 2.5 } : 0,
+                overflow: 'hidden',
+                borderRadius: { xs: '16px', md: '18px' },
+                position: activeView === 'predictions' ? 'relative' : 'fixed',
+                left: activeView === 'predictions' ? 'auto' : 0,
+                top: activeView === 'predictions' ? 'auto' : 0,
+                isolation: 'isolate',
+                padding: 0,
+                background: '#0b1220',
+                border: activeView === 'predictions' ? '1px solid rgba(244, 228, 188, 0.16)' : 'none',
+                boxShadow: activeView === 'predictions'
+                  ? '0 22px 50px rgba(0,0,0,0.42), 0 0 0 1px rgba(16,185,129,0.12)'
+                  : 'none',
+                zIndex: activeView === 'predictions' ? 'auto' : -1,
+              }}
+            >
+              <video
+                ref={bindHeaderVideo}
+                src={MEDIA_URLS.videoRugbyBall}
+                muted
+                playsInline
+                autoPlay
+                loop
+                preload="auto"
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  objectPosition: 'center 78%',
+                  opacity: 1,
+                }}
+                onError={(e) => {
+                  const v = e.currentTarget;
+                  const src = v.currentSrc || v.src || '';
+                  if (src.includes('/video_rugby_ball.mp4') && !src.includes('firebasestorage')) return;
+                  v.src = '/video_rugby_ball.mp4';
+                  v.load();
+                  v.play().catch(() => {});
+                }}
+              />
+              <Box
+                aria-hidden="true"
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  background:
+                    'linear-gradient(180deg, rgba(14,17,23,0.22) 0%, transparent 30%, transparent 58%, rgba(14,17,23,0.78) 100%), radial-gradient(ellipse at 50% 45%, transparent 42%, rgba(14,17,23,0.28) 100%)',
+                }}
+              />
+            </Box>
             {CONTENT_TAB_VIEWS.has(activeView) ? (
               <Box
                 sx={
@@ -2450,8 +2568,14 @@ function App() {
                         height: isMobileNewsReels ? '100%' : 'auto',
                         overflow: isMobileNewsReels ? 'hidden' : VIEW_CONTENT_WRAPPER_SX.overflowY,
                       }
-                    : activeView === 'lineups'
-                    ? { ...VIEW_CONTENT_WRAPPER_SX, bgcolor: 'transparent' }
+                    : activeView === 'lineups' || activeView === 'broadcast'
+                    ? {
+                        ...VIEW_CONTENT_WRAPPER_SX,
+                        bgcolor: 'transparent',
+                        background: 'none',
+                        backdropFilter: 'none',
+                        WebkitBackdropFilter: 'none',
+                      }
                     : VIEW_CONTENT_WRAPPER_SX
                 }
               >
@@ -2467,6 +2591,8 @@ function App() {
                   <LeagueTeams leagueId={selectedLeague} leagueName={leagueName} />
                 ) : activeView === 'lineups' ? (
                   <MatchLineups leagueId={selectedLeague} leagueName={leagueName} />
+                ) : activeView === 'broadcast' ? (
+                  <LiveBroadcast leagueId={selectedLeague} leagueName={leagueName} />
                 ) : (
                   <HistoricalPredictions leagueId={selectedLeague} leagueName={leagueName} />
                 )}
@@ -2478,56 +2604,6 @@ function App() {
               />
             ) : (
               <>
-            {/* Header Video - same width as odds */}
-            <Box 
-              sx={{ 
-                mt: { xs: 0, sm: 0 },
-                width: '100%',
-                maxWidth: { xs: '100%', sm: '900px', md: '100%' },
-                height: { xs: '280px', sm: '380px', md: '550px', lg: '600px' },
-                mx: 'auto',
-                overflow: 'hidden',
-                borderRadius: { xs: '12px', sm: '8px' },
-                position: 'relative',
-                display: 'block',
-                padding: 0,
-                marginBottom: 0,
-                background: 'transparent',
-                boxShadow: 'none',
-              }}
-            >
-              <video
-                ref={headerVideoRef}
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  preload="auto"
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    objectPosition: 'center 65%',
-                    willChange: 'transform',
-                    transform: 'translateZ(0)',
-                  }}
-                  onError={(e) => {
-                    console.error('Header video failed to load:', e);
-                    const v = headerVideoRef.current;
-                    if (!v) return;
-                    // Hard fallback for dev / CORS issues.
-                    try {
-                      v.src = '/video_rugby_ball.mp4';
-                      v.load();
-                      v.play().catch(() => {});
-                    } catch {}
-                  }}
-                >
-                  <source src={MEDIA_URLS.videoRugbyBall} type="video/mp4" />
-                </video>
-            </Box>
-
             {selectedLeague && (
               <Box sx={{ width: '100%', boxSizing: 'border-box' }}>
               {/* League Metrics */}
@@ -2598,6 +2674,42 @@ function App() {
               ) : null}
 
                 <Box sx={{ ...predictionsWidgetSx, my: 4, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>
+                  <Box className="prediction-model-toggle" role="tablist" aria-label="Prediction model">
+                    {PREDICTION_MODEL_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={predictionModelFamily === opt.id}
+                        className={`prediction-model-toggle-btn${predictionModelFamily === opt.id ? ' is-active' : ''}`}
+                        disabled={generating}
+                        onClick={() => handlePredictionModelChange(opt.id)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </Box>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: '#94a3b8', textAlign: 'center', fontSize: '0.78rem' }}
+                  >
+                    Showing {predictionModelFamily === 'killer' ? 'Killer V2' : predictionModelFamily.toUpperCase()} model scores
+                  </Typography>
+                  {predictionModelError && (
+                    <Typography
+                      variant="body2"
+                      sx={{ color: '#fca5a5', textAlign: 'center', fontSize: '0.85rem' }}
+                    >
+                      {predictionModelError}
+                    </Typography>
+                  )}
+                  <button
+                    className="generate-button"
+                    onClick={() => handleGeneratePredictions()}
+                    disabled={generating || oddsInputMatches.length === 0}
+                  >
+                    🎯 Generate Expert Predictions
+                  </button>
                   {generating && (
                     <Box sx={{
                       width: '100%',
@@ -2607,24 +2719,17 @@ function App() {
                       alignItems: 'center',
                       justifyContent: 'center',
                       py: 4,
-                      mb: 2,
                     }}>
                       <RugbyBallLoader size={100} color="#10b981" compact label="Generating predictions..." />
                     </Box>
                   )}
-                  <button
-                    className="generate-button"
-                    onClick={handleGeneratePredictions}
-                    disabled={generating || oddsInputMatches.length === 0}
-                  >
-                    🎯 Generate Expert Predictions
-                  </button>
                 </Box>
 
                 {predictions.length > 0 && (
                   <PredictionsDisplay
                     predictions={predictions}
                     leagueName={leagueName}
+                    modelFamily={predictionModelFamily}
                   />
                 )}
               </Box>

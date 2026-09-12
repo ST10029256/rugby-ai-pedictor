@@ -885,6 +885,29 @@ _predictor = None
 _enhanced_predictor = None
 LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "champion")
 LIVE_MODEL_CHANNEL = os.getenv("LIVE_MODEL_CHANNEL", "prod_100")
+_MODEL_FAMILY_ALIASES = {
+    "v4": "v4",
+    "maz_v4": "v4",
+    "v5": "v5",
+    "maz_v5": "v5",
+    "killer": "killer",
+    "killer_v2": "killer",
+    "killer_v1": "killer",
+    "a5": "killer",
+}
+
+
+def _normalize_requested_model_family(data: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    if not data:
+        return None
+    raw = data.get("model_family") or data.get("model")
+    return _MODEL_FAMILY_ALIASES.get(str(raw or "").strip().lower())
+
+
+def _model_version_for_family(family: Optional[str]) -> str:
+    if family:
+        return f"{family}:{LIVE_MODEL_CHANNEL}"
+    return _get_live_model_version()
 
 
 def get_predictor():
@@ -1107,9 +1130,14 @@ def _run_standard_prediction(
     logger = logging.getLogger(__name__)
     odds_only = bool(data.get("odds_only", False))
     match_id = _parse_match_id_from_request(data)
-    has_model = predictor.has_trained_model(league_id_int)
+    requested_family = _normalize_requested_model_family(data)
+    has_model = predictor.has_trained_model(league_id_int, model_family=requested_family)
 
     if odds_only or not has_model:
+        if requested_family and not odds_only:
+            raise FileNotFoundError(
+                f"No {requested_family} model is available for league {league_id_int}."
+            )
         logger.info(
             "Bookmaker odds only for league %s (odds_only=%s, has_model=%s)",
             league_id_int,
@@ -1131,11 +1159,14 @@ def _run_standard_prediction(
             league_id_int,
             str(match_date),
             match_id=match_id,
+            model_family=requested_family,
         )
         prediction.setdefault("model_available", True)
         prediction.setdefault("show_scores", True)
         return prediction
     except (FileNotFoundError, ValueError, RuntimeError, ImportError) as model_err:
+        if requested_family:
+            raise
         logger.warning(
             "Model prediction unavailable for league %s, falling back to odds only: %s",
             league_id_int,
@@ -1150,7 +1181,7 @@ def _run_standard_prediction(
         )
 
 
-@https_fn.on_call(timeout_sec=300, memory=512, secrets=["HIGHLIGHTLY_API_KEY"])  # 5 minute timeout, 512MB memory
+@https_fn.on_call(timeout_sec=300, memory=512)  # 5 minute timeout, 512MB memory
 def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get match prediction
@@ -1204,10 +1235,11 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
             return {'error': 'Invalid league_id'}
 
         db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+        requested_family = _normalize_requested_model_family(data)
         frozen = _serve_frozen_prediction(
             db_path,
             data.get('event_id') or data.get('match_id'),
-            _get_live_model_version(),
+            _model_version_for_family(requested_family),
             str(home_team),
             str(away_team),
             str(match_date),
@@ -1316,8 +1348,9 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
                 except Exception as db_error:
                     logger.debug(f"Could not find event_id from database: {db_error}")
             
-            # Save to Firestore if we have event_id and prediction data
-            if event_id and prediction and not prediction.get('error'):
+            # Save to Firestore if we have event_id and prediction data.
+            # Family comparison requests must not overwrite the production prediction doc.
+            if event_id and prediction and not prediction.get('error') and not requested_family:
                 try:
                     db = get_firestore_client()
                     prediction_ref = db.collection('predictions').document(str(event_id))
@@ -1379,7 +1412,7 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e), 'traceback': error_trace}
 
 
-@https_fn.on_request(timeout_sec=120, memory=1024, secrets=["HIGHLIGHTLY_API_KEY"])
+@https_fn.on_request(timeout_sec=120, memory=1024)
 def predict_match_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for match prediction with explicit CORS support
@@ -1448,10 +1481,11 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
             return https_fn.Response(json.dumps(response_data), status=400, headers=headers)
         
         db_path = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "data.sqlite")
+        requested_family = _normalize_requested_model_family(data)
         frozen = _serve_frozen_prediction(
             db_path,
             data.get('event_id') or data.get('match_id'),
-            _get_live_model_version(),
+            _model_version_for_family(requested_family),
             str(home_team),
             str(away_team),
             str(match_date),
@@ -1541,8 +1575,9 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
                 except Exception as db_error:
                     logger.debug(f"Could not find event_id from database: {db_error}")
             
-            # Save to Firestore if we have event_id and prediction data
-            if event_id and prediction and not prediction.get('error'):
+            # Save to Firestore if we have event_id and prediction data.
+            # Family comparison requests must not overwrite the production prediction doc.
+            if event_id and prediction and not prediction.get('error') and not requested_family:
                 try:
                     db = get_firestore_client()
                     prediction_ref = db.collection('predictions').document(str(event_id))
@@ -1616,12 +1651,18 @@ _UPCOMING_PRED_CACHE_TTL_SECONDS = 1800  # 30 minutes
 _UPCOMING_PRED_BATCH_MAX = 40
 
 
-def _batch_cache_key(event_id: Any, home_team: str, away_team: str, match_date: str) -> str:
+def _batch_cache_key(
+    event_id: Any, home_team: str, away_team: str, match_date: str, model_family: Optional[str] = None
+) -> str:
     """Stable Firestore doc id for a fixture's cached prediction."""
     if event_id:
-        return f"evt_{event_id}"
-    raw = f"{home_team}|{away_team}|{match_date}".lower()
-    return "k_" + re.sub(r"[^a-z0-9]+", "_", raw).strip("_")[:200]
+        base = f"evt_{event_id}"
+    else:
+        raw = f"{home_team}|{away_team}|{match_date}".lower()
+        base = "k_" + re.sub(r"[^a-z0-9]+", "_", raw).strip("_")[:200]
+    if model_family:
+        return f"{base}__{model_family}"
+    return base
 
 
 def _load_pre_kickoff_snapshot(
@@ -1692,6 +1733,8 @@ def _load_pre_kickoff_snapshot(
             out["actual_winner"] = act_w
         if pred_ok is not None:
             out["prediction_correct"] = bool(int(pred_ok))
+        if ":" in str(model_version):
+            out["model_family"] = str(model_version).split(":", 1)[0]
         return out
     except Exception:
         return None
@@ -1754,7 +1797,7 @@ def _serve_frozen_prediction(
     return None
 
 
-@https_fn.on_request(timeout_sec=300, memory=1024, secrets=["HIGHLIGHTLY_API_KEY"])
+@https_fn.on_request(timeout_sec=300, memory=1024)
 def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
     """Predict a whole round of fixtures in a single request.
 
@@ -1814,7 +1857,11 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
             )
 
         matches = matches[:_UPCOMING_PRED_BATCH_MAX]
-        model_version = str(data.get("model_version") or _get_live_model_version())
+        requested_family = _normalize_requested_model_family(data)
+        if requested_family:
+            model_version = _model_version_for_family(requested_family)
+        else:
+            model_version = str(data.get("model_version") or _get_live_model_version())
         try:
             ttl_seconds = int(data.get("ttl_seconds", _UPCOMING_PRED_CACHE_TTL_SECONDS))
         except (TypeError, ValueError):
@@ -1842,7 +1889,9 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                     "home_team": home,
                     "away_team": away,
                     "match_date": match_date,
-                    "cache_key": _batch_cache_key(event_id, home, away, match_date),
+                    "cache_key": _batch_cache_key(
+                        event_id, home, away, match_date, requested_family
+                    ),
                 }
             )
 
@@ -1969,7 +2018,11 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                         predictor = get_predictor()
                     pred = _run_standard_prediction(
                         predictor,
-                        {"event_id": event_id, "match_id": event_id},
+                        {
+                            "event_id": event_id,
+                            "match_id": event_id,
+                            "model_family": requested_family,
+                        },
                         league_id_int,
                         home,
                         away,
@@ -2150,7 +2203,7 @@ def _attach_midnight_snapshots(matches: List[Dict[str, Any]], db_path: str) -> N
             match["prediction_correct"] = snap.get("prediction_correct")
 
 
-@https_fn.on_call(secrets=["HIGHLIGHTLY_API_KEY"])
+@https_fn.on_call()
 def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get upcoming matches for a league
@@ -2516,7 +2569,7 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e), 'matches': []}
 
 
-@https_fn.on_call(secrets=["HIGHLIGHTLY_API_KEY"])
+@https_fn.on_call()
 def get_live_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
     """
     Callable Cloud Function to get live matches
@@ -2541,7 +2594,7 @@ def get_live_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e)}
 
 
-@https_fn.on_request(secrets=["HIGHLIGHTLY_API_KEY"])
+@https_fn.on_request()
 def get_live_matches_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for live matches with explicit CORS support.
@@ -5774,7 +5827,7 @@ def get_trending_topics_http(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps(response_data), status=500, headers=headers)
 
 
-@https_fn.on_request(timeout_sec=120, memory=512, secrets=["HIGHLIGHTLY_API_KEY", "APISPORTS_RUGBY_KEY"])
+@https_fn.on_request(timeout_sec=120, memory=512, secrets=["APISPORTS_RUGBY_KEY"])
 def get_league_standings_http(req: https_fn.Request) -> https_fn.Response:
     """
     Get league standings from Highlightly, falling back to SQLite match results.

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import logging
 from .highlightly_client import HighlightlyRugbyAPI
 from .hybrid_predictor import MultiLeaguePredictor
+from .highlightly_leagues import extract_scores
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,10 @@ class EnhancedRugbyPredictor:
             4574: "Rugby World Cup",
             4551: "Super Rugby",
             4430: "French Top 14",
-            4414: "English Premiership Rugby"
+            4414: "English Premiership Rugby",
+            4714: "Six Nations Championship",
+            5479: "Rugby Union International Friendlies",
+            5480: "Nations Championship",
         }
     
     def get_enhanced_prediction(self, 
@@ -246,36 +250,175 @@ class EnhancedRugbyPredictor:
         
         return min(confidence, 1.0)
     
+    @staticmethod
+    def _extract_match_state(match: Dict[str, Any]) -> str:
+        state = match.get("state") or match.get("status") or ""
+        if isinstance(state, dict):
+            return str(
+                state.get("name")
+                or state.get("description")
+                or state.get("short")
+                or ""
+            ).strip()
+        return str(state or "").strip()
+
+    @staticmethod
+    def _extract_game_time(match: Dict[str, Any], state_name: str) -> Optional[str]:
+        """Best-effort clock/minute from Highlightly's inconsistent rugby payloads."""
+        state = match.get("state") if isinstance(match.get("state"), dict) else {}
+        candidates = [
+            match.get("minute"),
+            match.get("clock"),
+            match.get("elapsed"),
+            match.get("gameTime"),
+            match.get("game_time"),
+            match.get("time"),
+            state.get("minute") if isinstance(state, dict) else None,
+            state.get("clock") if isinstance(state, dict) else None,
+            state.get("elapsed") if isinstance(state, dict) else None,
+            state.get("time") if isinstance(state, dict) else None,
+        ]
+        for raw in candidates:
+            if raw is None or raw == "":
+                continue
+            if isinstance(raw, (int, float)):
+                minute = int(raw)
+                return str(minute) if minute >= 0 else None
+            text = str(raw).strip()
+            if not text:
+                continue
+            digits = "".join(ch for ch in text if ch.isdigit())
+            if digits:
+                return digits
+            if "'" in text or "’" in text:
+                return text.replace("’", "'").rstrip("'")
+        # Rugby halves without an explicit clock still need a phase label.
+        if state_name in {"First half", "Second half", "Half time"}:
+            return None
+        return None
+
+    @staticmethod
+    def _extract_start_time(date_raw: Any) -> Optional[str]:
+        if not date_raw:
+            return None
+        text = str(date_raw).strip()
+        # ISO-ish: 2026-09-08T19:35:00Z
+        if "T" in text and len(text) >= 16:
+            hhmm = text.split("T", 1)[1][:5]
+            if hhmm and hhmm[0].isdigit():
+                return hhmm
+        return None
+
     def get_live_matches(self, league_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get live/upcoming matches with enhanced data"""
+        """Get live/upcoming matches with scores, clock, venue and logos."""
         try:
+            try:
+                league_id = int(league_id) if league_id is not None else None
+            except (TypeError, ValueError):
+                league_id = None
             league_name = self.league_mapping.get(league_id) if league_id else None
-            today = datetime.now().strftime("%Y-%m-%d")
-            
-            matches = self.highlightly_api.get_matches(
-                league_name=league_name,
-                date=today,
-                limit=50
-            )
-            
+            hl_league_id = None
+            if league_id is not None:
+                try:
+                    from .highlightly_leagues import HIGHLIGHTLY_LEAGUE_MAPPINGS
+                    mapped = HIGHLIGHTLY_LEAGUE_MAPPINGS.get(league_id)
+                    if mapped:
+                        hl_league_id = int(mapped[1])
+                except Exception:
+                    hl_league_id = None
+            try:
+                from zoneinfo import ZoneInfo
+                now_sast = datetime.now(ZoneInfo("Africa/Johannesburg"))
+            except Exception:
+                now_sast = datetime.utcnow() + timedelta(hours=2)
+            day_list = [
+                now_sast.strftime("%Y-%m-%d"),
+                (now_sast + timedelta(days=1)).strftime("%Y-%m-%d"),
+            ]
+
+            raw_matches = []
+            seen_ids = set()
+            for day in day_list:
+                payload = self.highlightly_api.get_matches(
+                    league_id=hl_league_id,
+                    league_name=None if hl_league_id else league_name,
+                    date=day,
+                    limit=50,
+                )
+                for row in payload.get("data", []) or []:
+                    if not isinstance(row, dict):
+                        continue
+                    row_id = row.get("id")
+                    if row_id is not None:
+                        if row_id in seen_ids:
+                            continue
+                        seen_ids.add(row_id)
+                    raw_matches.append(row)
+
+            live_states = {"Not started", "First half", "Second half", "Half time"}
             live_matches = []
-            for match in matches.get('data', []):
-                match_state = match.get('state', {}).get('name', '')
-                
-                if match_state in ['Not started', 'First half', 'Second half', 'Half time']:
-                    enhanced_match = {
-                        "match_id": match.get('id'),
-                        "home_team": match.get('homeTeam', {}).get('name'),
-                        "away_team": match.get('awayTeam', {}).get('name'),
-                        "date": match.get('date'),
-                        "state": match_state,
-                        "league": match.get('league', {}).get('name'),
-                        "prediction": self._get_quick_prediction(match)
-                    }
-                    live_matches.append(enhanced_match)
-            
+            for match in raw_matches:
+                if not isinstance(match, dict):
+                    continue
+                match_state = self._extract_match_state(match) or "Not started"
+                if match_state not in live_states:
+                    continue
+
+                home_team = match.get("homeTeam") or {}
+                away_team = match.get("awayTeam") or {}
+                league = match.get("league") or {}
+                venue = match.get("venue") or {}
+                round_info = match.get("round") or {}
+
+                home_score, away_score = extract_scores(match)
+                date_raw = match.get("date")
+                start_time = self._extract_start_time(date_raw)
+                game_time = self._extract_game_time(match, match_state)
+                is_live = match_state in {"First half", "Second half", "Half time"}
+
+                venue_name = None
+                if isinstance(venue, dict):
+                    venue_name = venue.get("name") or venue.get("venue")
+                elif venue:
+                    venue_name = str(venue)
+
+                round_name = None
+                if isinstance(round_info, dict):
+                    round_name = round_info.get("name") or round_info.get("round")
+                elif round_info:
+                    round_name = str(round_info)
+
+                formatted_date = None
+                if date_raw:
+                    formatted_date = str(date_raw).split("T", 1)[0]
+
+                enhanced_match = {
+                    "match_id": match.get("id"),
+                    "home_team": home_team.get("name") if isinstance(home_team, dict) else home_team,
+                    "away_team": away_team.get("name") if isinstance(away_team, dict) else away_team,
+                    "home_logo": home_team.get("logo") if isinstance(home_team, dict) else None,
+                    "away_logo": away_team.get("logo") if isinstance(away_team, dict) else None,
+                    "home_score": home_score if home_score is not None else (0 if is_live else None),
+                    "away_score": away_score if away_score is not None else (0 if is_live else None),
+                    "date": date_raw,
+                    "date_event": date_raw,
+                    "formatted_date": formatted_date,
+                    "start_time": start_time,
+                    "game_time": game_time,
+                    "state": match_state,
+                    "is_live": is_live,
+                    "league": league.get("name") if isinstance(league, dict) else league_name,
+                    "venue": venue_name,
+                    "round": round_name,
+                    "prediction": {},
+                }
+                live_matches.append(enhanced_match)
+
+            # Live boards first, then half-time, then kickoff waiting.
+            rank = {"First half": 0, "Second half": 0, "Half time": 1, "Not started": 2}
+            live_matches.sort(key=lambda m: (rank.get(m.get("state"), 9), str(m.get("date") or "")))
             return live_matches
-            
+
         except Exception as e:
             logger.error(f"Error getting live matches: {e}")
             return []

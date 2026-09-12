@@ -398,37 +398,27 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
       const source = video.currentSrc || video.src;
       console.log('✅ [Storage] Login video metadata loaded from:', source);
       computeLoopBounds();
-      // Try to autoplay when metadata is ready
-      video.play().catch(() => {
-        // Autoplay might be blocked, that's fine
-      });
     };
 
     const handleCanPlay = () => {
-      const video = videoRef.current;
-      if (video) {
-        const source = video.currentSrc || video.src;
-        if (source.includes('firebasestorage.googleapis.com')) {
-          console.log('✅ [Storage] Login video loaded successfully from Firebase Storage');
-        } else {
-          console.log('📁 [Local] Login video loaded from local file');
-        }
+      const videoEl = videoRef.current;
+      if (!videoEl) return;
+      if (!document.hidden) {
+        videoEl.play().catch(() => {});
       }
     };
 
     const handleError = (e) => {
-      const video = videoRef.current;
-      if (video) {
-        const source = video.currentSrc || video.src;
-        console.error('❌ [Storage] Login video failed to load from:', source);
-        console.error('Error details:', e);
-        // Hard fallback for dev / CORS issues.
-        try {
-          video.src = '/login_video.mp4';
-          video.load();
-          video.play().catch(() => {});
-        } catch {}
-      }
+      const videoEl = videoRef.current;
+      if (!videoEl) return;
+      const source = videoEl.currentSrc || videoEl.src || '';
+      console.error('❌ [Storage] Login video failed to load from:', source);
+      console.error('Error details:', e);
+      if (source.includes('login_video.mp4') && !source.includes('firebasestorage')) return;
+      try {
+        videoEl.src = '/login_video.mp4';
+        videoEl.load();
+      } catch {}
     };
 
     // After the FIRST full play, jump back to loopStart and from then on we stay in that 10s loop
@@ -461,6 +451,11 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
     video.addEventListener('ended', handleEnded);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('error', handleError);
+
+    if (video.readyState >= 2) {
+      handleCanPlay();
+    }
+    video.play().catch(() => {});
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -775,7 +770,7 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
           width: '100%',
           height: '100dvh',
           minHeight: '100dvh',
-          backgroundColor: '#020617',
+          backgroundColor: '#0e1117',
         }}
       >
         <RugbyBallLoader size={120} color="#10b981" label="Loading..." />
@@ -799,7 +794,7 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
         overflowX: 'clip',
         WebkitOverflowScrolling: 'touch',
         boxSizing: 'border-box',
-        backgroundColor: '#020617',
+        backgroundColor: '#0e1117',
         // Keep Kick Off reachable above the mobile keyboard.
         pb: { xs: 'max(24px, env(safe-area-inset-bottom, 0px))', sm: 3 },
       }}
@@ -808,9 +803,9 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
       <Box
         component="video"
         ref={videoRef}
-        autoPlay
         muted
         playsInline
+        autoPlay
         preload="auto"
         sx={{
           position: 'absolute',

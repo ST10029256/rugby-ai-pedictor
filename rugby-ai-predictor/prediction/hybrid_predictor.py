@@ -529,6 +529,13 @@ class MultiLeaguePredictor:
             )
         self.sportdevs_api_key = sportdevs_api_key or os.getenv('SPORTDEVS_API_KEY', '')
         self._predictors: Dict[Tuple[str, int], Any] = {}
+        self._killer_predictor = None
+
+    FAMILY_LABELS = {
+        "v4": "V4 AI",
+        "v5": "V5 AI",
+        "killer": "Killer V2 AI",
+    }
 
     @staticmethod
     def _load_champion_map() -> Dict[str, str]:
@@ -557,7 +564,12 @@ class MultiLeaguePredictor:
                 logger.warning("Failed to read league champion map from %s: %s", path, e)
         return {}
 
-    def _requested_model_family(self, league_id: int) -> str:
+    def _requested_model_family(self, league_id: int, override: Optional[str] = None) -> str:
+        forced = str(override or "").strip().lower()
+        if forced in {"killer_v2", "killer_v1", "a5"}:
+            forced = "killer"
+        if forced in {"v4", "v5", "killer"}:
+            return forced
         family = str(os.getenv("LIVE_MODEL_FAMILY", "v4")).strip().lower()
         if family in {"v4", "v5"}:
             return family
@@ -567,15 +579,70 @@ class MultiLeaguePredictor:
             if chosen in {"v4", "v5"}:
                 return chosen
             return "v5"
+        if family in {"killer", "killer_v2"}:
+            return "killer"
         return "v4"
+
+    @staticmethod
+    def _present_family_prediction(result: Dict[str, Any], family: str) -> Dict[str, Any]:
+        """Show that family's own scores/probabilities, not the odds blend."""
+        if not isinstance(result, dict):
+            return result
+        label = MultiLeaguePredictor.FAMILY_LABELS.get(family)
+        if not label:
+            return result
+        ai = result.get("ai_home_win_prob")
+        if ai is not None:
+            try:
+                ai_f = float(ai)
+                result["home_win_prob"] = ai_f
+                if result.get("draw_prob") is None:
+                    result["away_win_prob"] = float(1.0 - ai_f)
+                result["hybrid_home_win_prob"] = ai_f
+                result["confidence"] = float(max(ai_f, 1.0 - ai_f, float(result.get("draw_prob") or 0.0)))
+            except (TypeError, ValueError):
+                pass
+        home_score = result.get("predicted_home_score")
+        away_score = result.get("predicted_away_score")
+        if home_score is not None and away_score is not None:
+            home_r = round(float(home_score))
+            away_r = round(float(away_score))
+            if home_r > away_r:
+                result["predicted_winner"] = "Home"
+            elif away_r > home_r:
+                result["predicted_winner"] = "Away"
+            else:
+                result["predicted_winner"] = "Draw"
+        result["prediction_type"] = label
+        result["model_family"] = family
+        result.setdefault("model_available", True)
+        result.setdefault("show_scores", True)
+        return result
+
+    def _get_killer_predictor(self):
+        if self._killer_predictor is not None:
+            return self._killer_predictor
+        from .storage_loader import load_killer_assets_from_storage
+        from .killer_runtime import KillerRuntimePredictor
+
+        assets = load_killer_assets_from_storage(self.storage_bucket)
+        if not assets:
+            raise FileNotFoundError(
+                "Killer V2 freeze weights were not found locally or in Cloud Storage. "
+                "Upload models/killer_v2/FROZEN.json plus live_A5_seed_{42,1337,9001}.pt."
+            )
+        self._killer_predictor = KillerRuntimePredictor(assets, self.db_path)
+        return self._killer_predictor
     
-    def _get_predictor(self, league_id: int) -> HybridPredictor:
+    def _get_predictor(self, league_id: int, family_override: Optional[str] = None) -> HybridPredictor:
         """Get or create predictor for a specific league"""
         import logging
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG)
 
-        requested_family = self._requested_model_family(league_id)
+        requested_family = self._requested_model_family(league_id, family_override)
+        if requested_family == "killer":
+            return self._get_killer_predictor()
         cache_key = (requested_family, int(league_id))
         logger.info(f"=== _get_predictor called for league {league_id} family={requested_family} ===")
 
@@ -596,7 +663,8 @@ class MultiLeaguePredictor:
             raise ValueError(error_msg)
         
         runtime_families = [requested_family]
-        if requested_family == "v5":
+        explicit = str(family_override or "").strip().lower() in {"v4", "v5", "killer", "killer_v2", "a5"}
+        if requested_family == "v5" and not explicit:
             runtime_families.append("v4")
 
         for runtime_family in runtime_families:
@@ -648,6 +716,11 @@ class MultiLeaguePredictor:
                     runtime_error,
                 )
 
+        if explicit:
+            raise FileNotFoundError(
+                f"No {requested_family.upper()} runtime assets found for league {league_id}."
+            )
+
         # Fallback path (legacy .pkl models).
         try:
             from .storage_loader import load_model_from_storage
@@ -687,11 +760,13 @@ class MultiLeaguePredictor:
             logger.error(f"❌ Failed to initialize HybridPredictor: {e}", exc_info=True)
             raise
     
-    def has_trained_model(self, league_id: int) -> bool:
+    def has_trained_model(self, league_id: int, model_family: Optional[str] = None) -> bool:
         """Return True when a deployed model exists for this league or a linked international league."""
-        from .storage_loader import model_exists_in_storage
+        from .storage_loader import killer_assets_available, model_exists_in_storage
 
-        requested_family = self._requested_model_family(league_id)
+        requested_family = self._requested_model_family(league_id, model_family)
+        if requested_family == "killer":
+            return killer_assets_available(self.storage_bucket)
 
         def _exists(lid: int) -> bool:
             return model_exists_in_storage(
@@ -707,12 +782,13 @@ class MultiLeaguePredictor:
         league_id: int,
         home_team: str,
         away_team: str,
+        model_family: Optional[str] = None,
     ) -> Tuple[int, Dict[str, Any]]:
         import sqlite3
 
         from .storage_loader import model_exists_in_storage
 
-        requested_family = self._requested_model_family(league_id)
+        requested_family = self._requested_model_family(league_id, model_family)
 
         def _exists(lid: int) -> bool:
             return model_exists_in_storage(
@@ -786,7 +862,8 @@ class MultiLeaguePredictor:
         }
 
     def predict_match(self, home_team: str, away_team: str, league_id: int, 
-                     match_date: str, match_id: Optional[int] = None) -> Dict[str, Any]:
+                     match_date: str, match_id: Optional[int] = None,
+                     model_family: Optional[str] = None) -> Dict[str, Any]:
         """
         Predict match outcome using team names
         
@@ -796,27 +873,49 @@ class MultiLeaguePredictor:
             league_id: League ID
             match_date: Match date in YYYY-MM-DD format
             match_id: Optional match ID for bookmaker odds
+            model_family: Optional v4 / v5 / killer override
             
         Returns:
             Prediction dictionary with winner, scores, and confidence
         """
+        requested_family = self._requested_model_family(int(league_id), model_family)
+        explicit = str(model_family or "").strip().lower() in {
+            "v4", "v5", "killer", "killer_v2", "killer_v1", "a5",
+        }
+        if requested_family == "killer":
+            predictor = self._get_killer_predictor()
+            result = predictor.predict_match(
+                home_team,
+                away_team,
+                int(league_id),
+                match_date,
+                match_id=match_id,
+            )
+            result.setdefault("requested_league_id", int(league_id))
+            result.setdefault("prediction_league_id", int(league_id))
+            return self._present_family_prediction(result, "killer")
+
         source_league_id, link_meta = self._resolve_prediction_league(
             int(league_id),
             str(home_team),
             str(away_team),
+            model_family=model_family,
         )
-        predictor = self._get_predictor(source_league_id)
+        predictor = self._get_predictor(source_league_id, model_family)
+        inner_league = int(getattr(predictor, "league_id", source_league_id) or source_league_id)
         result = predictor.predict_match(
             home_team,
             away_team,
-            int(league_id),
+            inner_league,
             match_date,
             match_id=match_id,
         )
         if isinstance(result, dict):
             result.setdefault("requested_league_id", int(league_id))
             result.setdefault("prediction_league_id", int(source_league_id))
-            if link_meta.get("link_source") == "international_cluster":
+            if explicit:
+                result = self._present_family_prediction(result, requested_family)
+            elif link_meta.get("link_source") == "international_cluster":
                 result["international_model_link"] = link_meta
                 result.setdefault(
                     "prediction_type",

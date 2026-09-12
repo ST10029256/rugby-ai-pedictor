@@ -139,7 +139,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
       </Box>
       <Box className="custom-metric">
         <Box className="metric-label">League</Box>
-        <Box className="metric-value" sx={{ fontSize: '1.2rem' }}>{leagueName}</Box>
+        <Box className="metric-value metric-value--league">{leagueName || '—'}</Box>
         <Box className="metric-delta">Selected</Box>
       </Box>
       <Box className="custom-metric">

@@ -286,3 +286,112 @@ def load_model_from_storage(
         logger.error(f"❌ {error_msg}", exc_info=True)
         raise RuntimeError(error_msg) from e
 
+
+def _killer_local_dirs() -> List[str]:
+    env_dir = str(os.getenv("KILLER_ARTIFACT_DIR") or "").strip()
+    here = os.path.dirname(os.path.abspath(__file__))
+    functions_root = os.path.dirname(here)
+    repo_root = os.path.dirname(functions_root)
+    dirs = []
+    if env_dir:
+        dirs.append(env_dir)
+    dirs.extend(
+        [
+            os.path.join(functions_root, "artifacts_killer_v2"),
+            os.path.join(repo_root, "artifacts_killer_v2"),
+        ]
+    )
+    return dirs
+
+
+def _killer_dir_is_ready(path: str) -> bool:
+    if not path or not os.path.isdir(path):
+        return False
+    if not os.path.isfile(os.path.join(path, "FROZEN.json")):
+        return False
+    seeds = [
+        os.path.join(path, "live_A5_seed_42.pt"),
+        os.path.join(path, "live_A5_seed_1337.pt"),
+        os.path.join(path, "live_A5_seed_9001.pt"),
+    ]
+    return all(os.path.isfile(p) for p in seeds)
+
+
+def _killer_assets_from_dir(path: str) -> Dict[str, Any]:
+    return {
+        "artifacts_dir": path,
+        "seed_model_paths": [
+            os.path.join(path, "live_A5_seed_42.pt"),
+            os.path.join(path, "live_A5_seed_1337.pt"),
+            os.path.join(path, "live_A5_seed_9001.pt"),
+        ],
+        "model_family": "killer",
+    }
+
+
+def load_local_killer_assets() -> Optional[Dict[str, Any]]:
+    """Load Killer V2 freeze weights from disk when present."""
+    for path in _killer_local_dirs():
+        if _killer_dir_is_ready(path):
+            logger.info("Loaded Killer V2 assets from %s", path)
+            return _killer_assets_from_dir(path)
+    return None
+
+
+def load_killer_assets_from_storage(bucket_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Download Killer V2 freeze weights from Cloud Storage, or use a local copy."""
+    local = load_local_killer_assets()
+    if local:
+        return local
+    if not bucket_name:
+        return None
+    try:
+        from google.cloud import storage  # type: ignore
+    except Exception as import_error:
+        logger.warning("Could not import google.cloud.storage for Killer assets: %s", import_error)
+        return None
+
+    clean_bucket_name = (
+        bucket_name.replace("gs://", "").replace("https://", "").replace("http://", "").split("/")[0]
+    )
+    client = storage.Client()
+    bucket = client.bucket(clean_bucket_name)
+    prefixes = ("models/killer_v2/", "models/artifacts_killer_v2/", "killer_v2/")
+    required = ("FROZEN.json", "live_A5_seed_42.pt", "live_A5_seed_1337.pt", "live_A5_seed_9001.pt")
+    found_prefix = None
+    for prefix in prefixes:
+        if all(bucket.blob(f"{prefix}{name}").exists() for name in required):
+            found_prefix = prefix
+            break
+    if found_prefix is None:
+        logger.warning("Killer V2 freeze weights not found in bucket %s", clean_bucket_name)
+        return None
+
+    temp_dir = tempfile.mkdtemp(prefix="killer_v2_assets_")
+    for name in required:
+        local_path = os.path.join(temp_dir, name)
+        bucket.blob(f"{found_prefix}{name}").download_to_filename(local_path)
+    logger.info("Downloaded Killer V2 assets from gs://%s/%s", clean_bucket_name, found_prefix)
+    return _killer_assets_from_dir(temp_dir)
+
+
+def killer_assets_available(bucket_name: Optional[str] = None) -> bool:
+    if load_local_killer_assets():
+        return True
+    if not bucket_name:
+        return False
+    try:
+        from google.cloud import storage  # type: ignore
+    except Exception:
+        return False
+    clean_bucket_name = (
+        bucket_name.replace("gs://", "").replace("https://", "").replace("http://", "").split("/")[0]
+    )
+    client = storage.Client()
+    bucket = client.bucket(clean_bucket_name)
+    required = ("FROZEN.json", "live_A5_seed_42.pt", "live_A5_seed_1337.pt", "live_A5_seed_9001.pt")
+    for prefix in ("models/killer_v2/", "models/artifacts_killer_v2/", "killer_v2/"):
+        if all(bucket.blob(f"{prefix}{name}").exists() for name in required):
+            return True
+    return False
+

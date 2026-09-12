@@ -1,27 +1,10 @@
-import React, { memo, useEffect, useMemo } from 'react';
+import React, { memo, useMemo } from 'react';
 import { Box, Typography, Grid } from '@mui/material';
 import { MEDIA_URLS } from '../utils/storageUrls';
 import { hasMeaningfulTime, formatKickoffSAST, formatSASTDateYMD, getLocalYYYYMMDD } from '../utils/date';
 import { predictionsWidgetSx } from '../utils/predictionsLayout';
 
-const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagueName }) {
-  // Log image loading status
-  useEffect(() => {
-    const img = new Image();
-    img.onload = () => {
-      const source = MEDIA_URLS.imageRugby;
-      if (source.includes('firebasestorage.googleapis.com')) {
-        console.log('✅ [Storage] Rugby image loaded successfully from Firebase Storage');
-      } else {
-        console.log('📁 [Local] Rugby image loaded from local file');
-      }
-    };
-    img.onerror = (e) => {
-      console.error('❌ [Storage] Rugby image failed to load from:', MEDIA_URLS.imageRugby);
-      console.error('Error details:', e);
-    };
-    img.src = MEDIA_URLS.imageRugby;
-  }, []);
+const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagueName, modelFamily }) {
 
   const getPredictionKickoffMs = (prediction) => {
     const kickoff = prediction?.kickoff_at;
@@ -183,6 +166,14 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
               <Typography variant="h2" component="h2">
                 📅 {date}{date !== 'TBD' && date < getLocalYYYYMMDD() ? ' · AI vs actual' : ''}
               </Typography>
+              {modelFamily && (
+                <Typography
+                  variant="caption"
+                  sx={{ display: 'block', mt: 0.6, color: '#f4e4bc', fontWeight: 700, letterSpacing: 0.14, textTransform: 'uppercase' }}
+                >
+                  {modelFamily === 'killer' ? 'Killer V2' : `${String(modelFamily).toUpperCase()} model`}
+                </Typography>
+              )}
             </Box>
 
             {predictionsByDate[date].map((prediction, idx) => {
@@ -231,7 +222,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
               return (
               <Box 
                 key={idx} 
-                className="prediction-card fade-in-up"
+                className="prediction-card prediction-result-card fade-in-up"
                 sx={{
                   backgroundImage: `url(${MEDIA_URLS.imageRugby})`,
                   backgroundSize: 'cover',
@@ -256,7 +247,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                 }}
               >
                   {kickoffTimeDisplay && (
-                    <Box sx={{ position: 'relative', height: { xs: 'auto', md: 86, lg: 94 }, mb: { xs: 1.5, sm: 1.85, md: 1.25 } }}>
+                    <Box sx={{ position: 'relative', height: { xs: 'auto', md: 58, lg: 64 }, mb: { xs: 1.5, sm: 1.85, md: 0.7 } }}>
                       <Box
                         sx={{
                           display: 'flex',
@@ -311,9 +302,9 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                   )}
                   {/* Score Display - only when AI model has historical training */}
                   {scoreDisplay && (
-                  <Box sx={{ my: 2 }}>
-                    <Box sx={{ borderTop: '1px solid #4b5563', mb: 3 }} />
-                    <Grid container spacing={{ xs: 0.5, sm: 2, md: 3 }} alignItems="center" justifyContent="center" sx={{ mb: 2, width: '100%', margin: '0 auto', maxWidth: '100%' }}>
+                  <Box sx={{ my: { xs: 2, md: 0.8 } }}>
+                    <Box sx={{ borderTop: '1px solid #4b5563', mb: { xs: 3, md: 1.5 } }} />
+                    <Grid container spacing={{ xs: 0.5, sm: 2, md: 2 }} alignItems="center" justifyContent="center" sx={{ mb: { xs: 2, md: 1 }, width: '100%', margin: '0 auto', maxWidth: '100%' }}>
                       <Grid item xs={5} sm={4} md={4} lg={4} xl={4} sx={{ 
                         padding: { xs: '0.25rem', sm: '0.5rem', md: '1rem' }, 
                         boxSizing: 'border-box',
@@ -338,7 +329,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                           width: '100%',
                           marginBottom: { xs: '0.5rem', sm: '1rem' }
                         }}>{homeTeam}</Typography>
-                        <Box component="div" className="team-score" sx={{ textAlign: 'center', width: '100%', fontWeight: 900, fontSize: { xs: '3.5rem', sm: '5rem', md: '7rem' }, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>{homeScore}</Box>
+                        <Box component="div" className="team-score" sx={{ textAlign: 'center', width: '100%', fontWeight: 900, fontSize: { xs: '3.5rem', sm: '5rem', md: '4.4rem', lg: '5rem' }, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>{homeScore}</Box>
                         {isComparison && (
                           <Typography sx={{ mt: 0.75, color: '#94a3b8', fontWeight: 700, fontSize: { xs: '0.78rem', sm: '0.92rem' } }}>
                             {aiHome != null ? `AI ${aiHome}` : 'No AI lock'}
@@ -362,7 +353,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                           justifyContent: 'center', 
                           width: '100%',
                           height: '100%',
-                          marginTop: { xs: '2.4em', sm: '2.4em', md: '2.4em' },
+                          marginTop: { xs: '2.4em', sm: '2.4em', md: '1.35em' },
                           marginBottom: { xs: '0', sm: '0', md: '0' }
                         }}>
                           <Typography className="vs-text" sx={{ textAlign: 'center', width: '100%', margin: 0 }}>VS</Typography>
@@ -392,7 +383,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                           width: '100%',
                           marginBottom: { xs: '0.5rem', sm: '1rem' }
                         }}>{awayTeam}</Typography>
-                        <Box component="div" className="team-score" sx={{ textAlign: 'center', width: '100%', fontWeight: 900, fontSize: { xs: '3.5rem', sm: '5rem', md: '7rem' }, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>{awayScore}</Box>
+                        <Box component="div" className="team-score" sx={{ textAlign: 'center', width: '100%', fontWeight: 900, fontSize: { xs: '3.5rem', sm: '5rem', md: '4.4rem', lg: '5rem' }, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>{awayScore}</Box>
                         {isComparison && (
                           <Typography sx={{ mt: 0.75, color: '#94a3b8', fontWeight: 700, fontSize: { xs: '0.78rem', sm: '0.92rem' } }}>
                             {aiAway != null ? `AI ${aiAway}` : 'No AI lock'}
@@ -477,7 +468,7 @@ const PredictionsDisplay = memo(function PredictionsDisplay({ predictions, leagu
                       </Box>
                     )}
 
-                  <Box sx={{ borderTop: '1px solid #4b5563', borderBottom: '1px solid #4b5563', py: 2, my: 2 }}>
+                  <Box sx={{ borderTop: '1px solid #4b5563', borderBottom: '1px solid #4b5563', py: { xs: 2, md: 1.25 }, my: { xs: 2, md: 1 } }}>
                     {winner && (
                     <Box className="winner-display">
                       <Typography
