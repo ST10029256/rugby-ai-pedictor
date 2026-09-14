@@ -8,19 +8,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import RugbyBallLoader from './RugbyBallLoader';
 import { TabLoadingScreen, useViewLoadingScrollLock } from '../utils/viewLoader';
 import { getNewsFeed } from '../firebase';
-
-const LEAGUE_CONFIGS = {
-  4986: { name: 'Rugby Championship' },
-  4446: { name: 'United Rugby Championship' },
-  5069: { name: 'Currie Cup' },
-  4574: { name: 'Rugby World Cup' },
-  4551: { name: 'Super Rugby' },
-  4430: { name: 'French Top 14' },
-  4414: { name: 'English Premiership Rugby' },
-  4714: { name: 'Six Nations Championship' },
-  5479: { name: 'Rugby Union International Friendlies' },
-  5480: { name: 'Nations Championship' },
-};
+import { LEAGUE_CONFIGS, leagueIdsMatch } from '../utils/leagues';
 
 const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
 const PLAYABLE_VIDEO_EXT_PATTERN = /\.(mp4|webm|ogg|m3u8)(\?.*)?$/i;
@@ -801,6 +789,10 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
   const displayLeagueChipLabel = useMemo(() => {
     if (!isSmallScreen) return displayLeagueName;
     if (displayLeagueName === 'United Rugby Championship') return 'URC';
+    if (displayLeagueName === 'Investec Champions Cup') return 'Champions Cup';
+    if (displayLeagueName === 'EPCR Challenge Cup') return 'Challenge Cup';
+    if (displayLeagueName === "Women's Six Nations") return "Women's 6N";
+    if (displayLeagueName === "Women's Rugby World Cup") return "Women's RWC";
     return displayLeagueName;
   }, [displayLeagueName, isSmallScreen]);
 
@@ -1277,8 +1269,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
         if (result?.data?.success) {
           let news = Array.isArray(result.data.news) ? result.data.news : [];
           if (leagueId) {
-            const targetLeagueId = Number(leagueId);
-            news = news.filter((item) => Number(item?.league_id) === targetLeagueId);
+            news = news.filter((item) => leagueIdsMatch(leagueId, item?.league_id));
           }
           // Keep a per-league memory cache so fast league switching doesn't wipe known-good feeds.
           if (news.length > 0) {

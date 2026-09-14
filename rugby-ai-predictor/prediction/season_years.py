@@ -1,6 +1,6 @@
 """Season-year rules shared by standings, Highlightly fetches, and History.
 
-Only URC, Premiership and Top 14 cross two calendar years.
+URC, Premiership, Top 14 and EPCR cups cross two calendar years.
 Everything else is a single calendar year / World Cup edition year.
 """
 
@@ -20,6 +20,14 @@ URC = 4446
 PREMIERSHIP = 4414
 TOP14 = 4430
 
+CHAMPIONS_CUP = 5481
+CHALLENGE_CUP = 5482
+WOMEN_RWC = 5483
+WOMEN_SIX_NATIONS = 5484
+WXV_1 = 5485
+WXV_2 = 5486
+WXV_3 = 5487
+
 CALENDAR_YEAR_LEAGUE_IDS = {
     SUPER_RUGBY,
     SIX_NATIONS,
@@ -28,16 +36,21 @@ CALENDAR_YEAR_LEAGUE_IDS = {
     NATIONS_CHAMPIONSHIP,
     RWC,
     FRIENDLIES,
+    WOMEN_RWC,
+    WOMEN_SIX_NATIONS,
+    WXV_1,
+    WXV_2,
+    WXV_3,
 }
 
-CROSS_YEAR_LEAGUE_IDS = {URC, PREMIERSHIP, TOP14}
+CROSS_YEAR_LEAGUE_IDS = {URC, PREMIERSHIP, TOP14, CHAMPIONS_CUP, CHALLENGE_CUP}
 
 
 def cross_year_season_start_month(league_id: Any) -> Optional[int]:
     lid = int(league_id)
     if lid == TOP14:
         return 8
-    if lid in (URC, PREMIERSHIP):
+    if lid in (URC, PREMIERSHIP, CHAMPIONS_CUP, CHALLENGE_CUP):
         return 9
     return None
 

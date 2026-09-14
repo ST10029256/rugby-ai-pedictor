@@ -1,22 +1,9 @@
 import { getPrimaryStandingsSeasonYear } from './season';
+import { INTERNATIONAL_LEAGUE_IDS, LEAGUE_ID_MAPPING } from './leagues';
 import leagueTeamsFallback from './leagueTeamsFallback.json';
 import staticTeamLogos from './staticTeamLogos.json';
 
-/** Local league id → Highlightly league id (same as standings). */
-export const LEAGUE_ID_MAPPING = {
-  4986: 73119,
-  4446: 65460,
-  5069: 32271,
-  4574: 59503,
-  4551: 61205,
-  4430: 14400,
-  4414: 11847,
-  4714: 44185,
-  5479: 72268,
-  5480: 124179,
-};
-
-export const INTERNATIONAL_LEAGUE_IDS = new Set([4986, 4574, 4714, 5479, 5480]);
+export { INTERNATIONAL_LEAGUE_IDS, LEAGUE_ID_MAPPING };
 
 const PREM_LEAGUE_ID = 4414;
 

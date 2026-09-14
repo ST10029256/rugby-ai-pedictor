@@ -54,10 +54,20 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, mean_absolute_error
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_ROOT = Path(__file__).resolve().parent.parent
+_PRED_ROOT = _ROOT / "rugby-ai-predictor"
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+if str(_PRED_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PRED_ROOT))
 
 from prediction.config import LEAGUE_MAPPINGS
 from prediction.features import FeatureConfig, build_feature_table
+from prediction.international_leagues import (
+    expand_training_load_ids,
+    get_linked_league_ids,
+    international_pool_enabled,
+)
 
 V4_VERSION = "v4"
 LOG = logging.getLogger("maz_v4")
@@ -81,6 +91,14 @@ LEAGUE_HOME_ADV_PRIOR: Dict[int, float] = {
     4714: 0.54,  # Six Nations
     4574: 0.50,  # Rugby World Cup: conservative prior, let data override it
     5479: 0.52,  # Friendlies
+    5480: 0.52,  # Nations Championship
+    5481: 0.55,  # Investec Champions Cup
+    5482: 0.55,  # EPCR Challenge Cup
+    5483: 0.50,  # Women's Rugby World Cup
+    5484: 0.54,  # Women's Six Nations
+    5485: 0.52,  # WXV 1
+    5486: 0.52,  # WXV 2
+    5487: 0.52,  # WXV 3
 }
 
 
@@ -125,6 +143,29 @@ def default_db_path() -> Path:
     p_main = root / "data.sqlite"
     p_fn = root / "rugby-ai-predictor" / "data.sqlite"
     return p_main if p_main.exists() else p_fn
+
+
+def resolve_selected_leagues(
+    league_id: Optional[int],
+    league_ids: Optional[str],
+    all_leagues: bool,
+) -> Dict[int, str]:
+    selected: Dict[int, str] = {}
+    if league_ids:
+        for part in str(league_ids).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            lid = int(part)
+            selected[lid] = LEAGUE_MAPPINGS.get(lid, f"League {lid}")
+    if league_id is not None:
+        lid = int(league_id)
+        selected[lid] = LEAGUE_MAPPINGS.get(lid, f"League {lid}")
+    if all_leagues:
+        selected.update(dict(LEAGUE_MAPPINGS))
+    if not selected:
+        raise SystemExit("Use --league-id <id>, --league-ids <csv>, or --all-leagues")
+    return selected
 
 
 def load_all_df(conn: sqlite3.Connection, league_ids: Sequence[int]) -> pd.DataFrame:
@@ -927,8 +968,33 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="MAZ Boss MAXED V4 (temporal + interaction intelligence).")
     parser.add_argument("--db-path", default=None)
     parser.add_argument("--league-id", type=int, default=None)
+    parser.add_argument(
+        "--league-ids",
+        type=str,
+        default=None,
+        help="Comma-separated league ids to train (does not retrain unlisted leagues).",
+    )
     parser.add_argument("--all-leagues", action="store_true")
     parser.add_argument("--min-games", type=int, default=120)
+    parser.add_argument(
+        "--min-train-rows",
+        type=int,
+        default=40,
+        help="Minimum pooled completed rows for clustered leagues (EPCR / internationals).",
+    )
+    parser.add_argument(
+        "--international-pool",
+        dest="international_pool",
+        action="store_true",
+        default=True,
+        help="Pool linked league history (internationals, women's, EPCR + club context).",
+    )
+    parser.add_argument(
+        "--no-international-pool",
+        dest="international_pool",
+        action="store_false",
+        help="Disable linked-league pooling.",
+    )
     parser.add_argument("--holdout-ratio", type=float, default=0.2)
     parser.add_argument("--walk-forward", action="store_true")
     parser.add_argument(
@@ -976,8 +1042,8 @@ def main() -> None:
     if not args._ensemble_seeds:
         args._ensemble_seeds = [int(args.seed)]
 
-    if not args.league_id and not args.all_leagues:
-        raise SystemExit("Use --league-id <id> or --all-leagues")
+    if not args.league_id and not args.league_ids and not args.all_leagues:
+        raise SystemExit("Use --league-id <id>, --league-ids <csv>, or --all-leagues")
     if args.walk_forward and args.train_all_completed:
         raise SystemExit("Use either --walk-forward or --train-all-completed, not both.")
 
@@ -988,14 +1054,32 @@ def main() -> None:
     if not db_path.exists():
         raise SystemExit(f"DB not found: {db_path}")
 
-    leagues = {args.league_id: LEAGUE_MAPPINGS.get(args.league_id, f"League {args.league_id}")} if args.league_id else LEAGUE_MAPPINGS
+    leagues = resolve_selected_leagues(args.league_id, args.league_ids, args.all_leagues)
     conn = sqlite3.connect(str(db_path))
-    df_all = load_all_df(conn, leagues.keys())
+    load_ids = expand_training_load_ids(leagues.keys())
+    df_all = load_all_df(conn, load_ids)
     conn.close()
     if df_all.empty:
         raise SystemExit("No completed games found for selected leagues.")
 
-    keep_ids = [lid for lid in leagues.keys() if int((df_all["league_id"] == lid).sum()) >= args.min_games]
+    keep_ids: List[int] = []
+    for lid in leagues.keys():
+        n_own = int((df_all["league_id"] == lid).sum())
+        if international_pool_enabled(lid, args.international_pool):
+            pool_ids = get_linked_league_ids(lid)
+            n_pool = int(df_all["league_id"].isin(pool_ids).sum())
+            if n_pool >= int(args.min_train_rows):
+                keep_ids.append(lid)
+                LOG.info(
+                    "[%s] pooled keep: own_rows=%s pooled_rows=%s pool_leagues=%s",
+                    leagues[lid],
+                    n_own,
+                    n_pool,
+                    pool_ids,
+                )
+            continue
+        if n_own >= args.min_games:
+            keep_ids.append(lid)
     # In full-train mode, include international friendlies if enough completed rows to train.
     if args.train_all_completed and args.all_leagues and FRIENDLIES_LEAGUE_ID in leagues and FRIENDLIES_LEAGUE_ID not in keep_ids:
         n_friendlies = int((df_all["league_id"] == FRIENDLIES_LEAGUE_ID).sum())
@@ -1009,19 +1093,20 @@ def main() -> None:
             )
     if not keep_ids:
         raise SystemExit("No leagues meet --min-games threshold.")
+    retain_ids = expand_training_load_ids(keep_ids)
     df_all = (
-        df_all[df_all["league_id"].isin(keep_ids)]
+        df_all[df_all["league_id"].isin(retain_ids)]
         .copy()
         .sort_values(["date_event", "event_id"])
         .reset_index(drop=True)
     )
     global_team_to_idx = build_global_team_to_idx(df_all)
-    global_league_to_idx = build_global_league_to_idx(keep_ids)
+    global_league_to_idx = build_global_league_to_idx(retain_ids)
 
     pretrained_by_seed: Dict[int, Dict[str, torch.Tensor]] = {}
     if args.global_pretrain:
         pre_parts = []
-        for lid in keep_ids:
+        for lid in retain_ids:
             g_l = (
                 df_all[df_all["league_id"] == lid]
                 .copy()
@@ -1620,12 +1705,29 @@ def main() -> None:
 
     for lid in keep_ids:
         name = leagues[lid]
-        g = (
-            df_all[df_all["league_id"] == lid]
-            .copy()
-            .sort_values(["date_event", "event_id"])
-            .reset_index(drop=True)
-        )
+        if international_pool_enabled(lid, args.international_pool):
+            pool_ids = get_linked_league_ids(lid)
+            g = (
+                df_all[df_all["league_id"].isin(pool_ids)]
+                .copy()
+                .sort_values(["date_event", "event_id"])
+                .reset_index(drop=True)
+            )
+            n_own = int((df_all["league_id"] == lid).sum())
+            LOG.info(
+                "[%s] pool enabled: own_rows=%s pooled_rows=%s pool_leagues=%s",
+                name,
+                n_own,
+                len(g),
+                pool_ids,
+            )
+        else:
+            g = (
+                df_all[df_all["league_id"] == lid]
+                .copy()
+                .sort_values(["date_event", "event_id"])
+                .reset_index(drop=True)
+            )
         n = len(g)
         if args.train_all_completed:
             LOG.info("[%s] full-train mode: using all completed games (n=%s)", name, n)

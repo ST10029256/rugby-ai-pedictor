@@ -1,4 +1,4 @@
-"""Highlightly league mappings and fixture fetch helpers (all 10 rugby leagues)."""
+"""Highlightly league mappings and fixture fetch helpers."""
 
 from __future__ import annotations
 
@@ -25,7 +25,16 @@ HIGHLIGHTLY_LEAGUE_MAPPINGS: Dict[int, Tuple[str, int]] = {
     4714: ("Six Nations Championship", 44185),
     5479: ("Rugby Union International Friendlies", 72268),
     5480: ("Nations Championship", 124179),
+    5481: ("Investec Champions Cup", 46738),
+    5482: ("EPCR Challenge Cup", 45036),
+    5483: ("Women's Rugby World Cup", 60354),
+    5484: ("Women's Six Nations", 47589),
+    5485: ("WXV 1", 120775),
+    5486: ("WXV 2", 121626),
+    5487: ("WXV 3", 122477),
 }
+
+WOMEN_LEAGUE_IDS = {5483, 5484, 5485, 5486, 5487}
 
 YEAR_SPAN_LEAGUE_IDS = CROSS_YEAR_LEAGUE_IDS
 WOMEN_INDICATORS = (" w rugby", " women", " womens", " w ", " women's", " w's")
@@ -70,6 +79,13 @@ def parse_api_key(explicit: Optional[str] = None) -> str:
     return key
 
 
+def is_womens_league(league_id: Any) -> bool:
+    try:
+        return int(league_id) in WOMEN_LEAGUE_IDS
+    except (TypeError, ValueError):
+        return False
+
+
 def is_womens_match(home: str, away: str) -> bool:
     home_l = home.lower()
     away_l = away.lower()
@@ -97,8 +113,14 @@ def season_candidates(now: datetime, our_league_id: int, include_history: bool) 
         seasons = list(range(2015, year + 2))
         if our_league_id == 4574:
             seasons.extend([2023, 2027])
+        elif our_league_id == 5483:
+            seasons.extend([2010, 2014, 2017, 2022, 2025])
+        elif our_league_id in WOMEN_LEAGUE_IDS:
+            seasons.extend([2022, 2023, 2024, 2025, 2026])
     elif our_league_id == 4574:
         seasons = [year + 1, year, year - 1, 2023]
+    elif our_league_id == 5483:
+        seasons = [year, year - 1, year + 1, 2025, 2022]
     elif our_league_id == 5479:
         seasons = [year, year - 1, year - 2]
     elif our_league_id == 5480:
@@ -303,7 +325,9 @@ def highlightly_row_to_game(
 ) -> Optional[Dict[str, Any]]:
     home = str((row.get("homeTeam") or {}).get("name") or "").strip()
     away = str((row.get("awayTeam") or {}).get("name") or "").strip()
-    if not home or not away or is_womens_match(home, away):
+    if not home or not away:
+        return None
+    if not is_womens_league(our_league_id) and is_womens_match(home, away):
         return None
 
     dt = parse_match_dt(row.get("date"))

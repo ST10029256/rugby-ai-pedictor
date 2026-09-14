@@ -986,8 +986,9 @@ def get_enhanced_predictor():
                 if not db_path:
                     db_path = os.path.join(os.path.dirname(__file__), "data.sqlite")
                 _enhanced_predictor = ERP(db_path, api_key)
-        except (ImportError, Exception):
-            pass  # Enhanced predictor is optional
+        except (ImportError, Exception) as exc:
+            import logging
+            logging.getLogger(__name__).exception("Enhanced predictor init failed: %s", exc)
     return _enhanced_predictor
 
 
@@ -1243,6 +1244,7 @@ def predict_match(req: https_fn.CallableRequest) -> Dict[str, Any]:
             str(home_team),
             str(away_team),
             str(match_date),
+            data.get('kickoff_at') or data.get('kickoffAt'),
         )
         if frozen is not None:
             return frozen
@@ -1489,6 +1491,7 @@ def predict_match_http(req: https_fn.Request) -> https_fn.Response:
             str(home_team),
             str(away_team),
             str(match_date),
+            data.get('kickoff_at') or data.get('kickoffAt'),
         )
         if frozen is not None:
             headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
@@ -1747,8 +1750,14 @@ def _serve_frozen_prediction(
     home_team: str,
     away_team: str,
     match_date: str,
+    kickoff_at: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Return the midnight-locked snapshot, or a refusal once kickoff has passed."""
+    """Return a locked pre-kickoff snapshot when we have one.
+
+    Kickoff having started is not a reason to hide the forecast. Snapshot
+    *writes* still go through refuse_reason; serving always prefers a snapshot
+    and otherwise falls through to a live compute.
+    """
     snap = _load_pre_kickoff_snapshot(db_path, event_id, model_version)
     if snap is not None:
         snap["event_id"] = event_id
@@ -1756,44 +1765,6 @@ def _serve_frozen_prediction(
         snap["away_team"] = away_team
         snap["match_date"] = match_date
         return snap
-    if event_id is None or not os.path.exists(db_path):
-        return None
-    try:
-        import sqlite3
-
-        from prediction.prediction_integrity import refuse_reason
-
-        conn = sqlite3.connect(db_path)
-        try:
-            row = conn.execute(
-                """
-                SELECT timestamp, date_event, home_score, away_score
-                FROM event WHERE id = ? LIMIT 1
-                """,
-                (int(event_id),),
-            ).fetchone()
-        finally:
-            conn.close()
-        if not row:
-            return None
-        kickoff_at, date_event, home_score, away_score = row
-        refusal = refuse_reason(
-            kickoff_at=kickoff_at or date_event or match_date,
-            has_actual_score=home_score is not None and away_score is not None,
-            date_event=date_event or match_date,
-        )
-        if refusal:
-            return {
-                "event_id": event_id,
-                "home_team": home_team,
-                "away_team": away_team,
-                "match_date": match_date,
-                "prediction_unavailable": True,
-                "unavailable_reason": refusal,
-                "_source": "not_recorded",
-            }
-    except Exception:
-        return None
     return None
 
 
@@ -1881,6 +1852,7 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
             away = str(m.get("away_team") or "").strip()
             match_date = str(m.get("match_date") or "").strip()
             event_id = m.get("event_id") or m.get("id")
+            kickoff_at = m.get("kickoff_at") or m.get("kickoffAt")
             if not home or not away or not match_date:
                 continue
             normalized.append(
@@ -1889,6 +1861,7 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                     "home_team": home,
                     "away_team": away,
                     "match_date": match_date,
+                    "kickoff_at": kickoff_at,
                     "cache_key": _batch_cache_key(
                         event_id, home, away, match_date, requested_family
                     ),
@@ -1958,7 +1931,7 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
             except Exception as state_err:
                 logger.warning(f"Batch predict: fixture state lookup failed: {state_err}")
 
-        from prediction.prediction_integrity import refuse_reason
+        from prediction.prediction_integrity import prefer_kickoff, refuse_reason
 
         predictor = None
         results: List[Dict[str, Any]] = []
@@ -1986,32 +1959,24 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                 counts["snapshot"] += 1
             else:
                 cached = cached_by_key.get(key)
-                if cached is not None:
+                if cached is not None and not cached.get("prediction_unavailable"):
                     pred = cached
                     source = "cache"
                     counts["cache"] += 1
 
             if pred is None:
                 state = fixture_state.get(event_id) if event_id is not None else None
-                refusal = refuse_reason(
-                    kickoff_at=(state or {}).get("kickoff_at", match_date),
+                resolved_kickoff = prefer_kickoff(
+                    item.get("kickoff_at"),
+                    (state or {}).get("kickoff_at"),
+                    (state or {}).get("date_event"),
+                    match_date,
+                )
+                freeze_blocked = refuse_reason(
+                    kickoff_at=resolved_kickoff,
                     has_actual_score=bool((state or {}).get("has_actual_score")),
                     date_event=(state or {}).get("date_event", match_date),
                 )
-                if refusal:
-                    counts["not_recorded"] += 1
-                    results.append(
-                        {
-                            "event_id": event_id,
-                            "home_team": home,
-                            "away_team": away,
-                            "match_date": match_date,
-                            "prediction_unavailable": True,
-                            "unavailable_reason": refusal,
-                            "_source": "not_recorded",
-                        }
-                    )
-                    continue
 
                 try:
                     if predictor is None:
@@ -2034,7 +1999,9 @@ def predict_matches_batch_http(req: https_fn.Request) -> https_fn.Response:
                     counts["computed"] += 1
                     # Freeze immutable pre-kickoff history the first time we
                     # compute this fixture live (with odds). Never overwrite.
-                    if event_id is not None:
+                    # After kickoff we still *show* the AI card, but we do not
+                    # write a back-dated snapshot.
+                    if event_id is not None and not freeze_blocked:
                         try:
                             import sqlite3 as _sqlite3
 
@@ -2466,8 +2433,13 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
             else:
                 logger.warning("No team IDs to lookup!")
             
-            # Add team names to matches and filter out women's teams
+            # Keep women's fixtures in women's leagues; strip them from men's.
             women_indicators = [' w rugby', ' women', ' womens', ' w ', ' women\'s', ' w\'s']
+            try:
+                from prediction.highlightly_leagues import is_womens_league as _is_womens_league
+                keep_womens_matches = _is_womens_league(league_id)
+            except Exception:
+                keep_womens_matches = False
             logger.info(f"Processing {len(matches_without_teams)} matches, filtering women's teams...")
             
             women_filtered = 0
@@ -2484,10 +2456,10 @@ def get_upcoming_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
                 is_women_home = any(indicator in home_lower for indicator in women_indicators)
                 is_women_away = any(indicator in away_lower for indicator in women_indicators)
                 
-                if is_women_home or is_women_away:
+                if not keep_womens_matches and (is_women_home or is_women_away):
                     women_filtered += 1
                     logger.debug(f"Filtered out women's match: {home_team_name} vs {away_team_name}")
-                    continue  # Skip women's matches
+                    continue  # Skip women's matches in men's leagues
                 
                 try:
                     from prediction.team_display_names import display_team_name_for_league
@@ -2594,7 +2566,22 @@ def get_live_matches(req: https_fn.CallableRequest) -> Dict[str, Any]:
         return {'error': str(e)}
 
 
-@https_fn.on_request()
+def _live_match_signature(matches: Any) -> str:
+    rows = matches if isinstance(matches, list) else []
+    parts = []
+    for match in rows:
+        if not isinstance(match, dict):
+            continue
+        parts.append(
+            f"{match.get('match_id') or ''}:"
+            f"{match.get('state') or ''}:"
+            f"{'' if match.get('home_score') is None else match.get('home_score')}:"
+            f"{'' if match.get('away_score') is None else match.get('away_score')}"
+        )
+    return "|".join(parts)
+
+
+@https_fn.on_request(timeout_sec=60)
 def get_live_matches_http(req: https_fn.Request) -> https_fn.Response:
     """
     HTTP endpoint for live matches with explicit CORS support.
@@ -2627,21 +2614,41 @@ def get_live_matches_http(req: https_fn.Request) -> https_fn.Response:
             data = dict(req.args)
 
         league_id = data.get("league_id")
+        wait_for_detection = bool(data.get("wait"))
+        since = str(data.get("since") or "")
         logger.info(f"Request data: {data}, league_id={league_id}")
 
         enhanced_predictor = get_enhanced_predictor()
+        matches = enhanced_predictor.get_live_matches(league_id) if enhanced_predictor else []
+        signature = _live_match_signature(matches)
+        if wait_for_detection and enhanced_predictor:
+            deadline = time.time() + 22.0
+            while time.time() < deadline:
+                if since:
+                    if signature != since:
+                        break
+                elif matches:
+                    break
+                time.sleep(2.0)
+                matches = enhanced_predictor.get_live_matches(league_id)
+                signature = _live_match_signature(matches)
         if enhanced_predictor:
-            matches = enhanced_predictor.get_live_matches(league_id)
-            response_data = {"matches": matches}
+            response_data = {
+                "matches": matches,
+                "signature": signature,
+                "detection": True,
+            }
             status = 200
         else:
             logger.warning("Enhanced predictor not available, returning empty matches list")
-            response_data = {"matches": []}
+            response_data = {"matches": [], "signature": "", "detection": True}
             status = 200
 
         headers = {
             "Access-Control-Allow-Origin": "*",
             "Content-Type": "application/json",
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
         }
         logger.info("=== get_live_matches_http completed successfully ===")
         return https_fn.Response(json.dumps(response_data), status=status, headers=headers)

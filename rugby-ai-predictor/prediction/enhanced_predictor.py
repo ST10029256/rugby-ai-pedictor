@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import json
 from typing import Dict, List, Optional, Tuple, Any
@@ -15,11 +16,9 @@ class EnhancedRugbyPredictor:
     def __init__(self, db_path: str, highlightly_api_key: str):
         self.db_path = db_path
         self.highlightly_api = HighlightlyRugbyAPI(highlightly_api_key)
-        self.hybrid_predictor = MultiLeaguePredictor(db_path)
-        
-        # League mapping between our system and Highlightly
+        self._hybrid_predictor = None
         self.league_mapping = {
-            4986: "Rugby Championship",  # Our ID -> Highlightly name
+            4986: "Rugby Championship",
             4446: "United Rugby Championship",
             5069: "Currie Cup",
             4574: "Rugby World Cup",
@@ -30,6 +29,18 @@ class EnhancedRugbyPredictor:
             5479: "Rugby Union International Friendlies",
             5480: "Nations Championship",
         }
+
+    @property
+    def hybrid_predictor(self):
+        if self._hybrid_predictor is None:
+            bucket = (
+                os.getenv("MODEL_STORAGE_BUCKET")
+                or "rugby-ai-61fd0.firebasestorage.app"
+            )
+            self._hybrid_predictor = MultiLeaguePredictor(
+                self.db_path, storage_bucket=bucket
+            )
+        return self._hybrid_predictor
     
     def get_enhanced_prediction(self, 
                               home_team: str, 
@@ -253,14 +264,82 @@ class EnhancedRugbyPredictor:
     @staticmethod
     def _extract_match_state(match: Dict[str, Any]) -> str:
         state = match.get("state") or match.get("status") or ""
+        raw = ""
         if isinstance(state, dict):
-            return str(
-                state.get("name")
-                or state.get("description")
+            # Highlightly rugby uses `description` ("First half" / "Half time").
+            raw = str(
+                state.get("description")
+                or state.get("name")
                 or state.get("short")
                 or ""
             ).strip()
-        return str(state or "").strip()
+        else:
+            raw = str(state or "").strip()
+        return EnhancedRugbyPredictor._normalize_highlightly_state(raw)
+
+    @staticmethod
+    def _normalize_highlightly_state(raw: str) -> str:
+        s = " ".join(str(raw or "").lower().replace("_", " ").replace("-", " ").split())
+        aliases = {
+            "first half": "First half",
+            "1st half": "First half",
+            "1h": "First half",
+            "second half": "Second half",
+            "2nd half": "Second half",
+            "2h": "Second half",
+            "half time": "Half time",
+            "halftime": "Half time",
+            "ht": "Half time",
+            "extra time": "Extra time",
+            "et": "Extra time",
+            "aet": "Extra time",
+            "after extra time": "Extra time",
+            "extra first half": "Extra first half",
+            "et first half": "Extra first half",
+            "extra time first half": "Extra first half",
+            "extra second half": "Extra second half",
+            "et second half": "Extra second half",
+            "extra time second half": "Extra second half",
+            "extra time half time": "Extra time half time",
+            "et half time": "Extra time half time",
+            "penalties": "Penalties",
+            "penalty shootout": "Penalties",
+            "pens": "Penalties",
+            "finished": "Finished",
+            "full time": "Finished",
+            "ft": "Finished",
+            "ended": "Finished",
+            "not started": "Not started",
+            "scheduled": "Not started",
+            "ns": "Not started",
+            "live": "Live",
+            "in play": "Live",
+            "in progress": "Live",
+        }
+        return aliases.get(s, raw.strip() or "Not started")
+
+    @staticmethod
+    def _extract_venue(match: Dict[str, Any]) -> Optional[str]:
+        venue = match.get("venue") or match.get("stadium") or {}
+        parts = []
+        if isinstance(venue, dict):
+            name = venue.get("name") or venue.get("venue") or venue.get("stadium")
+            city = venue.get("city") or venue.get("cityName") or venue.get("city_name")
+            if name:
+                parts.append(str(name).strip())
+            if city:
+                parts.append(str(city).strip())
+        elif venue:
+            parts.append(str(venue).strip())
+        home = match.get("homeTeam") if isinstance(match.get("homeTeam"), dict) else {}
+        if not parts:
+            home_venue = home.get("venue") or home.get("stadium")
+            if isinstance(home_venue, dict):
+                home_venue = home_venue.get("name")
+            if home_venue:
+                parts.append(str(home_venue).strip())
+        text = ", ".join([p for p in parts if p])
+        return text or None
 
     @staticmethod
     def _extract_game_time(match: Dict[str, Any], state_name: str) -> Optional[str]:
@@ -272,11 +351,9 @@ class EnhancedRugbyPredictor:
             match.get("elapsed"),
             match.get("gameTime"),
             match.get("game_time"),
-            match.get("time"),
             state.get("minute") if isinstance(state, dict) else None,
             state.get("clock") if isinstance(state, dict) else None,
             state.get("elapsed") if isinstance(state, dict) else None,
-            state.get("time") if isinstance(state, dict) else None,
         ]
         for raw in candidates:
             if raw is None or raw == "":
@@ -355,7 +432,30 @@ class EnhancedRugbyPredictor:
                         seen_ids.add(row_id)
                     raw_matches.append(row)
 
-            live_states = {"Not started", "First half", "Second half", "Half time"}
+            live_states = {
+                "Not started",
+                "First half",
+                "Second half",
+                "Half time",
+                "Extra time",
+                "Extra first half",
+                "Extra second half",
+                "Extra time half time",
+                "Penalties",
+                "Live",
+                "Finished",
+            }
+            playing_states = {
+                "First half",
+                "Second half",
+                "Half time",
+                "Extra time",
+                "Extra first half",
+                "Extra second half",
+                "Extra time half time",
+                "Penalties",
+                "Live",
+            }
             live_matches = []
             for match in raw_matches:
                 if not isinstance(match, dict):
@@ -367,20 +467,13 @@ class EnhancedRugbyPredictor:
                 home_team = match.get("homeTeam") or {}
                 away_team = match.get("awayTeam") or {}
                 league = match.get("league") or {}
-                venue = match.get("venue") or {}
-                round_info = match.get("round") or {}
+                round_info = match.get("round") or match.get("week") or {}
 
                 home_score, away_score = extract_scores(match)
                 date_raw = match.get("date")
                 start_time = self._extract_start_time(date_raw)
-                game_time = self._extract_game_time(match, match_state)
-                is_live = match_state in {"First half", "Second half", "Half time"}
-
-                venue_name = None
-                if isinstance(venue, dict):
-                    venue_name = venue.get("name") or venue.get("venue")
-                elif venue:
-                    venue_name = str(venue)
+                is_live = match_state in playing_states
+                venue_name = self._extract_venue(match)
 
                 round_name = None
                 if isinstance(round_info, dict):
@@ -404,7 +497,6 @@ class EnhancedRugbyPredictor:
                     "date_event": date_raw,
                     "formatted_date": formatted_date,
                     "start_time": start_time,
-                    "game_time": game_time,
                     "state": match_state,
                     "is_live": is_live,
                     "league": league.get("name") if isinstance(league, dict) else league_name,
@@ -414,8 +506,20 @@ class EnhancedRugbyPredictor:
                 }
                 live_matches.append(enhanced_match)
 
-            # Live boards first, then half-time, then kickoff waiting.
-            rank = {"First half": 0, "Second half": 0, "Half time": 1, "Not started": 2}
+            # Detected live phases first, then interval, then finished, then kickoff.
+            rank = {
+                "First half": 0,
+                "Second half": 0,
+                "Extra time": 0,
+                "Extra first half": 0,
+                "Extra second half": 0,
+                "Penalties": 0,
+                "Live": 0,
+                "Half time": 1,
+                "Extra time half time": 1,
+                "Finished": 2,
+                "Not started": 3,
+            }
             live_matches.sort(key=lambda m: (rank.get(m.get("state"), 9), str(m.get("date") or "")))
             return live_matches
 

@@ -59,6 +59,27 @@ def is_date_only(value: Any) -> bool:
     return len(raw) == 10 and raw.count("-") == 2
 
 
+def has_kickoff_clock(value: Any) -> bool:
+    """True when the value includes a real time of day, not midnight-as-date."""
+    if value is None or is_date_only(value):
+        return False
+    parsed = parse_moment(value)
+    if parsed is None:
+        return False
+    return not (parsed.hour == 0 and parsed.minute == 0 and parsed.second == 0)
+
+
+def prefer_kickoff(*values: Any) -> Any:
+    """First candidate with a real clock, else the first non-empty value."""
+    for value in values:
+        if has_kickoff_clock(value):
+            return value
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def refuse_reason(
     *,
     kickoff_at: Any,
@@ -77,7 +98,7 @@ def refuse_reason(
     now = parse_moment(predicted_at) or utcnow()
     kickoff = parse_moment(kickoff_at)
 
-    if kickoff is not None and not is_date_only(kickoff_at):
+    if kickoff is not None and has_kickoff_clock(kickoff_at):
         if now >= kickoff:
             return f"kickoff already passed ({kickoff.isoformat()})"
         return None

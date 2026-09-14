@@ -9,6 +9,7 @@ import {
   Box,
   Typography,
 } from '@mui/material';
+import { GENDER_OPTIONS } from '../utils/leagues';
 
 const MOBILE_BREAKPOINT = '(max-width:899.95px)';
 
@@ -32,6 +33,186 @@ const chipSx = (tone) => ({
   },
 });
 
+const selectFieldSx = (menuOpen) => ({
+  color: '#fafafa',
+  width: '100%',
+  cursor: 'pointer',
+  backgroundColor: 'rgba(31, 41, 55, 0.85)',
+  borderRadius: '12px',
+  '& .MuiOutlinedInput-notchedOutline': {
+    borderColor: menuOpen ? '#10b981' : 'rgba(16, 185, 129, 0.25)',
+    borderWidth: menuOpen ? '2px' : '1.5px',
+    pointerEvents: 'none',
+  },
+  '&:hover .MuiOutlinedInput-notchedOutline': {
+    borderColor: 'rgba(16, 185, 129, 0.5)',
+  },
+  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+    borderColor: '#10b981',
+    borderWidth: '2px',
+  },
+  '& .MuiSelect-select': {
+    width: '100%',
+    cursor: 'pointer',
+    py: 1.5,
+    pl: 1.75,
+    pr: '44px !important',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 600,
+    fontSize: '0.9375rem',
+    lineHeight: 1.35,
+    minHeight: 24,
+  },
+  '& .MuiSelect-icon': {
+    color: '#10b981',
+    right: 12,
+    pointerEvents: 'none',
+    transition: 'transform 0.18s ease',
+    transform: menuOpen ? 'rotate(180deg)' : 'none',
+  },
+});
+
+const menuPaperSx = (paperWidth, isMobile, menuMaxHeight) => ({
+  width: paperWidth,
+  maxWidth: isMobile ? 'calc(100vw - 32px)' : paperWidth,
+  maxHeight: menuMaxHeight,
+  mt: 0.5,
+  py: 0.5,
+  backgroundColor: '#111827',
+  backgroundImage: 'none',
+  border: '1px solid rgba(16, 185, 129, 0.28)',
+  borderRadius: '14px',
+  boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
+  overflowX: 'hidden',
+  overflowY: 'auto',
+  WebkitOverflowScrolling: 'touch',
+  overscrollBehavior: 'contain',
+  scrollbarWidth: 'none',
+  msOverflowStyle: 'none',
+  '&::-webkit-scrollbar': {
+    display: 'none',
+    width: 0,
+    height: 0,
+  },
+  zIndex: 2401,
+  '& .MuiList-root': {
+    py: 0.25,
+  },
+  '& .MuiMenuItem-root': {
+    display: 'flex',
+    justifyContent: 'center',
+    px: 1.5,
+    py: 1.15,
+    mx: 0.5,
+    my: 0.25,
+    borderRadius: '10px',
+    color: '#f1f5f9',
+    minHeight: 0,
+    whiteSpace: 'normal',
+    textAlign: 'center',
+    alignItems: 'center',
+    '&.Mui-selected': {
+      backgroundColor: 'rgba(16, 185, 129, 0.2)',
+      '&:hover': {
+        backgroundColor: 'rgba(16, 185, 129, 0.28)',
+      },
+    },
+    '&:hover': {
+      backgroundColor: 'rgba(148, 163, 184, 0.1)',
+    },
+    '&.Mui-focusVisible': {
+      backgroundColor: 'rgba(16, 185, 129, 0.16)',
+    },
+  },
+});
+
+export const GenderSelector = memo(function GenderSelector({ value, onChange }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuWidth, setMenuWidth] = useState(null);
+  const controlRef = useRef(null);
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const selected = GENDER_OPTIONS.find((opt) => opt.id === value) || GENDER_OPTIONS[0];
+
+  const openMenu = () => {
+    const node = controlRef.current;
+    if (node?.offsetWidth) setMenuWidth(node.offsetWidth);
+    setMenuOpen(true);
+  };
+
+  const paperWidth = menuWidth
+    ? Math.max(menuWidth, isMobile ? 220 : 232)
+    : isMobile
+      ? 'min(100%, calc(100vw - 48px))'
+      : 232;
+
+  return (
+    <FormControl
+      ref={controlRef}
+      fullWidth
+      className="league-selector-control"
+      sx={{
+        maxWidth: '100%',
+        width: '100%',
+        minWidth: 0,
+        cursor: 'pointer',
+        '& .MuiInputLabel-root': { pointerEvents: 'none' },
+        '& .MuiOutlinedInput-notchedOutline': { pointerEvents: 'none' },
+        '& .MuiSelect-icon': { pointerEvents: 'none' },
+      }}
+    >
+      <InputLabel
+        id="gender-select-label"
+        shrink
+        sx={{
+          color: '#94a3b8',
+          pointerEvents: 'none',
+          '&.Mui-focused': { color: '#10b981' },
+          '&.MuiInputLabel-shrink': { color: '#10b981' },
+        }}
+      >
+        Competition
+      </InputLabel>
+      <Select
+        labelId="gender-select-label"
+        value={selected.id}
+        open={menuOpen}
+        onOpen={openMenu}
+        onClose={() => setMenuOpen(false)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setMenuOpen(false);
+        }}
+        label="Competition"
+        renderValue={() => selected.label}
+        MenuProps={{
+          disablePortal: false,
+          disableScrollLock: true,
+          keepMounted: false,
+          marginThreshold: null,
+          transitionDuration: { enter: 120, exit: 90 },
+          sx: { zIndex: 2400 },
+          PaperProps: {
+            className: 'league-selector-menu-paper',
+            sx: menuPaperSx(paperWidth, isMobile, 220),
+          },
+          anchorOrigin: { vertical: 'bottom', horizontal: 'left' },
+          transformOrigin: { vertical: 'top', horizontal: 'left' },
+          disableAutoFocusItem: true,
+        }}
+        sx={selectFieldSx(menuOpen)}
+      >
+        {GENDER_OPTIONS.map((opt) => (
+          <MenuItem key={opt.id} value={opt.id}>
+            {opt.label}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+});
+
 const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, onLeagueChange }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuWidth, setMenuWidth] = useState(null);
@@ -45,7 +226,6 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
       const width = node.offsetWidth;
       if (width) setMenuWidth(width);
       const rect = node.getBoundingClientRect();
-      // Always open downward: size menu to remaining space under the field
       const spaceBelow = Math.floor(window.innerHeight - rect.bottom - 12);
       const preferred = isMobile ? 420 : 480;
       setMenuMaxHeight(Math.max(140, Math.min(preferred, spaceBelow)));
@@ -69,6 +249,71 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
     : isMobile
       ? 'min(100%, calc(100vw - 48px))'
       : 232;
+
+  const renderLeagueItem = (league) => {
+    const upcoming = league.upcoming_matches || 0;
+    const recent = league.recent_matches || 0;
+    const hasMeta = upcoming > 0 || recent > 0;
+    const muted = !(league.has_news || hasMeta);
+
+    return (
+      <MenuItem
+        key={league.id}
+        value={String(league.id)}
+        sx={{ opacity: muted ? 0.55 : 1 }}
+      >
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: hasMeta ? 0.75 : 0,
+            width: '100%',
+            minWidth: 0,
+            textAlign: 'center',
+          }}
+        >
+          <Typography
+            component="span"
+            sx={{
+              display: 'block',
+              width: '100%',
+              color: 'inherit',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              lineHeight: 1.35,
+              textAlign: 'center',
+              whiteSpace: 'normal',
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
+            }}
+          >
+            {league.name}
+          </Typography>
+          {hasMeta ? (
+            <Box
+              sx={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 0.6,
+                justifyContent: 'center',
+                width: '100%',
+                minWidth: 0,
+              }}
+            >
+              {upcoming > 0 ? (
+                <Chip size="small" label={`${upcoming} upcoming`} sx={chipSx('upcoming')} />
+              ) : null}
+              {recent > 0 ? (
+                <Chip size="small" label={`${recent} recent`} sx={chipSx('recent')} />
+              ) : null}
+            </Box>
+          ) : null}
+        </Box>
+      </MenuItem>
+    );
+  };
 
   return (
     <FormControl
@@ -112,13 +357,13 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
         renderValue={(value) => {
           if (!value) return '';
           const league = leagues.find((l) => String(l.id) === String(value));
-          return league ? league.name : 'Select League';
+          if (!league) return 'Select League';
+          return league.name;
         }}
         MenuProps={{
           disablePortal: false,
           disableScrollLock: true,
           keepMounted: false,
-          // Never flip upward when viewport height is short
           marginThreshold: null,
           transitionDuration: { enter: 120, exit: 90 },
           sx: { zIndex: 2400 },
@@ -129,59 +374,7 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
           },
           PaperProps: {
             className: 'league-selector-menu-paper',
-            sx: {
-              width: paperWidth,
-              maxWidth: isMobile ? 'calc(100vw - 32px)' : paperWidth,
-              maxHeight: menuMaxHeight,
-              mt: 0.5,
-              py: 0.5,
-              backgroundColor: '#111827',
-              backgroundImage: 'none',
-              border: '1px solid rgba(16, 185, 129, 0.28)',
-              borderRadius: '14px',
-              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
-              overflowX: 'hidden',
-              overflowY: 'auto',
-              WebkitOverflowScrolling: 'touch',
-              overscrollBehavior: 'contain',
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-              '&::-webkit-scrollbar': {
-                display: 'none',
-                width: 0,
-                height: 0,
-              },
-              zIndex: 2401,
-              '& .MuiList-root': {
-                py: 0.25,
-              },
-              '& .MuiMenuItem-root': {
-                display: 'flex',
-                justifyContent: 'center',
-                px: 1.5,
-                py: 1.15,
-                mx: 0.5,
-                my: 0.25,
-                borderRadius: '10px',
-                color: '#f1f5f9',
-                minHeight: 0,
-                whiteSpace: 'normal',
-                textAlign: 'center',
-                alignItems: 'center',
-                '&.Mui-selected': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                  '&:hover': {
-                    backgroundColor: 'rgba(16, 185, 129, 0.28)',
-                  },
-                },
-                '&:hover': {
-                  backgroundColor: 'rgba(148, 163, 184, 0.1)',
-                },
-                '&.Mui-focusVisible': {
-                  backgroundColor: 'rgba(16, 185, 129, 0.16)',
-                },
-              },
-            },
+            sx: menuPaperSx(paperWidth, isMobile, menuMaxHeight),
           },
           MenuListProps: {
             autoFocusItem: false,
@@ -192,119 +385,9 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
           transformOrigin: { vertical: 'top', horizontal: 'left' },
           disableAutoFocusItem: true,
         }}
-        sx={{
-          color: '#fafafa',
-          width: '100%',
-          cursor: 'pointer',
-          backgroundColor: 'rgba(31, 41, 55, 0.85)',
-          borderRadius: '12px',
-          '& .MuiOutlinedInput-notchedOutline': {
-            borderColor: menuOpen ? '#10b981' : 'rgba(16, 185, 129, 0.25)',
-            borderWidth: menuOpen ? '2px' : '1.5px',
-            pointerEvents: 'none',
-          },
-          '&:hover .MuiOutlinedInput-notchedOutline': {
-            borderColor: 'rgba(16, 185, 129, 0.5)',
-          },
-          '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-            borderColor: '#10b981',
-            borderWidth: '2px',
-          },
-          '& .MuiSelect-select': {
-            width: '100%',
-            cursor: 'pointer',
-            py: 1.5,
-            pl: 1.75,
-            pr: '44px !important',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            fontWeight: 600,
-            fontSize: '0.9375rem',
-            lineHeight: 1.35,
-            minHeight: 24,
-          },
-          '& .MuiSelect-icon': {
-            color: '#10b981',
-            right: 12,
-            pointerEvents: 'none',
-            transition: 'transform 0.18s ease',
-            transform: menuOpen ? 'rotate(180deg)' : 'none',
-          },
-        }}
+        sx={selectFieldSx(menuOpen)}
       >
-        {leagues.map((league) => {
-          const upcoming = league.upcoming_matches || 0;
-          const recent = league.recent_matches || 0;
-          const hasMeta = upcoming > 0 || recent > 0;
-          const muted = !(league.has_news || hasMeta);
-
-          return (
-            <MenuItem
-              key={league.id}
-              value={String(league.id)}
-              sx={{ opacity: muted ? 0.55 : 1 }}
-            >
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: hasMeta ? 0.75 : 0,
-                  width: '100%',
-                  minWidth: 0,
-                  textAlign: 'center',
-                }}
-              >
-                <Typography
-                  component="span"
-                  sx={{
-                    display: 'block',
-                    width: '100%',
-                    color: 'inherit',
-                    fontSize: '0.9rem',
-                    fontWeight: 600,
-                    lineHeight: 1.35,
-                    textAlign: 'center',
-                    whiteSpace: 'normal',
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {league.name}
-                </Typography>
-                {hasMeta ? (
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: 0.6,
-                      justifyContent: 'center',
-                      width: '100%',
-                      minWidth: 0,
-                    }}
-                  >
-                    {upcoming > 0 ? (
-                      <Chip
-                        size="small"
-                        label={`${upcoming} upcoming`}
-                        sx={chipSx('upcoming')}
-                      />
-                    ) : null}
-                    {recent > 0 ? (
-                      <Chip
-                        size="small"
-                        label={`${recent} recent`}
-                        sx={chipSx('recent')}
-                      />
-                    ) : null}
-                  </Box>
-                ) : null}
-              </Box>
-            </MenuItem>
-          );
-        })}
+        {leagues.map((league) => renderLeagueItem(league))}
       </Select>
     </FormControl>
   );

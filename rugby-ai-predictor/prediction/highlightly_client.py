@@ -62,8 +62,13 @@ class HighlightlyRugbyAPI:
                 
             response = requests.get(
                 f"{self.base_url}/matches",
-                headers=self.headers,
-                params=params
+                headers={
+                    **self.headers,
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                },
+                params=params,
+                timeout=20,
             )
             response.raise_for_status()
             return response.json()

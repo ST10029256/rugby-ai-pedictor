@@ -50,6 +50,13 @@ DEFAULT_LEAGUE_IDS: List[int] = [
     5069,  # Currie Cup
     5479,  # Internationals
     5480,  # Nations Championship
+    5481,  # Investec Champions Cup
+    5482,  # EPCR Challenge Cup
+    5483,  # Women's Rugby World Cup
+    5484,  # Women's Six Nations
+    5485,  # WXV 1
+    5486,  # WXV 2
+    5487,  # WXV 3
 ]
 
 LEAGUE_HOME_ADV_PRIOR: Dict[int, float] = {
@@ -63,6 +70,13 @@ LEAGUE_HOME_ADV_PRIOR: Dict[int, float] = {
     4574: 0.50,
     5479: 0.52,
     5480: 0.52,
+    5481: 0.55,
+    5482: 0.55,
+    5483: 0.50,
+    5484: 0.54,
+    5485: 0.52,
+    5486: 0.52,
+    5487: 0.52,
 }
 
 CONFIDENCE_BUCKETS = (0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85)

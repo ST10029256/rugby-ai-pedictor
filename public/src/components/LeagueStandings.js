@@ -22,21 +22,8 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getLeagueStandings, subscribeToStandingsCache } from '../firebase';
 import { formatStandingsSeasonLabel, getPrimaryStandingsSeasonYear } from '../utils/season';
 import { TabLoadingScreen } from '../utils/viewLoader';
+import { LEAGUE_ID_MAPPING, expandLeagueIds } from '../utils/leagues';
 import { buildTeamLogoCandidates, resolveTeamLogoUrl } from '../utils/teamLogos';
-
-// League ID mapping: Our league ID -> Highlightly league ID
-const LEAGUE_ID_MAPPING = {
-  4986: 73119, // Rugby Championship
-  4446: 65460, // United Rugby Championship
-  5069: 32271, // Currie Cup
-  4574: 59503, // Rugby World Cup (no standings)
-  4551: 61205, // Super Rugby
-  4430: 14400, // French Top 14
-  4414: 11847, // English Premiership Rugby (CORRECTED: was 5039 which was Austrian league)
-  4714: 44185, // Six Nations Championship
-  5479: 72268, // Rugby Union International Friendlies (Friendly International - no standings as friendlies don't have league tables)
-  5480: 124179, // Nations Championship (hemisphere tables)
-};
 
 const PREM_LEAGUE_ID = 4414;
 
@@ -342,6 +329,9 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     if (!leagueId) return;
     const highlightlyLeagueId = LEAGUE_ID_MAPPING[leagueId];
     if (!highlightlyLeagueId || leagueId === 5479) return;
+    // Bundled cups/tiers are merged over HTTP; a single-league cache snapshot
+    // would wipe the other tables.
+    if (expandLeagueIds(leagueId).length > 1) return;
 
     const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
 

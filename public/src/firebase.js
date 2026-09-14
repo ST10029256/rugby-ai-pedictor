@@ -4,6 +4,12 @@ import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getDeviceAuthPayload } from './utils/deviceId';
+import {
+  expandLeagueIds,
+  LEAGUE_ID_MAPPING,
+  getLeagueConfig,
+  leagueDisplayName,
+} from './utils/leagues';
 
 // Firebase config for rugby-ai-61fd0
 // For callable functions, we mainly need projectId
@@ -50,9 +56,18 @@ export const predictMatch = async (data) => {
   return { data: json };
 };
 
-export const getUpcomingMatches = (data) => {
+export const getUpcomingMatches = async (data) => {
   const callable = httpsCallable(functionsRegion, 'get_upcoming_matches');
-  return callable(data);
+  const ids = expandLeagueIds(data?.league_id);
+  if (ids.length <= 1) return callable(data);
+  const results = await Promise.all(ids.map((id) => callable({ ...data, league_id: id })));
+  const matches = [];
+  for (let i = 0; i < results.length; i += 1) {
+    for (const match of results[i]?.data?.matches || []) {
+      matches.push({ ...match, league_id: match.league_id ?? ids[i] });
+    }
+  }
+  return { data: { matches } };
 };
 
 // Predict an entire round of fixtures in a single request. The backend serves
@@ -78,21 +93,37 @@ export const predictMatchesBatch = async (data) => {
   return { data: json };
 };
 
-export const getLiveMatches = async (data) => {
-  // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
+const fetchLiveMatchesOnce = async (data) => {
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_live_matches_http';
-
   const response = await fetch(url, {
     method: 'POST',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
     },
-    body: JSON.stringify(data || {}),
+    body: JSON.stringify({ ...(data || {}), _ts: Date.now() }),
   });
-
-  // Normalize shape to match httpsCallable: { data: ... }
   const json = await response.json().catch(() => ({}));
   return { data: json };
+};
+
+export const getLiveMatches = async (data) => {
+  const ids = expandLeagueIds(data?.league_id);
+  if (ids.length <= 1) return fetchLiveMatchesOnce(data);
+  const results = await Promise.all(ids.map((id) => fetchLiveMatchesOnce({ ...data, league_id: id })));
+  const matches = [];
+  let signature = '';
+  let detection = false;
+  for (let i = 0; i < results.length; i += 1) {
+    const payload = results[i]?.data || {};
+    detection = detection || payload.detection === true;
+    signature = `${signature}|${payload.signature || ''}`;
+    for (const match of payload.matches || []) {
+      matches.push({ ...match, league_id: match.league_id ?? ids[i] });
+    }
+  }
+  return { data: { matches, signature, detection } };
 };
 
 export const getLeagues = () => {
@@ -178,7 +209,7 @@ export const verifyEmailLoginCode = async (data) => {
   }
 };
 
-export const getNewsFeed = async (data) => {
+const fetchNewsFeedOnce = async (data) => {
   // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_news_feed_http';
 
@@ -246,6 +277,22 @@ export const getNewsFeed = async (data) => {
   }
 };
 
+export const getNewsFeed = async (data) => {
+  const ids = expandLeagueIds(data?.league_id);
+  if (ids.length <= 1) return fetchNewsFeedOnce(data);
+  const results = await Promise.all(ids.map((id) => fetchNewsFeedOnce({ ...data, league_id: id })));
+  const news = [];
+  let success = false;
+  for (let i = 0; i < results.length; i += 1) {
+    const result = results[i];
+    if (result?.data?.success) success = true;
+    for (const item of result?.data?.news || []) {
+      news.push({ ...item, league_id: item.league_id ?? ids[i] });
+    }
+  }
+  return { data: { ...(results[0]?.data || {}), success, news, count: news.length } };
+};
+
 export const getTrendingTopics = async (data) => {
   // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_trending_topics_http';
@@ -267,7 +314,7 @@ export const getTrendingTopics = async (data) => {
   return { data: json };
 };
 
-export const getLeagueStandings = async ({
+const fetchLeagueStandingsOnce = async ({
   highlightlyLeagueId,
   sportsdbLeagueId,
   leagueName,
@@ -314,7 +361,49 @@ export const getLeagueStandings = async ({
   return json;
 };
 
-export const getLeagueLineupMatches = async ({
+export const getLeagueStandings = async (args) => {
+  const ids = expandLeagueIds(args?.sportsdbLeagueId);
+  if (ids.length <= 1) return fetchLeagueStandingsOnce(args);
+  const parts = await Promise.all(
+    ids.map((id) =>
+      fetchLeagueStandingsOnce({
+        ...args,
+        sportsdbLeagueId: id,
+        highlightlyLeagueId: LEAGUE_ID_MAPPING[id] || args?.highlightlyLeagueId,
+        leagueName: getLeagueConfig(id)?.matchLabel || getLeagueConfig(id)?.name || args?.leagueName,
+      })
+    )
+  );
+  const groups = [];
+  let first = null;
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (!part?.success || !part.standings) continue;
+    if (!first) first = part;
+    const label = getLeagueConfig(ids[i])?.matchLabel || getLeagueConfig(ids[i])?.name;
+    for (const group of part.standings.groups || []) {
+      const groupName = group?.name || group?.group_name;
+      groups.push({
+        ...group,
+        name: groupName && label && groupName !== label ? `${label} · ${groupName}` : (label || groupName),
+      });
+    }
+  }
+  if (!first) return parts.find(Boolean) || { success: false };
+  return {
+    ...first,
+    standings: {
+      ...first.standings,
+      groups,
+      league: {
+        ...(first.standings.league || {}),
+        name: leagueDisplayName(args.sportsdbLeagueId),
+      },
+    },
+  };
+};
+
+const fetchLeagueLineupMatchesOnce = async ({
   sportsdbLeagueId,
   season,
   matchScope = 'historic',
@@ -336,6 +425,17 @@ export const getLeagueLineupMatches = async ({
   }
 
   return response.json().catch(() => ({}));
+};
+
+export const getLeagueLineupMatches = async (args = {}) => {
+  const ids = expandLeagueIds(args.sportsdbLeagueId);
+  if (ids.length <= 1) return fetchLeagueLineupMatchesOnce(args);
+  const parts = await Promise.all(ids.map((id) => fetchLeagueLineupMatchesOnce({ ...args, sportsdbLeagueId: id })));
+  const matches = [];
+  for (const part of parts) {
+    matches.push(...(part?.matches || part?.data?.matches || []));
+  }
+  return { ...(parts[0] || {}), matches };
 };
 
 export const getMatchLineups = async ({
@@ -501,25 +601,89 @@ const postHistoryEndpoint = async ({ url, data, label, requestPrefix }) => {
 };
 
 export const getHistoricalPredictions = async (data) => {
-  // Use explicit HTTP endpoint with CORS headers to avoid browser CORS issues
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_predictions_http';
-  return postHistoryEndpoint({
-    url,
-    data,
-    label: 'HistoryReplay',
-    requestPrefix: 'hist-replay',
-  });
+  const ids = expandLeagueIds(data?.league_id);
+  if (ids.length <= 1) {
+    return postHistoryEndpoint({
+      url,
+      data,
+      label: 'HistoryReplay',
+      requestPrefix: 'hist-replay',
+    });
+  }
+  const allMatches = [];
+  let matchesByYearWeek = {};
+  let firstPage = null;
+  for (const id of ids) {
+    let offset = 0;
+    for (let pageNum = 0; pageNum < 20; pageNum += 1) {
+      const page = await postHistoryEndpoint({
+        url,
+        data: { ...data, league_id: id, offset, limit: data?.limit || 250 },
+        label: 'HistoryReplay',
+        requestPrefix: 'hist-replay',
+      });
+      if (!firstPage) firstPage = page;
+      const pageData = page?.data || {};
+      allMatches.push(...(pageData.all_matches || []));
+      matchesByYearWeek = { ...matchesByYearWeek, ...(pageData.matches_by_year_week || {}) };
+      if (!pageData.pagination?.has_more) break;
+      const nextOffset = Number(pageData.pagination?.next_offset);
+      if (!Number.isFinite(nextOffset) || nextOffset <= offset) break;
+      offset = nextOffset;
+    }
+  }
+  return {
+    ...(firstPage || {}),
+    data: {
+      ...(firstPage?.data || {}),
+      all_matches: allMatches,
+      matches_by_year_week: matchesByYearWeek,
+      pagination: { has_more: false, returned_rows: allMatches.length, total_rows: allMatches.length },
+    },
+  };
 };
 
 export const getHistoricalBacktest = async (data) => {
-  // True walk-forward backtest (unseen) - server trains only on past games per week
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_backtest_http';
-  return postHistoryEndpoint({
-    url,
-    data,
-    label: 'HistoryBacktest',
-    requestPrefix: 'hist-backtest',
-  });
+  const ids = expandLeagueIds(data?.league_id);
+  if (ids.length <= 1) {
+    return postHistoryEndpoint({
+      url,
+      data,
+      label: 'HistoryBacktest',
+      requestPrefix: 'hist-backtest',
+    });
+  }
+  const pages = await Promise.all(
+    ids.map((id) =>
+      postHistoryEndpoint({
+        url,
+        data: { ...data, league_id: id },
+        label: 'HistoryBacktest',
+        requestPrefix: 'hist-backtest',
+      })
+    )
+  );
+  const allMatches = [];
+  let matchesByYearWeek = {};
+  for (const page of pages) {
+    const pageData = page?.data || {};
+    allMatches.push(...(pageData.all_matches || []));
+    matchesByYearWeek = {
+      ...matchesByYearWeek,
+      ...(pageData.matches_by_year_week || {}),
+    };
+  }
+  return {
+    ...(pages[0] || {}),
+    data: {
+      ...(pages[0]?.data || {}),
+      all_matches: allMatches,
+      matches_by_year_week: matchesByYearWeek,
+      statistics: pages[0]?.data?.statistics,
+    },
+  };
 };
 
 export const scanFirestoreMatches = async (data) => {

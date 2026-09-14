@@ -25,19 +25,27 @@ from typing import Dict, Optional, Set, Tuple
 CURRIE_CUP_LEAGUE_ID = 5069
 URC_LEAGUE_ID = 4446
 SUPER_RUGBY_LEAGUE_ID = 4551
+PREMIERSHIP_LEAGUE_ID = 4414
+TOP14_LEAGUE_ID = 4430
+CHAMPIONS_CUP_LEAGUE_ID = 5481
+CHALLENGE_CUP_LEAGUE_ID = 5482
 
 # Competitions contested by national teams only.
 NATION_LEAGUES: Set[int] = {4574, 4714, 4986, 5480}
+WOMEN_NATION_LEAGUES: Set[int] = {5483, 5484, 5485, 5486, 5487}
 
 # Friendlies mix nations, second national sides, clubs and invitational teams,
 # so a team id appearing here tells us nothing about its home competition.
 MIXED_LEAGUES: Set[int] = {5479}
 
-# Club competitions that legitimately share a side. The South African
-# franchises moved from Super Rugby to the URC, so "Bulls" is one continuous
-# team across both. The Currie Cup is deliberately absent: its entries are
-# separate provincial unions and must never collapse into a franchise.
-CLUB_LEAGUE_GROUPS: Tuple[Set[int], ...] = ({URC_LEAGUE_ID, SUPER_RUGBY_LEAGUE_ID},)
+# Club competitions that legitimately share a side. EPCR cups reuse the same
+# URC / Premiership / Top 14 clubs. Currie Cup stays out: those provinces are
+# separate from the franchises.
+CLUB_LEAGUE_GROUPS: Tuple[Set[int], ...] = (
+    {URC_LEAGUE_ID, SUPER_RUGBY_LEAGUE_ID, CHAMPIONS_CUP_LEAGUE_ID, CHALLENGE_CUP_LEAGUE_ID},
+    {PREMIERSHIP_LEAGUE_ID, CHAMPIONS_CUP_LEAGUE_ID, CHALLENGE_CUP_LEAGUE_ID},
+    {TOP14_LEAGUE_ID, CHAMPIONS_CUP_LEAGUE_ID, CHALLENGE_CUP_LEAGUE_ID},
+)
 
 
 # --------------------------------------------------------------------------
@@ -284,6 +292,8 @@ def leagues_may_share_team(league_a: Optional[int], league_b: Optional[int]) -> 
     a, b = int(league_a), int(league_b)
     if a == b:
         return True
+    if a in WOMEN_NATION_LEAGUES or b in WOMEN_NATION_LEAGUES:
+        return a in WOMEN_NATION_LEAGUES and b in WOMEN_NATION_LEAGUES
     if a in MIXED_LEAGUES or b in MIXED_LEAGUES:
         return True
     if a in NATION_LEAGUES and b in NATION_LEAGUES:

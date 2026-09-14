@@ -3,9 +3,8 @@ import { Box, Drawer, Typography, CssBaseline, ThemeProvider, createTheme, IconB
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import LogoutIcon from '@mui/icons-material/Logout';
-import LeagueSelector from './components/LeagueSelector';
+import LeagueSelector, { GenderSelector } from './components/LeagueSelector';
 import LeagueMetrics from './components/LeagueMetrics';
-import LiveMatches from './components/LiveMatches';
 import ManualOddsInput from './components/ManualOddsInput';
 import PredictionsDisplay from './components/PredictionsDisplay';
 import LoginWidget from './components/LoginWidget';
@@ -29,6 +28,15 @@ import { getDeviceId } from './utils/deviceId';
 import { ensureProfileFromAuth } from './utils/userProfile';
 import { predictionsWidgetSx } from './utils/predictionsLayout';
 import { applyLeagueDisplayNames, modelTeamNameForPrediction } from './utils/teamDisplayNames';
+import {
+  LEAGUE_CATALOG,
+  LEAGUE_CONFIGS,
+  GENDER_MEN,
+  genderForLeague,
+  leagueDisplayName,
+  leaguesForPicker,
+  canonicalizePickerLeagueId,
+} from './utils/leagues';
 import { hasUsableOdds, impliedHomeProbability, oddsAdjustedView } from './utils/oddsAdjustment';
 
 const PREDICTION_MODEL_OPTIONS = [
@@ -63,18 +71,6 @@ const darkTheme = createTheme({
   },
 });
 
-const LEAGUE_CONFIGS = {
-  4986: { name: "Rugby Championship", neutral_mode: false },
-  4446: { name: "United Rugby Championship", neutral_mode: false },
-  5069: { name: "Currie Cup", neutral_mode: false },
-  4574: { name: "Rugby World Cup", neutral_mode: true },
-  4551: { name: "Super Rugby", neutral_mode: false },
-  4430: { name: "French Top 14", neutral_mode: false },
-  4414: { name: "English Premiership Rugby", neutral_mode: false },
-  4714: { name: "Six Nations Championship", neutral_mode: true },
-  5479: { name: "Rugby Union International Friendlies", neutral_mode: true },
-  5480: { name: "Nations Championship", neutral_mode: true },
-};
 const DEBUG_UPCOMING_LEAGUES = new Set([4714]);
 const APP_DISPLAY_NAME = 'Rugby AI Predictor';
 const APP_NAV_VIEWS = [
@@ -529,6 +525,12 @@ function getUpcomingExclusionReason(match, leagueId) {
   return null;
 }
 
+function predictionLeagueId(match, selectedLeague) {
+  const fromMatch = Number(match?.league_id);
+  if (Number.isFinite(fromMatch) && fromMatch > 0) return fromMatch;
+  return Number(selectedLeague);
+}
+
 function dedupeUpcomingMatches(matches, leagueId) {
   const sideIdentity = (match, side) => {
     const id = side === 'home' ? match?.home_team_id : match?.away_team_id;
@@ -641,6 +643,17 @@ function App() {
   const [showSubscription, setShowSubscription] = useState(false);
   const [leagues, setLeagues] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState(null);
+  const [selectedGender, setSelectedGender] = useState(() => {
+    try {
+      const savedLeague = parseInt(localStorage.getItem('rugby_ai_selected_league'), 10);
+      if (!Number.isNaN(savedLeague)) return genderForLeague(savedLeague);
+      const savedGender = localStorage.getItem('rugby_ai_selected_gender');
+      if (savedGender === 'women' || savedGender === 'men') return savedGender;
+    } catch (_) {
+      /* ignore */
+    }
+    return GENDER_MEN;
+  });
   const [upcomingMatches, setUpcomingMatches] = useState([]);
   const [generatedPredictions, setGeneratedPredictions] = useState([]);
   const [predictionModelFamily, setPredictionModelFamily] = useState(readSavedPredictionModel);
@@ -683,6 +696,11 @@ function App() {
       return String(a?.away_team || '').localeCompare(String(b?.away_team || ''));
     });
   }, [upcomingWindow.matches, selectedLeague]);
+
+  const visibleLeagues = useMemo(
+    () => leaguesForPicker(leagues).filter((league) => league.gender === selectedGender),
+    [leagues, selectedGender]
+  );
 
   const oddsInputMatches = useMemo(() => {
     const todayIso = getLocalYYYYMMDD();
@@ -805,8 +823,8 @@ function App() {
     // Restore selected league from localStorage after login
     const savedLeague = localStorage.getItem('rugby_ai_selected_league');
     if (savedLeague) {
-      const leagueId = parseInt(savedLeague);
-      if (!isNaN(leagueId)) {
+      const leagueId = canonicalizePickerLeagueId(parseInt(savedLeague, 10));
+      if (!Number.isNaN(leagueId)) {
         setSelectedLeague(leagueId);
       }
     }
@@ -853,8 +871,8 @@ function App() {
     if (authenticated && !selectedLeague) {
       const savedLeague = localStorage.getItem('rugby_ai_selected_league');
       if (savedLeague) {
-        const leagueId = parseInt(savedLeague);
-        if (!isNaN(leagueId)) {
+        const leagueId = canonicalizePickerLeagueId(parseInt(savedLeague, 10));
+        if (!Number.isNaN(leagueId)) {
           setSelectedLeague(leagueId);
         }
       }
@@ -1052,25 +1070,29 @@ function App() {
               availableLeagues.push(configLeague);
             }
           });
-          
-          // Sort by ID to keep consistent order
-          availableLeagues.sort((a, b) => a.id - b.id);
         }
+
+        availableLeagues = leaguesForPicker(availableLeagues);
         
         setLeagues(availableLeagues);
         if (availableLeagues.length > 0) {
           // Only auto-select if no league is currently selected and no saved league exists
           const savedLeague = localStorage.getItem('rugby_ai_selected_league');
           if (!selectedLeague && !savedLeague) {
-          setSelectedLeague(availableLeagues[0].id);
+            const first = availableLeagues.find((l) => l.gender === selectedGender) || availableLeagues[0];
+            setSelectedLeague(first.id);
+            setSelectedGender(genderForLeague(first.id));
           } else if (savedLeague) {
-            const leagueId = parseInt(savedLeague);
+            const leagueId = canonicalizePickerLeagueId(parseInt(savedLeague, 10));
             // Verify the saved league is still in available leagues
             if (!isNaN(leagueId) && availableLeagues.some(l => l.id === leagueId)) {
               setSelectedLeague(leagueId);
+              setSelectedGender(genderForLeague(leagueId));
             } else if (!selectedLeague) {
               // Saved league not available, use first available
-              setSelectedLeague(availableLeagues[0].id);
+              const first = availableLeagues.find((l) => l.gender === selectedGender) || availableLeagues[0];
+              setSelectedLeague(first.id);
+              setSelectedGender(genderForLeague(first.id));
             }
           }
         }
@@ -1079,23 +1101,25 @@ function App() {
       .catch((error) => {
         console.error('Error loading leagues from API, using fallback:', error);
         // Fallback to LEAGUE_CONFIGS
-        const fallbackLeagues = Object.entries(LEAGUE_CONFIGS).map(([id, config]) => ({
-          id: parseInt(id),
-          name: config.name,
-          upcoming_matches: 0,
-          recent_matches: 0,
-          has_news: false,
-          total_news: 0,
-        }));
+        const fallbackLeagues = leaguesForPicker(
+          Object.entries(LEAGUE_CONFIGS).map(([id, config]) => ({
+            id: parseInt(id),
+            name: config.name,
+            upcoming_matches: 0,
+            recent_matches: 0,
+            has_news: false,
+            total_news: 0,
+          }))
+        );
         setLeagues(fallbackLeagues);
         if (fallbackLeagues.length > 0) {
           const savedLeague = localStorage.getItem('rugby_ai_selected_league');
           if (savedLeague) {
-            const leagueId = parseInt(savedLeague);
-            if (!isNaN(leagueId) && fallbackLeagues.some(l => l.id === leagueId)) {
+            const leagueId = canonicalizePickerLeagueId(parseInt(savedLeague, 10));
+            if (!Number.isNaN(leagueId) && fallbackLeagues.some((l) => l.id === leagueId)) {
               setSelectedLeague(leagueId);
             } else {
-          setSelectedLeague(fallbackLeagues[0].id);
+              setSelectedLeague(fallbackLeagues[0].id);
             }
           } else {
             setSelectedLeague(fallbackLeagues[0].id);
@@ -1125,7 +1149,7 @@ function App() {
         
         if (result && result.data) {
           const matches = (result.data.matches || []).map((m) =>
-            applyLeagueDisplayNames(m, selectedLeague)
+            applyLeagueDisplayNames(m, predictionLeagueId(m, selectedLeague))
           );
           const dedupedMatches = dedupeUpcomingMatches(matches, selectedLeague);
           const diagnostics = dedupedMatches.map((m) => {
@@ -1284,22 +1308,12 @@ function App() {
     const batchByEventId = new Map();
     const batchByNameKey = new Map();
     let lastError = '';
-    try {
-      const batchResult = await predictMatchesBatch({
-        league_id: selectedLeague,
-        model_family: modelFamily,
-        matches: tasks.map(({ match, matchDate }) => ({
-          event_id: match.id || match.event_id || null,
-          home_team: predictionTeamName(match, 'home'),
-          away_team: predictionTeamName(match, 'away'),
-          match_date: matchDate,
-        })),
-      });
+    const ingestBatchResult = (batchResult) => {
       if (batchResult?.data?.error) {
         lastError = String(batchResult.data.error);
       }
       for (const p of batchResult?.data?.predictions || []) {
-        if (p && !p.error) {
+        if (p && !p.error && !p.prediction_unavailable) {
           if (p.event_id !== null && p.event_id !== undefined) {
             batchByEventId.set(String(p.event_id), p);
           }
@@ -1308,9 +1322,31 @@ function App() {
           lastError = String(p.error);
         }
       }
-    } catch (batchErr) {
-      lastError = batchErr?.message || lastError;
-      console.warn('Batch prediction unavailable, using per-match fallback:', batchErr?.message);
+    };
+    const tasksByLeague = new Map();
+    for (const task of tasks) {
+      const leagueId = predictionLeagueId(task.match, selectedLeague);
+      if (!tasksByLeague.has(leagueId)) tasksByLeague.set(leagueId, []);
+      tasksByLeague.get(leagueId).push(task);
+    }
+    for (const [leagueId, leagueTasks] of tasksByLeague.entries()) {
+      try {
+        const batchResult = await predictMatchesBatch({
+          league_id: leagueId,
+          model_family: modelFamily,
+          matches: leagueTasks.map(({ match, matchDate }) => ({
+            event_id: match.id || match.event_id || null,
+            home_team: predictionTeamName(match, 'home'),
+            away_team: predictionTeamName(match, 'away'),
+            match_date: matchDate,
+            kickoff_at: getKickoffAtFromMatch(match, leagueId) || null,
+          })),
+        });
+        ingestBatchResult(batchResult);
+      } catch (batchErr) {
+        lastError = batchErr?.message || lastError;
+        console.warn('Batch prediction unavailable, using per-match fallback:', batchErr?.message);
+      }
     }
 
     const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 1000) => {
@@ -1333,19 +1369,21 @@ function App() {
       while (taskIndex < tasks.length) {
         const currentIndex = taskIndex++;
         const { match, matchDate, odds } = tasks[currentIndex];
-        const kickoffAt = getKickoffAtFromMatch(match, selectedLeague);
+        const matchLeagueId = predictionLeagueId(match, selectedLeague);
+        const kickoffAt = getKickoffAtFromMatch(match, matchLeagueId);
         try {
           const result = await retryWithBackoff(async () => {
             const eid = String(match.id || match.event_id || '');
             const nameKey = `${predictionTeamName(match, 'home')}::${predictionTeamName(match, 'away')}::${matchDate}`;
             const fromBatch = (eid && batchByEventId.get(eid)) || batchByNameKey.get(nameKey);
-            if (fromBatch) return { data: fromBatch };
+            if (fromBatch && !fromBatch.prediction_unavailable) return { data: fromBatch };
             return await predictMatch({
               home_team: predictionTeamName(match, 'home'),
               away_team: predictionTeamName(match, 'away'),
-              league_id: selectedLeague,
+              league_id: matchLeagueId,
               match_date: matchDate,
               event_id: match.id || match.event_id || null,
+              kickoff_at: kickoffAt || null,
               enhanced: false,
               model_family: modelFamily,
             });
@@ -1365,7 +1403,7 @@ function App() {
               away_team: match.away_team,
               date: matchDate,
               kickoff_at: kickoffAt,
-              league_id: selectedLeague,
+              league_id: matchLeagueId,
               home_team_id: match.home_team_id,
               away_team_id: match.away_team_id,
               prediction_unavailable: true,
@@ -1424,7 +1462,7 @@ function App() {
               show_scores: false,
               model_available: false,
               home_win_prob: homeWinProb,
-              league_id: selectedLeague,
+              league_id: matchLeagueId,
               intensity: 'Odds-based pick (no AI score yet)',
               confidence_level: finalConfidence >= 0.8 ? 'High Confidence' : finalConfidence >= 0.65 ? 'Moderate Confidence' : 'Close Match Expected',
               score_diff: null,
@@ -1494,7 +1532,7 @@ function App() {
             predicted_home_score: displayHomeScore,
             predicted_away_score: displayAwayScore,
             home_win_prob: homeWinProb,
-            league_id: selectedLeague,
+            league_id: matchLeagueId,
             intensity,
             confidence_level: finalConfidence >= 0.8 ? 'High Confidence' : finalConfidence >= 0.65 ? 'Moderate Confidence' : 'Close Match Expected',
             score_diff: displayHomeScore - displayAwayScore,
@@ -1569,8 +1607,24 @@ function App() {
   }, []);
 
   const leagueName = useMemo(() => {
-    return selectedLeague ? LEAGUE_CONFIGS[selectedLeague]?.name || 'Unknown' : '';
+    return selectedLeague ? leagueDisplayName(selectedLeague) : '';
   }, [selectedLeague]);
+
+  const handleGenderChange = useCallback((gender) => {
+    setSelectedGender(gender);
+    try {
+      localStorage.setItem('rugby_ai_selected_gender', gender);
+    } catch (_) {
+      /* ignore */
+    }
+    setSelectedLeague((current) => {
+      if (genderForLeague(current) === gender) return current;
+      const next =
+        leagues.find((league) => genderForLeague(league.id) === gender) ||
+        LEAGUE_CATALOG.find((league) => league.gender === gender && league.picker !== false);
+      return next ? next.id : current;
+    });
+  }, [leagues]);
 
   const bindHeaderVideo = useCallback((node) => {
     headerVideoRef.current = node;
@@ -1617,7 +1671,14 @@ function App() {
   }, [isMobile]);
 
   const handleLeagueChange = useCallback((league) => {
-    setSelectedLeague(league);
+    const next = canonicalizePickerLeagueId(league);
+    setSelectedLeague(next);
+    setSelectedGender(genderForLeague(next));
+    try {
+      localStorage.setItem('rugby_ai_selected_gender', genderForLeague(next));
+    } catch (_) {
+      /* ignore */
+    }
     // Keep the control panel open so the league dropdown can close cleanly.
     // Panel closes via nav change / explicit close only.
   }, []);
@@ -1808,13 +1869,16 @@ function App() {
                 px: 0.5,
               }}
             >
-              League
+              Leagues
             </Typography>
-            <LeagueSelector
-              leagues={leagues}
-              selectedLeague={selectedLeague}
-              onLeagueChange={handleLeagueChange}
-            />
+            <GenderSelector value={selectedGender} onChange={handleGenderChange} />
+            <Box sx={{ mt: 1.25 }}>
+              <LeagueSelector
+                leagues={visibleLeagues}
+                selectedLeague={selectedLeague}
+                onLeagueChange={handleLeagueChange}
+              />
+            </Box>
             <Box
               sx={{
                 width: '72%',
@@ -1992,13 +2056,16 @@ function App() {
                 px: 0.5,
               }}
             >
-              League
+              Leagues
             </Typography>
-            <LeagueSelector
-              leagues={leagues}
-              selectedLeague={selectedLeague}
-              onLeagueChange={handleLeagueChange}
-            />
+            <GenderSelector value={selectedGender} onChange={handleGenderChange} />
+            <Box sx={{ mt: 1.25 }}>
+              <LeagueSelector
+                leagues={visibleLeagues}
+                selectedLeague={selectedLeague}
+                onLeagueChange={handleLeagueChange}
+              />
+            </Box>
             <Box
               sx={{
                 width: '72%',
@@ -2636,9 +2703,6 @@ function App() {
                   Odds are grouped by match date below and auto-filled from Highlightly bookmakers when available (typically 1–7 days before kickoff). Edit or clear fields to use your own odds.
                 </Typography>
               </Box>
-
-              {/* Live Matches */}
-              <LiveMatches leagueId={selectedLeague} />
 
               {/* Manual Odds Input */}
               {loadingMatches ? (

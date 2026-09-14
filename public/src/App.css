@@ -2965,6 +2965,7 @@ h2.match-title {
   flex-direction: column;
   justify-content: space-between;
   padding: clamp(16px, 2.4vw, 28px);
+  padding-bottom: clamp(78px, 11cqi, 118px);
   container-type: inline-size;
   container-name: pitch;
 }
@@ -3000,6 +3001,9 @@ h2.match-title {
   inset: 0;
   z-index: 0;
   pointer-events: none;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
 .broadcast-pitch-photo {
@@ -3009,7 +3013,9 @@ h2.match-title {
   height: 100%;
   object-fit: cover;
   object-position: center 58%;
-  display: block;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
   transform: none;
   filter: none;
 }
@@ -3092,6 +3098,19 @@ h2.match-title {
   color: #f4e4bc;
 }
 
+.broadcast-ft-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #f4e4bc;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+}
+
 .broadcast-comp,
 .broadcast-fixture-no {
   font-size: 0.74rem;
@@ -3134,6 +3153,13 @@ h2.match-title {
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.84);
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+}
+
+.broadcast-phase.is-detected {
+  font-size: clamp(0.95rem, 2vw, 1.2rem);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #ffffff;
 }
 
 .broadcast-scoreboard {

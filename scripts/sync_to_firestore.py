@@ -62,7 +62,7 @@ def _configured_league_ids() -> List[int]:
         from prediction.config import LEAGUE_MAPPINGS
         return list(LEAGUE_MAPPINGS.keys())
     except Exception:
-        return [4414, 4430, 4446, 4551, 4574, 4714, 4986, 5069, 5479, 5480]
+        return [4414, 4430, 4446, 4551, 4574, 4714, 4986, 5069, 5479, 5480, 5481, 5482, 5483, 5484, 5485, 5486, 5487]
 
 
 def _retry_firestore_call(
@@ -685,7 +685,7 @@ def prune_upcoming_firestore_clones(firestore_db: Any, days_back: int = 2, days_
         from prediction.config import LEAGUE_MAPPINGS
         league_ids = list(LEAGUE_MAPPINGS.keys())
     except Exception:
-        league_ids = [4414, 4430, 4446, 4551, 4574, 4714, 4986, 5069, 5479, 5480]
+        league_ids = [4414, 4430, 4446, 4551, 4574, 4714, 4986, 5069, 5479, 5480, 5481, 5482, 5483, 5484, 5485, 5486, 5487]
 
     now = datetime.now(tz.utc)
     start = now - timedelta(days=days_back)

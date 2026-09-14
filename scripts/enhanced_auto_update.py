@@ -93,6 +93,13 @@ MAX_ROUNDS_BY_LEAGUE: Dict[int, int] = {
     4574: 30,  # World Cup (placeholder cap)
     5479: 30,  # Friendlies (round scanning may not help much)
     5480: 7,   # Nations Championship: 6 ranking rounds + finals weekend
+    5481: 8,   # Investec Champions Cup (pool + knockouts)
+    5482: 8,   # EPCR Challenge Cup
+    5483: 8,   # Women's Rugby World Cup
+    5484: 5,   # Women's Six Nations
+    5485: 5,   # WXV 1
+    5486: 5,   # WXV 2
+    5487: 5,   # WXV 3
 }
 
 def compute_current_seasons(sportsdb_id: int, today: Optional[datetime] = None) -> List[str]:
@@ -922,6 +929,8 @@ def main():
     parser = argparse.ArgumentParser(description='Auto-update rugby games from Highlightly')
     parser.add_argument('--db', default='data.sqlite', help='Database file path')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--league-id', type=int, action='append', default=None,
+                        help='Only update this league id (repeatable). Default: all configured leagues')
     parser.add_argument('--include-history', action='store_true', help='Fetch all available Highlightly seasons (slower)')
     parser.add_argument('--api-key', default=None, help='Highlightly API key (or HIGHLIGHTLY_API_KEY env var)')
     parser.add_argument('--days-ahead', type=int, default=180, help='Only keep fixtures up to N days ahead (default: 180)')
@@ -969,9 +978,13 @@ def main():
     total_updated = 0
     total_fetched = 0
     request_counter = [0]
-    all_leagues = list(LEAGUE_MAPPINGS.keys())
+    all_leagues = list(args.league_id) if args.league_id else list(LEAGUE_MAPPINGS.keys())
+    unknown = [lid for lid in all_leagues if lid not in LEAGUE_MAPPINGS]
+    if unknown:
+        logger.error("Unknown league id(s): %s", unknown)
+        sys.exit(2)
     
-    logger.info(f"🔄 Fetching games for ALL {len(all_leagues)} leagues from Highlightly")
+    logger.info(f"🔄 Fetching games for {len(all_leagues)} league(s) from Highlightly")
     
     for league_id in all_leagues:
         league_info = LEAGUE_MAPPINGS[league_id]

@@ -49,6 +49,7 @@ if str(RUGBY_PREDICTOR_ROOT) not in sys.path:
     sys.path.insert(0, str(RUGBY_PREDICTOR_ROOT))
 
 from prediction.international_leagues import (  # noqa: E402
+    expand_training_load_ids,
     get_linked_league_ids,
     international_pool_enabled,
     is_international_rugby_league,
@@ -75,6 +76,7 @@ FRIENDLIES_LEAGUE_ID = _V4.FRIENDLIES_LEAGUE_ID
 DEFAULT_PROB_STD_THRESHOLD = _V4.DEFAULT_PROB_STD_THRESHOLD
 
 default_db_path = _V4.default_db_path
+resolve_selected_leagues = _V4.resolve_selected_leagues
 load_all_df = _V4.load_all_df
 build_global_team_to_idx = _V4.build_global_team_to_idx
 build_global_league_to_idx = _V4.build_global_league_to_idx
@@ -501,6 +503,12 @@ def main() -> None:
     )
     parser.add_argument("--db-path", default=None)
     parser.add_argument("--league-id", type=int, default=None)
+    parser.add_argument(
+        "--league-ids",
+        type=str,
+        default=None,
+        help="Comma-separated league ids to train (does not retrain unlisted leagues).",
+    )
     parser.add_argument("--all-leagues", action="store_true")
     parser.add_argument("--min-games", type=int, default=120)
     parser.add_argument(
@@ -514,7 +522,7 @@ def main() -> None:
         dest="international_pool",
         action="store_true",
         default=True,
-        help="Pool Rugby Championship / RWC / Friendlies / Nations Championship history when training cluster leagues.",
+        help="Pool linked league history (men's internationals, women's, EPCR + club context).",
     )
     parser.add_argument(
         "--no-international-pool",
@@ -570,8 +578,8 @@ def main() -> None:
     if not args._ensemble_seeds:
         args._ensemble_seeds = [int(args.seed)]
 
-    if not args.league_id and not args.all_leagues:
-        raise SystemExit("Use --league-id <id> or --all-leagues")
+    if not args.league_id and not args.league_ids and not args.all_leagues:
+        raise SystemExit("Use --league-id <id>, --league-ids <csv>, or --all-leagues")
     if args.walk_forward and args.train_all_completed:
         raise SystemExit("Use either --walk-forward or --train-all-completed, not both.")
 
@@ -582,9 +590,10 @@ def main() -> None:
     if not db_path.exists():
         raise SystemExit(f"DB not found: {db_path}")
 
-    leagues = {args.league_id: LEAGUE_MAPPINGS.get(args.league_id, f"League {args.league_id}")} if args.league_id else LEAGUE_MAPPINGS
+    leagues = resolve_selected_leagues(args.league_id, args.league_ids, args.all_leagues)
     conn = sqlite3.connect(str(db_path))
-    df_all = load_all_df(conn, leagues.keys())
+    load_ids = expand_training_load_ids(leagues.keys())
+    df_all = load_all_df(conn, load_ids)
     conn.close()
     if df_all.empty:
         raise SystemExit("No completed games found for selected leagues.")
@@ -610,19 +619,20 @@ def main() -> None:
             f"(min_games={args.min_games}, min_train_rows={args.min_train_rows})."
         )
 
+    retain_ids = expand_training_load_ids(keep_ids)
     df_all = (
-        df_all[df_all["league_id"].isin(keep_ids)]
+        df_all[df_all["league_id"].isin(retain_ids)]
         .copy()
         .sort_values(["date_event", "event_id"])
         .reset_index(drop=True)
     )
     global_team_to_idx = build_global_team_to_idx(df_all)
-    global_league_to_idx = build_global_league_to_idx(keep_ids)
+    global_league_to_idx = build_global_league_to_idx(retain_ids)
 
     pretrained_by_seed: Dict[int, Dict[str, torch.Tensor]] = {}
     if args.global_pretrain:
         pre_parts = []
-        for lid in keep_ids:
+        for lid in retain_ids:
             g_l = (
                 df_all[df_all["league_id"] == lid]
                 .copy()

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 # Core international cluster (TheSportsDB / local league IDs).
 RUGBY_CHAMPIONSHIP_ID = 4986
@@ -24,6 +24,30 @@ INTERNATIONAL_RUGBY_CLUSTER: Dict[int, str] = {
     INTERNATIONAL_FRIENDLIES_ID: "Rugby Union International Friendlies",
     NATIONS_CHAMPIONSHIP_ID: "Nations Championship",
 }
+
+WOMEN_RWC_ID = 5483
+WOMEN_SIX_NATIONS_ID = 5484
+WXV_1_ID = 5485
+WXV_2_ID = 5486
+WXV_3_ID = 5487
+
+WOMEN_INTERNATIONAL_CLUSTER: Dict[int, str] = {
+    WOMEN_RWC_ID: "Women's Rugby World Cup",
+    WOMEN_SIX_NATIONS_ID: "Women's Six Nations",
+    WXV_1_ID: "WXV 1",
+    WXV_2_ID: "WXV 2",
+    WXV_3_ID: "WXV 3",
+}
+
+CHAMPIONS_CUP_ID = 5481
+CHALLENGE_CUP_ID = 5482
+EPCR_CLUSTER: Dict[int, str] = {
+    CHAMPIONS_CUP_ID: "Investec Champions Cup",
+    CHALLENGE_CUP_ID: "EPCR Challenge Cup",
+}
+# Same clubs contest URC / Premiership / Top 14. Include that history when
+# training EPCR models so team embeddings are not cup-only.
+EPCR_CLUB_CONTEXT_IDS: Tuple[int, ...] = (4446, 4414, 4430)
 
 # Preferred fallback order when choosing a deployed model for Nations Championship.
 LINKED_MODEL_PRIORITY: Tuple[int, ...] = (
@@ -78,17 +102,47 @@ def is_international_rugby_league(league_id: int) -> bool:
     return int(league_id) in INTERNATIONAL_RUGBY_CLUSTER
 
 
+def is_womens_international_league(league_id: int) -> bool:
+    return int(league_id) in WOMEN_INTERNATIONAL_CLUSTER
+
+
+def is_epcr_league(league_id: int) -> bool:
+    return int(league_id) in EPCR_CLUSTER
+
+
 def get_linked_league_ids(league_id: int) -> List[int]:
     """All cluster leagues that can share training data / models."""
-    if not is_international_rugby_league(league_id):
-        return [int(league_id)]
-    return list(INTERNATIONAL_RUGBY_CLUSTER.keys())
+    lid = int(league_id)
+    if lid in WOMEN_INTERNATIONAL_CLUSTER:
+        return list(WOMEN_INTERNATIONAL_CLUSTER.keys())
+    if lid in INTERNATIONAL_RUGBY_CLUSTER:
+        return list(INTERNATIONAL_RUGBY_CLUSTER.keys())
+    if lid in EPCR_CLUSTER:
+        return sorted(set(EPCR_CLUSTER.keys()) | set(EPCR_CLUB_CONTEXT_IDS))
+    return [lid]
+
+
+def expand_training_load_ids(league_ids: Sequence[int]) -> List[int]:
+    load_ids = set()
+    for lid in league_ids:
+        load_ids.add(int(lid))
+        load_ids.update(int(x) for x in get_linked_league_ids(lid))
+    return sorted(load_ids)
 
 
 def international_pool_enabled(league_id: int, explicit_flag: Optional[bool] = None) -> bool:
+    clustered = (
+        is_international_rugby_league(league_id)
+        or is_womens_international_league(league_id)
+        or is_epcr_league(league_id)
+    )
+    if explicit_flag is False:
+        return False
+    if clustered:
+        return True
     if explicit_flag is not None:
         return bool(explicit_flag)
-    return is_international_rugby_league(league_id)
+    return False
 
 
 def _teams_for_league(conn: sqlite3.Connection, league_id: int) -> Dict[int, str]:

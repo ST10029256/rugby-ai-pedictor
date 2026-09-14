@@ -390,6 +390,80 @@
         "artifacts/league_5479_model_maz_maxed_v4_seed_9001.pt"
       ],
       "saved_meta": "artifacts/league_5479_model_maz_maxed_v4_meta.pkl"
+    },
+    "5481": {
+      "name": "Investec Champions Cup",
+      "status": "trained_only",
+      "mode": "train_all_completed",
+      "train_rows": 8001,
+      "test_rows": 0,
+      "ensemble_size": 3,
+      "global_pretrained": true,
+      "calibration_method": "beta",
+      "blend_method": "alpha_grid",
+      "blend_alpha": 1.0,
+      "regime": "high_variance",
+      "regime_idx": 2,
+      "regime_uncertainty_multiplier": 1.2,
+      "alpha_avg_train": 0.4398438036441803,
+      "variance_avg_train": 97.22195434570312,
+      "ensemble_prob_std_avg_train": 0.0685826471099888,
+      "confidence_margin_variance_threshold": 305.6217346191406,
+      "confidence_prob_std_threshold": 0.12123191267702987,
+      "embedding_norm_mean": 5.543493111928304,
+      "embedding_norm_std": 0.9116272131601969,
+      "train_metrics": {
+        "winner_accuracy": 0.8490188726409199,
+        "home_mae": 7.697234630584717,
+        "away_mae": 6.519092559814453,
+        "overall_mae": 7.108163595199585,
+        "brier_winner": 0.10954478736402791,
+        "ece_winner": 0.03874907464174205,
+        "rows": 8001
+      },
+      "saved_seed_models": [
+        "artifacts\\league_5481_model_maz_maxed_v4_seed_42.pt",
+        "artifacts\\league_5481_model_maz_maxed_v4_seed_1337.pt",
+        "artifacts\\league_5481_model_maz_maxed_v4_seed_9001.pt"
+      ],
+      "saved_meta": "artifacts\\league_5481_model_maz_maxed_v4_meta.pkl"
+    },
+    "5482": {
+      "name": "EPCR Challenge Cup",
+      "status": "trained_only",
+      "mode": "train_all_completed",
+      "train_rows": 8001,
+      "test_rows": 0,
+      "ensemble_size": 3,
+      "global_pretrained": true,
+      "calibration_method": "beta",
+      "blend_method": "alpha_grid",
+      "blend_alpha": 1.0,
+      "regime": "high_variance",
+      "regime_idx": 2,
+      "regime_uncertainty_multiplier": 1.2,
+      "alpha_avg_train": 0.44138824939727783,
+      "variance_avg_train": 97.15641784667969,
+      "ensemble_prob_std_avg_train": 0.06796102435400933,
+      "confidence_margin_variance_threshold": 311.8314514160156,
+      "confidence_prob_std_threshold": 0.12170573590132416,
+      "embedding_norm_mean": 5.544204076131185,
+      "embedding_norm_std": 0.9108616908391317,
+      "train_metrics": {
+        "winner_accuracy": 0.8525184351956006,
+        "home_mae": 7.684372901916504,
+        "away_mae": 6.517963409423828,
+        "overall_mae": 7.101168155670166,
+        "brier_winner": 0.10876617584943969,
+        "ece_winner": 0.03762871430053403,
+        "rows": 8001
+      },
+      "saved_seed_models": [
+        "artifacts\\league_5482_model_maz_maxed_v4_seed_42.pt",
+        "artifacts\\league_5482_model_maz_maxed_v4_seed_1337.pt",
+        "artifacts\\league_5482_model_maz_maxed_v4_seed_9001.pt"
+      ],
+      "saved_meta": "artifacts\\league_5482_model_maz_maxed_v4_meta.pkl"
     }
   },
   "summary": {

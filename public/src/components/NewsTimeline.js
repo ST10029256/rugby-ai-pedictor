@@ -17,12 +17,13 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
+import { leagueIdsMatch } from '../utils/leagues';
 
 const NewsTimeline = ({ newsItems = [], leagueId = null }) => {
   // 🎯 LEAGUE-SPECIFIC: Filter timeline by league if provided
   let filteredItems = newsItems;
   if (leagueId) {
-    filteredItems = newsItems.filter((item) => item.league_id === leagueId);
+    filteredItems = newsItems.filter((item) => leagueIdsMatch(leagueId, item.league_id));
   }
   
   // Group news items by match and sort by timestamp (newest first)

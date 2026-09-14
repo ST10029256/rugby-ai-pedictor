@@ -45,6 +45,13 @@ LEAGUE_CONFIGS = {
     4714: {"name": "Six Nations Championship"},
     5479: {"name": "Rugby Union International Friendlies"},
     5480: {"name": "Nations Championship"},
+    5481: {"name": "Investec Champions Cup"},
+    5482: {"name": "EPCR Challenge Cup"},
+    5483: {"name": "Women's Rugby World Cup"},
+    5484: {"name": "Women's Six Nations"},
+    5485: {"name": "WXV 1"},
+    5486: {"name": "WXV 2"},
+    5487: {"name": "WXV 3"},
 }
 
 def get_last_checkpoint() -> Optional[datetime]:

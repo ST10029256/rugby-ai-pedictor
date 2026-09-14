@@ -23,6 +23,13 @@ LEAGUE_MAPPINGS = {
     4714: "Six Nations Championship",
     5479: "Rugby Union International Friendlies",
     5480: "Nations Championship",
+    5481: "Investec Champions Cup",
+    5482: "EPCR Challenge Cup",
+    5483: "Women's Rugby World Cup",
+    5484: "Women's Six Nations",
+    5485: "WXV 1",
+    5486: "WXV 2",
+    5487: "WXV 3",
 }
 
 

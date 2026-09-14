@@ -28,6 +28,7 @@ import { hasMeaningfulTime, formatSASTDateYMD, formatSASTTimePM } from '../utils
 import leagueSeasonWindows from '../data/leagueSeasonWindows.json';
 import { assignHistoryPlayoffStages, PLAYOFF_STAGE_ORDER, playoffStageSortVal, regularRoundLabel, getCompetitionFinalsFormat, seasonYearFromMatches, buildRankingRoundEntries } from '../utils/historyPlayoffRounds';
 import { resolveSeasonLabel, crossYearSeasonStartMonth } from '../utils/season';
+import { expandLeagueIds } from '../utils/leagues';
 
 const HistoricalPredictions = ({ leagueId, leagueName }) => {
   const [loading, setLoading] = useState(true);
@@ -84,9 +85,10 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
   const HISTORY_MAX_PAGES = 100;
   const detectedSeasonRanges = useMemo(() => {
     const all = Array.isArray(leagueSeasonWindows?.leagues) ? leagueSeasonWindows.leagues : [];
-    const targetLeagueId = Number(leagueId);
-    const leagueEntry = all.find((entry) => Number(entry?.league_id) === targetLeagueId);
-    const seasons = Array.isArray(leagueEntry?.seasons) ? leagueEntry.seasons : [];
+    const targetIds = new Set(expandLeagueIds(leagueId));
+    const seasons = all
+      .filter((entry) => targetIds.has(Number(entry?.league_id)))
+      .flatMap((entry) => (Array.isArray(entry?.seasons) ? entry.seasons : []));
     return seasons
       .map((s) => {
         const startDate = String(s?.start_date || '').slice(0, 10);

@@ -1,23 +1,14 @@
 /**
  * Season-year rules for every competition in the app.
  *
- * Only URC, Premiership and Top 14 cross two calendar years.
+ * URC, Premiership, Top 14 and EPCR cups cross two calendar years.
  * Everything else is a single calendar year / World Cup edition year —
- * including Nations Championship (July + November + Finals Weekend).
+ * including Nations Championship and the women's internationals.
  */
 
-export const LEAGUE_IDS = {
-  RUGBY_CHAMPIONSHIP: 4986,
-  URC: 4446,
-  CURRIE_CUP: 5069,
-  RWC: 4574,
-  SUPER_RUGBY: 4551,
-  TOP14: 4430,
-  PREMIERSHIP: 4414,
-  SIX_NATIONS: 4714,
-  FRIENDLIES: 5479,
-  NATIONS_CHAMPIONSHIP: 5480,
-};
+import { LEAGUE_IDS } from './leagues';
+
+export { LEAGUE_IDS };
 
 export const CALENDAR_YEAR_LEAGUE_IDS = new Set([
   LEAGUE_IDS.SUPER_RUGBY,
@@ -27,16 +18,25 @@ export const CALENDAR_YEAR_LEAGUE_IDS = new Set([
   LEAGUE_IDS.NATIONS_CHAMPIONSHIP,
   LEAGUE_IDS.RWC,
   LEAGUE_IDS.FRIENDLIES,
+  LEAGUE_IDS.WOMEN_RWC,
+  LEAGUE_IDS.WOMEN_SIX_NATIONS,
+  LEAGUE_IDS.WXV_1,
+  LEAGUE_IDS.WXV_2,
+  LEAGUE_IDS.WXV_3,
 ]);
 
 export const CROSS_YEAR_LEAGUE_IDS = new Set([
   LEAGUE_IDS.URC,
   LEAGUE_IDS.PREMIERSHIP,
   LEAGUE_IDS.TOP14,
+  LEAGUE_IDS.CHAMPIONS_CUP,
+  LEAGUE_IDS.CHALLENGE_CUP,
 ]);
 
 /** Highlightly league IDs keyed the same way (start year of the season). */
-export const CROSS_YEAR_HIGHLIGHTLY_LEAGUE_IDS = new Set([65460, 11847, 14400]);
+export const CROSS_YEAR_HIGHLIGHTLY_LEAGUE_IDS = new Set([
+  65460, 11847, 14400, 46738, 45036,
+]);
 
 function utcYearMonth(value) {
   if (value == null || value === '') return null;
@@ -55,7 +55,14 @@ function utcYearMonth(value) {
 export function crossYearSeasonStartMonth(leagueId) {
   const id = Number(leagueId);
   if (id === LEAGUE_IDS.TOP14) return 8;
-  if (id === LEAGUE_IDS.URC || id === LEAGUE_IDS.PREMIERSHIP) return 9;
+  if (
+    id === LEAGUE_IDS.URC ||
+    id === LEAGUE_IDS.PREMIERSHIP ||
+    id === LEAGUE_IDS.CHAMPIONS_CUP ||
+    id === LEAGUE_IDS.CHALLENGE_CUP
+  ) {
+    return 9;
+  }
   return null;
 }
 

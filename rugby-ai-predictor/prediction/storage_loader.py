@@ -15,6 +15,58 @@ LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4").strip().lower()
 ALLOW_LEGACY_MODEL_FALLBACK = os.getenv("ALLOW_LEGACY_MODEL_FALLBACK", "0").strip().lower() not in {"0", "false", "no"}
 
 
+def _candidate_local_artifact_dirs() -> List[str]:
+    here = os.path.dirname(os.path.abspath(__file__))
+    functions_root = os.path.dirname(here)
+    repo_root = os.path.dirname(functions_root)
+    return [
+        os.path.join(repo_root, "artifacts"),
+        os.path.join(repo_root, "models", "artifacts"),
+        os.path.join(functions_root, "artifacts"),
+        os.path.join(functions_root, "models", "artifacts"),
+        "artifacts",
+        os.path.join("models", "artifacts"),
+    ]
+
+
+def _load_runtime_assets_from_local(league_id: int, family: str) -> Optional[Dict[str, Any]]:
+    family_s = str(family or "v4").strip().lower()
+    if family_s not in {"v4", "v5"}:
+        return None
+    meta_name = f"league_{league_id}_model_maz_maxed_{family_s}_meta.pkl"
+    seed_prefix = f"league_{league_id}_model_maz_maxed_{family_s}_seed_"
+    for folder in _candidate_local_artifact_dirs():
+        meta_path = os.path.join(folder, meta_name)
+        if not os.path.isfile(meta_path):
+            continue
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        seed_paths = sorted(
+            os.path.join(folder, name)
+            for name in names
+            if name.startswith(seed_prefix) and name.endswith(".pt")
+        )
+        if not seed_paths:
+            continue
+        logger.info(
+            "Loaded local %s assets for league %s from %s (%s seeds)",
+            family_s,
+            league_id,
+            folder,
+            len(seed_paths),
+        )
+        return {
+            "league_id": int(league_id),
+            "meta_path": meta_path,
+            "seed_model_paths": seed_paths,
+            "bucket_name": None,
+            "model_family": family_s,
+        }
+    return None
+
+
 def _load_runtime_assets_from_storage(
     league_id: int,
     bucket_name: str,
@@ -25,6 +77,9 @@ def _load_runtime_assets_from_storage(
 
     Returns None when the required runtime assets are not present.
     """
+    local = _load_runtime_assets_from_local(league_id, family)
+    if local:
+        return local
     if not bucket_name:
         return None
     try:

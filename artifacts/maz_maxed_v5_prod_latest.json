@@ -503,6 +503,94 @@
         "artifacts/league_5480_model_maz_maxed_v5_seed_9001.pt"
       ],
       "saved_meta": "artifacts/league_5480_model_maz_maxed_v5_meta.pkl"
+    },
+    "5481": {
+      "name": "Investec Champions Cup",
+      "status": "trained_only",
+      "mode": "train_all_completed",
+      "train_rows": 8001,
+      "test_rows": 0,
+      "ensemble_size": 3,
+      "global_pretrained": true,
+      "architecture": "global_backbone_league_adapters_cross_attention_moe_score_first",
+      "calibration_method": "isotonic",
+      "blend_method": "logistic_meta",
+      "blend_alpha": null,
+      "regime": "high_variance",
+      "regime_idx": 2,
+      "regime_uncertainty_multiplier": 1.2,
+      "alpha_avg_train": 0.4946290850639343,
+      "variance_avg_train": 30.999534606933594,
+      "ensemble_prob_std_avg_train": 0.020394847529198484,
+      "confidence_margin_variance_threshold": 114.49020385742188,
+      "confidence_prob_std_threshold": 0.03918957031470924,
+      "embedding_norm_mean": 5.60053014755249,
+      "embedding_norm_std": 0.9111881256103516,
+      "expert_usage_avg": [
+        0.287883182366689,
+        0.21126719315846762,
+        0.2364280770222346,
+        0.2644219994544983
+      ],
+      "train_metrics": {
+        "winner_accuracy": 0.9998750156230471,
+        "home_mae": 2.650806427001953,
+        "away_mae": 2.7187070846557617,
+        "overall_mae": 2.6847567558288574,
+        "brier_winner": 6.249218947619042e-05,
+        "ece_winner": 9.997500311913115e-07,
+        "rows": 8001
+      },
+      "saved_seed_models": [
+        "artifacts\\league_5481_model_maz_maxed_v5_seed_42.pt",
+        "artifacts\\league_5481_model_maz_maxed_v5_seed_1337.pt",
+        "artifacts\\league_5481_model_maz_maxed_v5_seed_9001.pt"
+      ],
+      "saved_meta": "artifacts\\league_5481_model_maz_maxed_v5_meta.pkl"
+    },
+    "5482": {
+      "name": "EPCR Challenge Cup",
+      "status": "trained_only",
+      "mode": "train_all_completed",
+      "train_rows": 8001,
+      "test_rows": 0,
+      "ensemble_size": 3,
+      "global_pretrained": true,
+      "architecture": "global_backbone_league_adapters_cross_attention_moe_score_first",
+      "calibration_method": "isotonic",
+      "blend_method": "logistic_meta",
+      "blend_alpha": null,
+      "regime": "high_variance",
+      "regime_idx": 2,
+      "regime_uncertainty_multiplier": 1.2,
+      "alpha_avg_train": 0.49551093578338623,
+      "variance_avg_train": 30.112590789794922,
+      "ensemble_prob_std_avg_train": 0.021503810927618196,
+      "confidence_margin_variance_threshold": 110.13260650634766,
+      "confidence_prob_std_threshold": 0.04112536964999637,
+      "embedding_norm_mean": 5.599831581115723,
+      "embedding_norm_std": 0.9132843414942423,
+      "expert_usage_avg": [
+        0.29917338490486145,
+        0.20708746214707693,
+        0.23164010544617972,
+        0.2620989978313446
+      ],
+      "train_metrics": {
+        "winner_accuracy": 1.0,
+        "home_mae": 2.646489143371582,
+        "away_mae": 2.7633605003356934,
+        "overall_mae": 2.7049248218536377,
+        "brier_winner": 1.0000000000383047e-12,
+        "ece_winner": 9.99999999945207e-07,
+        "rows": 8001
+      },
+      "saved_seed_models": [
+        "artifacts\\league_5482_model_maz_maxed_v5_seed_42.pt",
+        "artifacts\\league_5482_model_maz_maxed_v5_seed_1337.pt",
+        "artifacts\\league_5482_model_maz_maxed_v5_seed_9001.pt"
+      ],
+      "saved_meta": "artifacts\\league_5482_model_maz_maxed_v5_meta.pkl"
     }
   },
   "summary": {
