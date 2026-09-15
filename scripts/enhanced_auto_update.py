@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 # Ensure API keys can be sourced from local .env files.
 _load_local_env_files()
 
-LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "v4")
+LIVE_MODEL_FAMILY = os.getenv("LIVE_MODEL_FAMILY", "champion")
 LIVE_MODEL_CHANNEL = os.getenv("LIVE_MODEL_CHANNEL", "prod_100")
 LIVE_MODEL_VERSION = os.getenv("LIVE_MODEL_VERSION", f"{LIVE_MODEL_FAMILY}:{LIVE_MODEL_CHANNEL}")
 
@@ -1049,6 +1049,7 @@ def main():
         except Exception as e:
             logger.error(f"❌ Error updating {league_name}: {e}")
 
+    freeze_stats = None
     if snapshot_runtime and snapshot_runtime.enabled:
         try:
             freeze_stats = snapshot_runtime.freeze_upcoming(conn, hours_ahead=48, limit=1000)
@@ -1079,6 +1080,11 @@ def main():
                 )
         except Exception as freeze_err:
             logger.error("Upcoming freeze failed: %s", freeze_err)
+            freeze_stats = {"scanned": 0, "created": 0, "skipped_existing": 0, "skipped_started": 0, "errors": 1}
+    elif os.getenv("GITHUB_ACTIONS"):
+        logger.error(
+            "Upcoming freeze disabled (predictor import failed). History will have no AI."
+        )
 
     try:
         from killer_v1_rebuilt.freeze import default_live_dir, freeze_is_ready
@@ -1104,6 +1110,25 @@ def main():
             "fetch failure so the data freeze is visible in CI."
         )
         sys.exit(4)
+
+    if os.getenv("GITHUB_ACTIONS"):
+        if not snapshot_runtime or not snapshot_runtime.enabled:
+            logger.error(
+                "Upcoming freeze is disabled in CI (predictor import failed). "
+                "History cannot store pre-kickoff predictions."
+            )
+            sys.exit(5)
+        if freeze_stats and int(freeze_stats.get("errors") or 0) > 0 and int(freeze_stats.get("created") or 0) == 0:
+            logger.error(
+                "Upcoming freeze wrote no predictions and had errors "
+                "(scanned=%s skipped_existing=%s skipped_started=%s errors=%s). "
+                "History will have no AI for those fixtures.",
+                freeze_stats.get("scanned"),
+                freeze_stats.get("skipped_existing"),
+                freeze_stats.get("skipped_started"),
+                freeze_stats.get("errors"),
+            )
+            sys.exit(5)
 
     logger.info(f"🎉 Update complete! Total games updated: {total_updated} (Highlightly API calls: {request_counter[0]})")
     if snapshot_runtime and snapshot_runtime.enabled:

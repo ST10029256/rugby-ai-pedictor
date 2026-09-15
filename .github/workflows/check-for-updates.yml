@@ -168,10 +168,21 @@ jobs:
 
           echo "database_sha256=$(sha256sum data.sqlite | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      # Models live in Cloud Storage. The midnight freeze must run after this
+      # or every league's History card is written with no AI prediction.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+          cleanup_credentials: true
+
       - name: Full historical refresh from Highlightly
         if: steps.mode.outputs.full_refresh == 'true'
         env:
           HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+          MODEL_STORAGE_BUCKET: rugby-ai-61fd0.firebasestorage.app
+          GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -202,6 +213,8 @@ jobs:
         if: steps.mode.outputs.full_refresh != 'true'
         env:
           HIGHLIGHTLY_API_KEY: ${{ secrets.HIGHLIGHTLY_API_KEY }}
+          MODEL_STORAGE_BUCKET: rugby-ai-61fd0.firebasestorage.app
+          GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -243,13 +256,6 @@ jobs:
           set -Eeuo pipefail
           python scripts/check_prediction_integrity.py --db data.sqlite
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-          create_credentials_file: true
-          cleanup_credentials: true
-
       # Completed games are deliberately NOT re-scored here.
       #
       # A prediction is only meaningful if it was made before kickoff, and the
@@ -257,8 +263,9 @@ jobs:
       # fixture in the next two days. Scoring a finished game instead used the
       # current model, which production training fits on that very result, so the
       # numbers looked uncannily accurate and were not forecasts at all. Those
-      # rows (snapshot_type='historical_backfill') were also read by nothing:
-      # the history endpoint joins pre_kickoff_live only. Rebuilding them cost
+      # rows (snapshot_type='historical_backfill') were also unused by History
+      # until the live freeze existed. History now prefers a pre-kickoff freeze
+      # and only falls back to that older backfill when no freeze exists.
       # roughly 11k model runs a night for output no user ever saw.
       #
       # backfill_v4_predictions_all_games.py still exists for deliberate offline

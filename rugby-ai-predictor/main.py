@@ -7363,16 +7363,20 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 e.round,
                 e.venue,
                 e.status,
-                s.predicted_winner,
-                s.predicted_home_score,
-                s.predicted_away_score,
-                s.confidence,
-                s.home_win_prob,
-                s.away_win_prob,
-                s.prediction_correct,
-                s.score_error,
-                s.predicted_at,
-                s.snapshot_type
+                COALESCE(s.predicted_winner, b.predicted_winner),
+                COALESCE(s.predicted_home_score, b.predicted_home_score),
+                COALESCE(s.predicted_away_score, b.predicted_away_score),
+                COALESCE(s.confidence, b.confidence),
+                COALESCE(s.home_win_prob, b.home_win_prob),
+                COALESCE(s.away_win_prob, b.away_win_prob),
+                COALESCE(s.prediction_correct, b.prediction_correct),
+                COALESCE(s.score_error, b.score_error),
+                COALESCE(s.predicted_at, b.predicted_at),
+                CASE
+                    WHEN s.match_id IS NOT NULL THEN s.snapshot_type
+                    WHEN b.match_id IS NOT NULL THEN b.snapshot_type
+                    ELSE NULL
+                END
             FROM event e
             LEFT JOIN league l ON e.league_id = l.id
             LEFT JOIN team t1 ON e.home_team_id = t1.id
@@ -7380,12 +7384,15 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
             LEFT JOIN prediction_snapshot s ON s.match_id = e.id
                 AND s.model_version = ?
                 AND s.snapshot_type = 'pre_kickoff_live'
+            LEFT JOIN prediction_snapshot b ON b.match_id = e.id
+                AND b.model_version = ?
+                AND b.snapshot_type = 'historical_backfill'
             WHERE {event_filter_sql}
             ORDER BY e.date_event ASC, e.league_id
             LIMIT ? OFFSET ?
         """
         t0_data = perf_counter()
-        cursor.execute(unified_data_sql, [model_version, *event_params, limit, offset])
+        cursor.execute(unified_data_sql, [model_version, model_version, *event_params, limit, offset])
         results = cursor.fetchall()
         logger.info(
             f"[hist][{request_id}] unified data query completed in {(perf_counter() - t0_data) * 1000:.1f} ms "
@@ -7546,6 +7553,7 @@ def get_historical_predictions_http(req: https_fn.Request) -> https_fn.Response:
                 "predicted_score_difference": abs(predicted_home_score - predicted_away_score) if predicted_home_score is not None and predicted_away_score is not None else None,
                 "home_win_prob": home_win_prob,
                 "away_win_prob": away_win_prob,
+                "prediction_source": _snapshot_type,
             }
 
             matches_by_year_week[year_key][round_key].append(match_data)
