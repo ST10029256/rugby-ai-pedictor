@@ -7,9 +7,29 @@ Backward-compatible with the original V4 publisher, while also supporting V5.
 
 import argparse
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
+
+
+def _completed_games_by_league(db_path: str) -> Dict[str, int]:
+    path = Path(db_path)
+    if not path.exists():
+        return {}
+    conn = sqlite3.connect(str(path))
+    try:
+        rows = conn.execute(
+            """
+            SELECT league_id, COUNT(*)
+            FROM event
+            WHERE home_score IS NOT NULL AND away_score IS NOT NULL
+            GROUP BY league_id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(int(league_id)): int(count) for league_id, count in rows}
 
 from firebase_admin import firestore, get_app, initialize_app
 
@@ -59,6 +79,9 @@ def publish(
 
     updated = 0
     generated_at = report.get("generated_at") or datetime.utcnow().isoformat()
+    completed_games = _completed_games_by_league("data.sqlite")
+    if not completed_games:
+        completed_games = _completed_games_by_league("rugby-ai-predictor/data.sqlite")
     source_report = str(report_file).replace("\\", "/")
     model_family = (model_family or "v4").strip().lower()
     model_type = (model_type or model_family).strip().lower()
@@ -72,11 +95,12 @@ def publish(
         metrics = league_data.get("metrics", {})
         winner_accuracy = float(metrics.get("winner_accuracy", 0.0))
         accuracy_pct = round(winner_accuracy * 100.0, 1)
-        # Keep eval metrics honest (80/20), but display full production trained rows
-        # when available so UI doesn't misleadingly show "80 games trained".
+        # Games Trained is completed fixtures in this league, not pooled train_rows.
         prod_entry = prod_leagues.get(str(league_id), {}) if prod_leagues else {}
+        own_completed = int(completed_games.get(str(league_id), 0))
         training_games = int(
-            prod_entry.get("train_rows")
+            own_completed
+            or prod_entry.get("train_rows")
             or league_data.get("total_rows")
             or league_data.get("train_rows")
             or 0

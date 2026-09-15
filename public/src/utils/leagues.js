@@ -130,10 +130,77 @@ export function catalogOrderIndex(leagueId) {
   return idx < 0 ? 9999 : idx;
 }
 
+export const BUNDLE_ALL_VALUE = 'all';
+
 export function expandLeagueIds(leagueId) {
   const id = Number(leagueId);
   if (!Number.isFinite(id)) return [];
   return (BUNDLE_BY_PRIMARY[id] || [id]).map((n) => Number(n));
+}
+
+export function isBundledPickerLeague(leagueId) {
+  return Boolean(BUNDLE_BY_PRIMARY[canonicalizePickerLeagueId(leagueId)]);
+}
+
+export function bundleSubpickerLabel(leagueId) {
+  const primary = canonicalizePickerLeagueId(leagueId);
+  if (primary === LEAGUE_IDS.CHAMPIONS_CUP) return 'Select Cup';
+  if (primary === LEAGUE_IDS.WXV_1) return 'Select Series';
+  return 'Select Split';
+}
+
+export function bundleAllowsAll(leagueId) {
+  return canonicalizePickerLeagueId(leagueId) === LEAGUE_IDS.WXV_1;
+}
+
+export function defaultBundleMember(leagueId) {
+  const primary = canonicalizePickerLeagueId(leagueId);
+  const ids = BUNDLE_BY_PRIMARY[primary];
+  if (!ids?.length) return null;
+  if (primary === LEAGUE_IDS.CHAMPIONS_CUP) return ids[0];
+  return null;
+}
+
+export function bundleMemberOptions(leagueId) {
+  const primary = canonicalizePickerLeagueId(leagueId);
+  const ids = BUNDLE_BY_PRIMARY[primary];
+  if (!ids) return [];
+  const members = ids.map((id) => {
+    const config = getLeagueConfig(id);
+    return { id, name: config?.matchLabel || config?.name || `League ${id}` };
+  });
+  if (!bundleAllowsAll(primary)) return members;
+  const groupName = getLeagueConfig(primary)?.name || 'All';
+  return [{ id: BUNDLE_ALL_VALUE, name: `All ${groupName}` }, ...members];
+}
+
+export function queryLeagueIds(pickerLeagueId, bundleMemberId) {
+  const primary = canonicalizePickerLeagueId(pickerLeagueId);
+  const members = BUNDLE_BY_PRIMARY[primary];
+  if (!members) {
+    const id = Number(pickerLeagueId);
+    return Number.isFinite(id) ? [id] : [];
+  }
+  if (
+    bundleMemberId == null ||
+    bundleMemberId === '' ||
+    bundleMemberId === BUNDLE_ALL_VALUE
+  ) {
+    if (primary === LEAGUE_IDS.CHAMPIONS_CUP) return [members[0]];
+    return [...members];
+  }
+  const member = Number(bundleMemberId);
+  if (members.includes(member)) return [member];
+  return [...members];
+}
+
+export function leagueViewDisplayName(pickerLeagueId, bundleMemberId, fallback = 'Unknown') {
+  const ids = queryLeagueIds(pickerLeagueId, bundleMemberId);
+  if (ids.length === 1) {
+    const config = getLeagueConfig(ids[0]);
+    return config?.matchLabel || config?.name || fallback;
+  }
+  return leagueDisplayName(pickerLeagueId, fallback);
 }
 
 export function canonicalizePickerLeagueId(leagueId) {
@@ -147,8 +214,10 @@ export function isPickerLeague(leagueId) {
   return Boolean(config && config.picker !== false);
 }
 
-export function leagueIdsMatch(filterLeagueId, itemLeagueId) {
-  const wanted = new Set(expandLeagueIds(filterLeagueId));
+export function leagueIdsMatch(filterLeagueId, itemLeagueId, filterIds) {
+  const wanted = new Set(
+    Array.isArray(filterIds) && filterIds.length ? filterIds.map(Number) : expandLeagueIds(filterLeagueId)
+  );
   return wanted.has(Number(itemLeagueId));
 }
 

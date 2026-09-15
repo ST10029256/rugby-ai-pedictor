@@ -3,7 +3,7 @@ import { Box, Drawer, Typography, CssBaseline, ThemeProvider, createTheme, IconB
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import LogoutIcon from '@mui/icons-material/Logout';
-import LeagueSelector, { GenderSelector } from './components/LeagueSelector';
+import LeagueSelector, { GenderSelector, BundleMemberSelector } from './components/LeagueSelector';
 import LeagueMetrics from './components/LeagueMetrics';
 import ManualOddsInput from './components/ManualOddsInput';
 import PredictionsDisplay from './components/PredictionsDisplay';
@@ -33,9 +33,14 @@ import {
   LEAGUE_CONFIGS,
   GENDER_MEN,
   genderForLeague,
-  leagueDisplayName,
+  leagueViewDisplayName,
   leaguesForPicker,
   canonicalizePickerLeagueId,
+  bundleMemberOptions,
+  bundleSubpickerLabel,
+  queryLeagueIds,
+  defaultBundleMember,
+  BUNDLE_ALL_VALUE,
 } from './utils/leagues';
 import { hasUsableOdds, impliedHomeProbability, oddsAdjustedView } from './utils/oddsAdjustment';
 
@@ -643,6 +648,16 @@ function App() {
   const [showSubscription, setShowSubscription] = useState(false);
   const [leagues, setLeagues] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState(null);
+  const [selectedBundleMember, setSelectedBundleMember] = useState(() => {
+    try {
+      const raw = localStorage.getItem('rugby_ai_selected_bundle_member');
+      if (raw == null || raw === '' || raw === 'all') return null;
+      const parsed = parseInt(raw, 10);
+      return Number.isNaN(parsed) ? null : parsed;
+    } catch (_) {
+      return null;
+    }
+  });
   const [selectedGender, setSelectedGender] = useState(() => {
     try {
       const savedLeague = parseInt(localStorage.getItem('rugby_ai_selected_league'), 10);
@@ -681,7 +696,7 @@ function App() {
   const generateRunRef = useRef(0);
   
   const isMobile = useMediaQuery('(max-width:899.95px)');
-  const isMobileReelsViewport = useMediaQuery('(max-width:768px)');
+  const isMobileReelsViewport = isMobile;
   const isMobileNewsReels = isMobileReelsViewport && activeView === 'news';
 
   const upcomingWindow = useMemo(() => getNextMatchWeek(upcomingMatches), [upcomingMatches]);
@@ -701,6 +716,12 @@ function App() {
     () => leaguesForPicker(leagues).filter((league) => league.gender === selectedGender),
     [leagues, selectedGender]
   );
+  const bundleOptions = useMemo(() => bundleMemberOptions(selectedLeague), [selectedLeague]);
+  const viewLeagueIds = useMemo(
+    () => queryLeagueIds(selectedLeague, selectedBundleMember),
+    [selectedLeague, selectedBundleMember]
+  );
+  const viewLeagueId = viewLeagueIds[0] || selectedLeague;
 
   const oddsInputMatches = useMemo(() => {
     const todayIso = getLocalYYYYMMDD();
@@ -823,9 +844,14 @@ function App() {
     // Restore selected league from localStorage after login
     const savedLeague = localStorage.getItem('rugby_ai_selected_league');
     if (savedLeague) {
-      const leagueId = canonicalizePickerLeagueId(parseInt(savedLeague, 10));
+      const rawId = parseInt(savedLeague, 10);
+      const leagueId = canonicalizePickerLeagueId(rawId);
       if (!Number.isNaN(leagueId)) {
         setSelectedLeague(leagueId);
+        const scoped = queryLeagueIds(leagueId, rawId);
+        if (scoped.length === 1 && scoped[0] === rawId && rawId !== leagueId) {
+          setSelectedBundleMember(rawId);
+        }
       }
     }
   };
@@ -866,14 +892,19 @@ function App() {
     body.style.overscrollBehavior = '';
   };
 
-  // Restore selected league from localStorage after authentication check
+  // Save selected league from localStorage after authentication check
   useEffect(() => {
     if (authenticated && !selectedLeague) {
       const savedLeague = localStorage.getItem('rugby_ai_selected_league');
       if (savedLeague) {
-        const leagueId = canonicalizePickerLeagueId(parseInt(savedLeague, 10));
+        const rawId = parseInt(savedLeague, 10);
+        const leagueId = canonicalizePickerLeagueId(rawId);
         if (!Number.isNaN(leagueId)) {
           setSelectedLeague(leagueId);
+          const scoped = queryLeagueIds(leagueId, rawId);
+          if (scoped.length === 1 && scoped[0] === rawId && rawId !== leagueId) {
+            setSelectedBundleMember(rawId);
+          }
         }
       }
     }
@@ -886,6 +917,22 @@ function App() {
     }
   }, [selectedLeague]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'rugby_ai_selected_bundle_member',
+        selectedBundleMember == null ? 'all' : String(selectedBundleMember)
+      );
+    } catch (_) {
+      /* ignore */
+    }
+  }, [selectedBundleMember]);
+
+  useEffect(() => {
+    const fallback = defaultBundleMember(selectedLeague);
+    if (fallback == null) return;
+    if (selectedBundleMember == null) setSelectedBundleMember(fallback);
+  }, [selectedLeague, selectedBundleMember]);
 
   // Prevent page scrolling when mobile drawer is open (only while authenticated).
   useEffect(() => {
@@ -967,8 +1014,10 @@ function App() {
       html.style.setProperty('overflow-x', 'hidden', 'important');
       html.style.height = 'auto';
       html.style.maxHeight = '';
+      html.style.minHeight = '100dvh';
       body.style.setProperty('overflow', 'visible', 'important');
       body.style.height = 'auto';
+      body.style.minHeight = '100dvh';
       body.style.position = '';
       body.style.top = '';
       body.style.width = '';
@@ -976,7 +1025,7 @@ function App() {
       if (root) {
         root.style.setProperty('overflow', 'visible', 'important');
         root.style.height = 'auto';
-        root.style.minHeight = '100%';
+        root.style.minHeight = '100dvh';
       }
     }
 
@@ -1145,7 +1194,11 @@ function App() {
 
     const fetchUpcoming = async () => {
       try {
-        const result = await getUpcomingMatches({ league_id: selectedLeague, limit: 50 });
+        const result = await getUpcomingMatches({
+          league_id: viewLeagueId,
+          league_ids: viewLeagueIds,
+          limit: 50,
+        });
         
         if (result && result.data) {
           const matches = (result.data.matches || []).map((m) =>
@@ -1199,11 +1252,11 @@ function App() {
 
     fetchUpcoming();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLeague]);
+  }, [selectedLeague, selectedBundleMember]);
 
   useEffect(() => {
     autoOddsFetchedKeysRef.current.clear();
-  }, [selectedLeague]);
+  }, [selectedLeague, selectedBundleMember]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1577,7 +1630,7 @@ function App() {
       date: p.date_event || p.date,
     }));
     setGeneratedPredictions(dedupedPredictions);
-    predictionsByFamilyRef.current[`${selectedLeague}::${modelFamily}`] = dedupedPredictions;
+    predictionsByFamilyRef.current[`${selectedLeague}::${selectedBundleMember || 'all'}::${modelFamily}`] = dedupedPredictions;
     if (dedupedPredictions.length === 0) {
       setPredictionModelError(
         lastError || `No ${modelFamily.toUpperCase()} predictions were returned for this round.`
@@ -1594,7 +1647,7 @@ function App() {
     } catch (_) {
       /* ignore */
     }
-    const cached = predictionsByFamilyRef.current[`${selectedLeague}::${family}`];
+    const cached = predictionsByFamilyRef.current[`${selectedLeague}::${selectedBundleMember || 'all'}::${family}`];
     setPredictionModelError('');
     setGeneratedPredictions(cached || []);
   };
@@ -1607,8 +1660,8 @@ function App() {
   }, []);
 
   const leagueName = useMemo(() => {
-    return selectedLeague ? leagueDisplayName(selectedLeague) : '';
-  }, [selectedLeague]);
+    return selectedLeague ? leagueViewDisplayName(selectedLeague, selectedBundleMember) : '';
+  }, [selectedLeague, selectedBundleMember]);
 
   const handleGenderChange = useCallback((gender) => {
     setSelectedGender(gender);
@@ -1622,7 +1675,9 @@ function App() {
       const next =
         leagues.find((league) => genderForLeague(league.id) === gender) ||
         LEAGUE_CATALOG.find((league) => league.gender === gender && league.picker !== false);
-      return next ? next.id : current;
+      const nextId = next ? next.id : current;
+      setSelectedBundleMember(defaultBundleMember(nextId));
+      return nextId;
     });
   }, [leagues]);
 
@@ -1673,6 +1728,7 @@ function App() {
   const handleLeagueChange = useCallback((league) => {
     const next = canonicalizePickerLeagueId(league);
     setSelectedLeague(next);
+    setSelectedBundleMember(defaultBundleMember(next));
     setSelectedGender(genderForLeague(next));
     try {
       localStorage.setItem('rugby_ai_selected_gender', genderForLeague(next));
@@ -1682,6 +1738,15 @@ function App() {
     // Keep the control panel open so the league dropdown can close cleanly.
     // Panel closes via nav change / explicit close only.
   }, []);
+
+  const handleBundleMemberChange = useCallback((value) => {
+    if (value === BUNDLE_ALL_VALUE || value === 'all' || value === '') {
+      setSelectedBundleMember(defaultBundleMember(selectedLeague));
+      return;
+    }
+    const parsed = parseInt(value, 10);
+    setSelectedBundleMember(Number.isNaN(parsed) ? defaultBundleMember(selectedLeague) : parsed);
+  }, [selectedLeague]);
 
   // Show login widget if not authenticated
   if (checkingAuth) {
@@ -1767,12 +1832,13 @@ function App() {
       boxSizing: 'border-box',
       background: 'linear-gradient(180deg, rgba(38, 39, 48, 0.95) 0%, rgba(31, 41, 55, 0.98) 100%)',
       position: 'relative',
-      // Outer panel scrolls on mobile — avoid nested scroll glitches.
-      overflowY: isMobile ? 'visible' : 'auto',
+      // Mobile: pin leagues/profile/logout; only the Navigate list scrolls.
+      overflow: isMobile ? 'hidden' : 'auto',
       overflowX: 'hidden',
       WebkitOverflowScrolling: isMobile ? 'auto' : 'touch',
       overscrollBehavior: 'contain',
-      minHeight: isMobile ? '100%' : 'auto',
+      flex: 1,
+      minHeight: 0,
       ...(!isMobile ? {
         contain: 'layout style',
       } : {}),
@@ -1865,19 +1931,27 @@ function App() {
                 fontWeight: 700,
                 letterSpacing: '0.12em',
                 textTransform: 'uppercase',
-                mb: 1.25,
+                mb: 2,
                 px: 0.5,
               }}
             >
               Leagues
             </Typography>
-            <GenderSelector value={selectedGender} onChange={handleGenderChange} />
-            <Box sx={{ mt: 1.25 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              <GenderSelector value={selectedGender} onChange={handleGenderChange} />
               <LeagueSelector
                 leagues={visibleLeagues}
                 selectedLeague={selectedLeague}
                 onLeagueChange={handleLeagueChange}
               />
+              {bundleOptions.length > 0 ? (
+                <BundleMemberSelector
+                  label={bundleSubpickerLabel(selectedLeague)}
+                  options={bundleOptions}
+                  value={selectedBundleMember == null ? (defaultBundleMember(selectedLeague) ?? BUNDLE_ALL_VALUE) : selectedBundleMember}
+                  onChange={handleBundleMemberChange}
+                />
+              ) : null}
             </Box>
             <Box
               sx={{
@@ -1893,7 +1967,15 @@ function App() {
             />
           </Box>
 
-          <Box sx={{ flex: '1 1 auto', minHeight: 0, width: '100%', mb: 2, overflowY: 'auto' }}>
+          <Box
+            sx={{
+              flex: '1 1 auto',
+              minHeight: 0,
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
             <Typography
               sx={{
                 color: '#64748b',
@@ -1901,91 +1983,107 @@ function App() {
                 fontWeight: 700,
                 letterSpacing: '0.12em',
                 textTransform: 'uppercase',
-                mb: 1.25,
+                mb: 2,
                 px: 0.5,
+                flexShrink: 0,
               }}
             >
               Navigate
             </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.65 }}>
-              {APP_NAV_VIEWS.map((item) => {
-                const isActive = activeView === item.id;
-                return (
-                  <Button
-                    key={item.id}
-                    fullWidth
-                    onClick={() => handleViewChange(item.id)}
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: '28px 1fr 28px',
-                      alignItems: 'center',
-                      justifyContent: 'stretch',
-                      gap: 0,
-                      py: 1.15,
-                      px: 1.5,
-                      borderRadius: '12px',
-                      textTransform: 'none',
-                      fontWeight: 700,
-                      fontSize: '0.95rem',
-                      color: isActive ? '#d1fae5' : '#e2e8f0',
-                      backgroundColor: isActive
-                        ? 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(16,185,129,0.08))'
-                        : 'rgba(255,255,255,0.03)',
-                      border: isActive
-                        ? '1px solid rgba(16, 185, 129, 0.45)'
-                        : '1px solid rgba(255,255,255,0.06)',
-                      boxShadow: isActive ? '0 4px 14px rgba(16, 185, 129, 0.15)' : 'none',
-                      transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
-                      WebkitUserSelect: 'none',
-                      userSelect: 'none',
-                      WebkitTouchCallout: 'none',
-                      touchAction: 'manipulation',
-                      '&:hover': {
+            <Box
+              className="mobile-nav-scroll"
+              sx={{
+                flex: '1 1 auto',
+                minHeight: 0,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehavior: 'contain',
+                touchAction: 'pan-y',
+              }}
+            >
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.65, pb: 0.5 }}>
+                {APP_NAV_VIEWS.map((item) => {
+                  const isActive = activeView === item.id;
+                  return (
+                    <Button
+                      key={item.id}
+                      fullWidth
+                      onClick={() => handleViewChange(item.id)}
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: '28px 1fr 28px',
+                        alignItems: 'center',
+                        justifyContent: 'stretch',
+                        gap: 0,
+                        py: 1.15,
+                        px: 1.5,
+                        borderRadius: '12px',
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        fontSize: '0.95rem',
+                        color: isActive ? '#d1fae5' : '#e2e8f0',
                         backgroundColor: isActive
-                          ? 'linear-gradient(135deg, rgba(16,185,129,0.24), rgba(16,185,129,0.12))'
-                          : 'rgba(255,255,255,0.06)',
-                        borderColor: isActive ? 'rgba(16, 185, 129, 0.55)' : 'rgba(255,255,255,0.12)',
-                      },
-                      '&:active': {
-                        transform: 'none',
-                      },
-                    }}
-                  >
-                    <Box
-                      component="span"
-                      sx={{
-                        justifySelf: 'start',
-                        fontSize: '1.1rem',
-                        lineHeight: 1,
-                        width: 28,
-                        textAlign: 'left',
+                          ? 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(16,185,129,0.08))'
+                          : 'rgba(255,255,255,0.03)',
+                        border: isActive
+                          ? '1px solid rgba(16, 185, 129, 0.45)'
+                          : '1px solid rgba(255,255,255,0.06)',
+                        boxShadow: isActive ? '0 4px 14px rgba(16, 185, 129, 0.15)' : 'none',
+                        transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
+                        WebkitUserSelect: 'none',
+                        userSelect: 'none',
+                        WebkitTouchCallout: 'none',
+                        touchAction: 'manipulation',
+                        '&:hover': {
+                          backgroundColor: isActive
+                            ? 'linear-gradient(135deg, rgba(16,185,129,0.24), rgba(16,185,129,0.12))'
+                            : 'rgba(255,255,255,0.06)',
+                          borderColor: isActive ? 'rgba(16, 185, 129, 0.55)' : 'rgba(255,255,255,0.12)',
+                        },
+                        '&:active': {
+                          transform: 'none',
+                        },
                       }}
                     >
-                      {item.icon}
-                    </Box>
-                    <Box
-                      component="span"
-                      sx={{
-                        textAlign: 'center',
-                        width: '100%',
-                        lineHeight: 1.2,
-                      }}
-                    >
-                      {item.label}
-                    </Box>
-                    <Box aria-hidden component="span" sx={{ width: 28 }} />
-                  </Button>
-                );
-              })}
+                      <Box
+                        component="span"
+                        sx={{
+                          justifySelf: 'start',
+                          fontSize: '1.1rem',
+                          lineHeight: 1,
+                          width: 28,
+                          textAlign: 'left',
+                        }}
+                      >
+                        {item.icon}
+                      </Box>
+                      <Box
+                        component="span"
+                        sx={{
+                          textAlign: 'center',
+                          width: '100%',
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {item.label}
+                      </Box>
+                      <Box aria-hidden component="span" sx={{ width: 28 }} />
+                    </Button>
+                  );
+                })}
+              </Box>
             </Box>
+          </Box>
 
+          <Box sx={{ flexShrink: 0, width: '100%', pt: 1 }}>
             <Box
               sx={{
                 width: '72%',
                 maxWidth: 220,
                 height: '2px',
                 mx: 'auto',
-                mt: 2.5,
+                mt: 1.5,
                 mb: 2,
                 borderRadius: '2px',
                 background: 'linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%)',
@@ -2006,6 +2104,7 @@ function App() {
               mt: 'auto',
               width: '100%',
               pt: 1.5,
+              pb: 'max(12px, env(safe-area-inset-bottom, 0px))',
               borderTop: '1px solid rgba(255,255,255,0.08)',
             }}
           >
@@ -2052,19 +2151,27 @@ function App() {
                 fontWeight: 700,
                 letterSpacing: '0.12em',
                 textTransform: 'uppercase',
-                mb: 1.25,
+                mb: 2,
                 px: 0.5,
               }}
             >
               Leagues
             </Typography>
-            <GenderSelector value={selectedGender} onChange={handleGenderChange} />
-            <Box sx={{ mt: 1.25 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              <GenderSelector value={selectedGender} onChange={handleGenderChange} />
               <LeagueSelector
                 leagues={visibleLeagues}
                 selectedLeague={selectedLeague}
                 onLeagueChange={handleLeagueChange}
               />
+              {bundleOptions.length > 0 ? (
+                <BundleMemberSelector
+                  label={bundleSubpickerLabel(selectedLeague)}
+                  options={bundleOptions}
+                  value={selectedBundleMember == null ? (defaultBundleMember(selectedLeague) ?? BUNDLE_ALL_VALUE) : selectedBundleMember}
+                  onChange={handleBundleMemberChange}
+                />
+              ) : null}
             </Box>
             <Box
               sx={{
@@ -2143,22 +2250,19 @@ function App() {
         className="app-shell"
         sx={{ 
         display: 'flex', 
-        minHeight: '100%',
+        minHeight: '100dvh',
         backgroundColor: '#0e1117',
         position: 'relative',
-        // Desktop + non-reels mobile: shell grows so the document can scroll
         ...(isMobileNewsReels
           ? {
               overflow: 'hidden',
               height: '100dvh',
               maxHeight: '100dvh',
-              minHeight: '100dvh',
             }
           : {
               overflow: 'visible',
               height: 'auto',
               maxHeight: 'none',
-              minHeight: '100dvh',
             }),
       }}>
         {/* Video Background */}
@@ -2172,8 +2276,7 @@ function App() {
           preload="auto"
           sx={{
             position: 'fixed',
-            top: 0,
-            left: 0,
+            inset: 0,
             width: '100%',
             height: '100%',
             objectFit: 'cover',
@@ -2222,8 +2325,9 @@ function App() {
                 position: 'fixed',
                 top: 0,
                 left: 0,
-                height: '100dvh',
-                maxHeight: '100dvh',
+                bottom: 0,
+                height: 'auto',
+                maxHeight: 'none',
                 WebkitOverflowScrolling: 'touch',
                 overscrollBehavior: 'contain',
                 // layout/style only — paint containment clips Select menus
@@ -2272,25 +2376,24 @@ function App() {
               />
             )}
             
-            {/* Mobile Control Panel — single scroll owner; no nested scroll / will-change thrash */}
+            {/* Mobile Control Panel — only the Navigate list scrolls */}
             <Box
               className="mobile-control-panel"
               sx={{
                 position: 'fixed',
                 top: 'var(--app-mobile-nav-offset)',
                 left: 0,
+                bottom: 0,
                 width: '280px',
-                height: 'calc(100dvh - var(--app-mobile-nav-offset))',
-                maxHeight: 'calc(100dvh - var(--app-mobile-nav-offset))',
+                height: 'auto',
+                maxHeight: 'none',
                 background: 'linear-gradient(180deg, #262730 0%, #1f2937 100%)',
                 borderRight: '1px solid rgba(16, 185, 129, 0.2)',
                 boxShadow: '4px 0 24px rgba(0, 0, 0, 0.5), inset -1px 0 0 rgba(16, 185, 129, 0.1)',
                 zIndex: 2100,
                 transform: mobileOpen ? 'translate3d(0,0,0)' : 'translate3d(-100%,0,0)',
                 transition: 'transform 0.28s cubic-bezier(0.4, 0, 0.2, 1)',
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                WebkitOverflowScrolling: 'touch',
+                overflow: 'hidden',
                 overscrollBehavior: 'contain',
                 // manipulation > pan-y: allows taps on Select without scroll hijack
                 touchAction: 'manipulation',
@@ -2300,10 +2403,6 @@ function App() {
                 // Solid fill — blur on a sliding panel causes iOS tap/scroll flicker
                 WebkitBackdropFilter: 'none',
                 backdropFilter: 'none',
-                '@supports not (height: 100dvh)': {
-                  height: 'calc(100svh - var(--app-mobile-nav-offset))',
-                  maxHeight: 'calc(100svh - var(--app-mobile-nav-offset))',
-                },
               }}
             >
               {drawerContent}
@@ -2319,9 +2418,9 @@ function App() {
             position: 'fixed',
             top: 0,
             left: { xs: 0, md: '280px' },
-            right: 'auto',
-            width: { xs: '100vw', md: 'calc(100vw - 280px)' },
-            maxWidth: { xs: '100vw', md: 'calc(100vw - 280px)' },
+            right: 0,
+            width: 'auto',
+            maxWidth: 'none',
             display: 'flex',
             gap: { xs: 0, md: 2 },
             justifyContent: { xs: 'center', md: 'center' },
@@ -2331,8 +2430,12 @@ function App() {
             paddingTop: { xs: 'calc(env(safe-area-inset-top, 0px) + 14px)', md: '12px' },
             paddingBottom: { xs: '14px', md: '12px' },
             backgroundColor: '#0e1117',
+            backgroundImage: 'none',
             backdropFilter: { xs: 'none', md: 'blur(10px)' },
             WebkitBackdropFilter: { xs: 'none', md: 'blur(10px)' },
+            filter: 'none',
+            isolation: 'isolate',
+            transform: 'none',
             borderBottom: '1px solid rgba(16, 185, 129, 0.2)',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
             zIndex: isMobile && mobileOpen ? 2200 : 2000,
@@ -2340,8 +2443,8 @@ function App() {
             boxSizing: 'border-box',
             margin: 0,
             overflow: 'hidden',
-            WebkitFontSmoothing: 'antialiased',
-            MozOsxFontSmoothing: 'grayscale',
+            WebkitFontSmoothing: 'auto',
+            MozOsxFontSmoothing: 'auto',
           }}>
             {isMobile ? (
               <Box
@@ -2409,25 +2512,27 @@ function App() {
                       width: 22,
                       height: 22,
                       flexShrink: 0,
-                      // drop-shadow filters can bleed blur into nearby text on mobile WebKit
                       filter: 'none',
+                      imageRendering: 'auto',
                     }}
                   />
                   <Typography
                     sx={{
                       fontWeight: 800,
                       fontSize: { xs: '0.9rem', sm: '0.98rem' },
-                      letterSpacing: '-0.02em',
+                      letterSpacing: '0.01em',
                       lineHeight: 1.2,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
-                      // Solid color on mobile — gradient + background-clip text looks soft/blurry
                       color: '#f8fafc',
                       background: 'none',
-                      WebkitBackgroundClip: 'unset',
-                      WebkitTextFillColor: 'unset',
-                      backgroundClip: 'unset',
+                      WebkitBackgroundClip: 'border-box',
+                      WebkitTextFillColor: '#f8fafc',
+                      backgroundClip: 'border-box',
+                      WebkitFontSmoothing: 'auto',
+                      MozOsxFontSmoothing: 'auto',
+                      textRendering: 'auto',
                     }}
                   >
                     {APP_DISPLAY_NAME}
@@ -2516,6 +2621,7 @@ function App() {
             paddingRight: 0,
             position: 'relative',
             zIndex: 1,
+            minHeight: isMobileNewsReels ? 0 : '100dvh',
             ...(isMobileNewsReels ? {
               overflow: 'hidden',
               height: '100dvh',
@@ -2525,20 +2631,12 @@ function App() {
                 height: '100svh',
                 maxHeight: '100svh',
               },
-            } : ((activeView === 'news' || activeView === 'standings' || activeView === 'teams' || activeView === 'lineups' || activeView === 'broadcast' || activeView === 'predictions' || activeView === 'history' || activeView === 'profile') ? {
-              // Grow with content only — forced minHeight was creating empty scroll
+            } : {
               overflow: 'visible',
               height: 'auto',
               maxHeight: 'none',
-              minHeight: 0,
               contain: 'none',
-            } : {
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              height: '100vh',
-              maxHeight: '100vh',
-              contain: 'layout style',
-            })),
+            }),
           }}
         >
           <Box className="main-content-wrapper" sx={{ 
@@ -2626,15 +2724,17 @@ function App() {
               <Box
                 sx={
                   activeView === 'news'
-                    ? {
-                        ...VIEW_CONTENT_WRAPPER_SX,
-                        ...(isMobileNewsReels
-                          ? { p: 0, px: 0, pt: 0, pb: 0 }
-                          : null),
-                        minHeight: isMobileNewsReels ? '100%' : VIEW_CONTENT_WRAPPER_SX.minHeight,
-                        height: isMobileNewsReels ? '100%' : 'auto',
-                        overflow: isMobileNewsReels ? 'hidden' : VIEW_CONTENT_WRAPPER_SX.overflowY,
-                      }
+                    ? (isMobileNewsReels
+                        ? {
+                            p: 0,
+                            m: 0,
+                            width: '100%',
+                            height: '100%',
+                            minHeight: '100%',
+                            overflow: 'hidden',
+                            bgcolor: '#000',
+                          }
+                        : VIEW_CONTENT_WRAPPER_SX)
                     : activeView === 'lineups' || activeView === 'broadcast'
                     ? {
                         ...VIEW_CONTENT_WRAPPER_SX,
@@ -2649,19 +2749,20 @@ function App() {
                 {activeView === 'news' ? (
                   <NewsFeed
                     userPreferences={userPreferences}
-                    leagueId={selectedLeague}
+                    leagueId={viewLeagueId}
+                    leagueIds={viewLeagueIds}
                     leagueName={leagueName}
                   />
                 ) : activeView === 'standings' ? (
-                  <LeagueStandings leagueId={selectedLeague} leagueName={leagueName} />
+                  <LeagueStandings leagueId={viewLeagueId} leagueIds={viewLeagueIds} leagueName={leagueName} />
                 ) : activeView === 'teams' ? (
-                  <LeagueTeams leagueId={selectedLeague} leagueName={leagueName} />
+                  <LeagueTeams leagueId={viewLeagueId} leagueIds={viewLeagueIds} leagueName={leagueName} />
                 ) : activeView === 'lineups' ? (
-                  <MatchLineups leagueId={selectedLeague} leagueName={leagueName} />
+                  <MatchLineups leagueId={viewLeagueId} leagueIds={viewLeagueIds} leagueName={leagueName} />
                 ) : activeView === 'broadcast' ? (
-                  <LiveBroadcast leagueId={selectedLeague} leagueName={leagueName} />
+                  <LiveBroadcast leagueId={viewLeagueId} leagueIds={viewLeagueIds} leagueName={leagueName} />
                 ) : (
-                  <HistoricalPredictions leagueId={selectedLeague} leagueName={leagueName} />
+                  <HistoricalPredictions leagueId={viewLeagueId} leagueIds={viewLeagueIds} leagueName={leagueName} />
                 )}
               </Box>
             ) : activeView === 'profile' ? (
@@ -2674,7 +2775,7 @@ function App() {
             {selectedLeague && (
               <Box sx={{ width: '100%', boxSizing: 'border-box' }}>
               {/* League Metrics */}
-              <LeagueMetrics leagueId={selectedLeague} leagueName={leagueName} />
+              <LeagueMetrics leagueId={viewLeagueId} leagueIds={viewLeagueIds} leagueName={leagueName} />
 
               <Box
                 sx={{
@@ -2721,7 +2822,7 @@ function App() {
               ) : oddsInputMatches.length > 0 ? (
                 <ManualOddsInput
                   matches={oddsInputMatches}
-                  selectedLeague={selectedLeague}
+                  selectedLeague={viewLeagueId}
                   manualOdds={manualOdds}
                   onOddsChange={handleManualOddsChange}
                   showHeader={false}

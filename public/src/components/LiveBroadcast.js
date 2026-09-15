@@ -411,7 +411,7 @@ function EmptyBroadcast({ leagueName }) {
   );
 }
 
-function LiveBroadcast({ leagueId, leagueName }) {
+function LiveBroadcast({ leagueId, leagueIds, leagueName }) {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -439,6 +439,7 @@ function LiveBroadcast({ leagueId, leagueName }) {
       const [liveResult, upcomingResult] = await Promise.all([
         getLiveMatches({
           league_id: leagueId,
+          league_ids: leagueIds,
           wait: Boolean(wait),
           since: since || undefined,
         }).catch((err) => {
@@ -446,7 +447,7 @@ function LiveBroadcast({ leagueId, leagueName }) {
           return { data: { matches: [] } };
         }),
         shouldRefreshUpcoming
-          ? getUpcomingMatches({ league_id: leagueId, limit: 50 }).catch((err) => {
+          ? getUpcomingMatches({ league_id: leagueId, league_ids: leagueIds, limit: 50 }).catch((err) => {
               console.warn('Live broadcast upcoming feed failed:', err?.message || err);
               return { data: { matches: upcomingRef.current } };
             })
@@ -486,7 +487,7 @@ function LiveBroadcast({ leagueId, leagueName }) {
     } finally {
       if (!quiet) setLoading(false);
     }
-  }, [leagueId]);
+  }, [leagueId, leagueIds]);
 
   useEffect(() => {
     let cancelled = false;

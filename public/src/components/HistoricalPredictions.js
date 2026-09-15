@@ -30,7 +30,7 @@ import { assignHistoryPlayoffStages, PLAYOFF_STAGE_ORDER, playoffStageSortVal, r
 import { resolveSeasonLabel, crossYearSeasonStartMonth } from '../utils/season';
 import { expandLeagueIds } from '../utils/leagues';
 
-const HistoricalPredictions = ({ leagueId, leagueName }) => {
+const HistoricalPredictions = ({ leagueId, leagueIds, leagueName }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
@@ -47,21 +47,22 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
 
   useEffect(() => {
     const now = Date.now();
+    const scopeKey = `${leagueId}::${(leagueIds || []).join(',')}`;
     const isDuplicateStrictModeRun =
-      lastInitialFetchRef.current.leagueId === leagueId &&
+      lastInitialFetchRef.current.scopeKey === scopeKey &&
       now - lastInitialFetchRef.current.atMs < 1500;
     if (isDuplicateStrictModeRun) {
-      console.log('[History] Skipping duplicate initial fetch (strict mode guard)', { leagueId });
+      console.log('[History] Skipping duplicate initial fetch (strict mode guard)', { leagueId, leagueIds });
       return;
     }
-    lastInitialFetchRef.current = { leagueId, atMs: now };
+    lastInitialFetchRef.current = { scopeKey, atMs: now };
     // Reset selection when league changes
     setSelectedYear(null);
     setExpandedWeeks(new Set());
     autoPreferredYearAppliedRef.current = false;
     const initialYear = isRugbyWorldCup ? null : currentYear;
     fetchHistoricalData(initialYear);
-  }, [leagueId]);
+  }, [leagueId, leagueIds]);
 
   const isEnglishPremiership = Number(leagueId) === 4414;
   const preferredRwcYears = useMemo(() => ['2023', '2019', '2015', '2011', '2007'], []);
@@ -85,7 +86,9 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
   const HISTORY_MAX_PAGES = 100;
   const detectedSeasonRanges = useMemo(() => {
     const all = Array.isArray(leagueSeasonWindows?.leagues) ? leagueSeasonWindows.leagues : [];
-    const targetIds = new Set(expandLeagueIds(leagueId));
+    const targetIds = new Set(
+      Array.isArray(leagueIds) && leagueIds.length ? leagueIds.map(Number) : expandLeagueIds(leagueId)
+    );
     const seasons = all
       .filter((entry) => targetIds.has(Number(entry?.league_id)))
       .flatMap((entry) => (Array.isArray(entry?.seasons) ? entry.seasons : []));
@@ -97,7 +100,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
       })
       .filter((s) => s.startDate && s.endDate)
       .sort((a, b) => a.startDate.localeCompare(b.startDate));
-  }, [leagueId]);
+  }, [leagueId, leagueIds]);
   const shouldHidePremiershipSuppressedWindowMatch = (match) => {
     if (!isEnglishPremiership) return false;
     const iso = String(match?.date || '').slice(0, 10);
@@ -187,7 +190,7 @@ const HistoricalPredictions = ({ leagueId, leagueName }) => {
 
     setLoading(true);
     setError(null);
-    const payload = { league_id: leagueId };
+    const payload = { league_id: leagueId, league_ids: leagueIds };
     if (yearOverride) payload.year = yearOverride;
     if (options?.refresh) payload.refresh = true;
     const mode = modeOverride || evaluationMode;

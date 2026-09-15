@@ -200,7 +200,7 @@ const TeamCard = ({ team, leagueId, logoMap }) => (
   </Paper>
 );
 
-const LeagueTeams = ({ leagueId, leagueName }) => {
+const LeagueTeams = ({ leagueId, leagueIds, leagueName }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [teams, setTeams] = useState([]);
@@ -260,6 +260,7 @@ const LeagueTeams = ({ leagueId, leagueName }) => {
         try {
           const data = await getLeagueStandings({
             sportsdbLeagueId: leagueId,
+            league_ids: leagueIds,
             highlightlyLeagueId: hlId,
             leagueName,
             season: seasonYear,
@@ -276,7 +277,7 @@ const LeagueTeams = ({ leagueId, leagueName }) => {
 
       if (teamMap.size < 8) {
         try {
-          const upcoming = await getUpcomingMatches({ league_id: leagueId, limit: 100 });
+          const upcoming = await getUpcomingMatches({ league_id: leagueId, league_ids: leagueIds, limit: 100 });
           const rows = upcoming?.data?.matches || [];
           addTeamsFromMatches(teamMap, rows, 'upcoming');
         } catch (e) {
@@ -306,7 +307,7 @@ const LeagueTeams = ({ leagueId, leagueName }) => {
     return () => {
       cancelled = true;
     };
-  }, [leagueId, leagueName, seasonYear]);
+  }, [leagueId, leagueIds, leagueName, seasonYear]);
 
   if (loading) {
     return <TabLoadingScreen label="Loading teams..." />;

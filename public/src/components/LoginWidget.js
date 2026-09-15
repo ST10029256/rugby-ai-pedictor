@@ -797,6 +797,9 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
         backgroundColor: '#0e1117',
         // Keep Kick Off reachable above the mobile keyboard.
         pb: { xs: 'max(24px, env(safe-area-inset-bottom, 0px))', sm: 3 },
+        '@supports not (min-height: 100dvh)': {
+          minHeight: '100vh',
+        },
       }}
     >
       {/* Video Background */}
@@ -808,9 +811,8 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
         autoPlay
         preload="auto"
         sx={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
+          position: 'fixed',
+          inset: 0,
           width: '100%',
           height: '100%',
           objectFit: 'cover',
@@ -824,7 +826,7 @@ const LoginWidget = ({ onLoginSuccess, onShowSubscription }) => {
       {/* Dark overlay for better readability */}
       <Box
         sx={{
-          position: 'absolute',
+          position: 'fixed',
           inset: 0,
           backgroundColor: 'rgba(2,6,23,0.4)',
           zIndex: 1,

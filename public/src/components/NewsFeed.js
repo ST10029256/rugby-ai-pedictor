@@ -19,6 +19,23 @@ const VERIFIED_BADGE_URL = 'https://abs.twimg.com/icons/apple-touch-icon-192x192
 const VIDEO_PROXY_ENDPOINT = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/proxy_video_http';
 const REEL_CONTROLS_HIDE_DELAY_MS = 2000;
 const MOBILE_NAV_TOP = 'var(--app-mobile-nav-offset)';
+const MOBILE_REELS_FRAME_SX = {
+  position: 'fixed',
+  top: MOBILE_NAV_TOP,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  width: '100%',
+  height: 'auto',
+  maxWidth: 'none',
+  maxHeight: 'none',
+  zIndex: 1500,
+  backgroundColor: '#000',
+  boxSizing: 'border-box',
+  overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
+};
 const REEL_VIDEO_PREFETCH_RADIUS = 3;
 const REEL_IMAGE_PREFETCH_RADIUS = 4;
 const REEL_BOOTSTRAP_PREFETCH_COUNT = 6;
@@ -733,34 +750,15 @@ function MobileReelsLoadingScreen() {
   useViewLoadingScrollLock();
   return (
     <Box
-      sx={{
-        position: 'fixed',
-        top: MOBILE_NAV_TOP,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        width: '100%',
-        height: 'calc(100dvh - var(--app-mobile-nav-offset))',
-        maxHeight: 'calc(100dvh - var(--app-mobile-nav-offset))',
-        zIndex: 1500,
-        backgroundColor: '#000',
-        display: 'grid',
-        placeItems: 'center',
-        placeContent: 'center',
-        boxSizing: 'border-box',
-        overflow: 'hidden',
-        '@supports not (height: 100dvh)': {
-          height: 'calc(100svh - var(--app-mobile-nav-offset))',
-          maxHeight: 'calc(100svh - var(--app-mobile-nav-offset))',
-        },
-      }}
+      className="news-reels-frame"
+      sx={{ ...MOBILE_REELS_FRAME_SX, display: 'grid', placeItems: 'center' }}
     >
       <RugbyBallLoader size={100} color="#10b981" compact label="Loading feed..." />
     </Box>
   );
 }
 
-const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) => {
+const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueIds = null, leagueName = null }) => {
   const [newsItems, setNewsItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [failedVideoSrcs, setFailedVideoSrcs] = useState({});
@@ -779,7 +777,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
   const reelControlsTimeoutsRef = useRef({});
   const activeReelIndexRef = useRef(0);
   const isSmallScreen = useMediaQuery('(max-width:600px)');
-  const isMobileReels = useMediaQuery('(max-width:768px)');
+  const isMobileReels = useMediaQuery('(max-width:899.95px)');
 
   const displayLeagueName = useMemo(() => {
     if (leagueName) return leagueName;
@@ -1250,7 +1248,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
   useEffect(() => {
     let mounted = true;
     const runId = ++requestRunRef.current;
-    const cacheKey = String(leagueId ?? 'all');
+    const cacheKey = `${leagueId ?? 'all'}::${(leagueIds || []).join(',')}`;
 
     const loadNewsFeed = async () => {
       try {
@@ -1260,6 +1258,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
           followed_teams: followedTeams,
           followed_leagues: followedLeagues,
           league_id: leagueId,
+          league_ids: leagueIds,
           limit: 60,
         };
         const result = await getNewsFeed(requestPayload);
@@ -1269,7 +1268,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
         if (result?.data?.success) {
           let news = Array.isArray(result.data.news) ? result.data.news : [];
           if (leagueId) {
-            news = news.filter((item) => leagueIdsMatch(leagueId, item?.league_id));
+            news = news.filter((item) => leagueIdsMatch(leagueId, item?.league_id, leagueIds));
           }
           // Keep a per-league memory cache so fast league switching doesn't wipe known-good feeds.
           if (news.length > 0) {
@@ -1311,6 +1310,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
     };
   }, [
     leagueId,
+    leagueIds,
     userPreferences?.user_id,
     followedTeams,
     followedLeagues,
@@ -1327,27 +1327,7 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
 
   if (isMobileReels) {
     return (
-      <Box
-        sx={{
-          position: 'fixed',
-          top: MOBILE_NAV_TOP,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          width: '100%',
-          height: 'calc(100dvh - var(--app-mobile-nav-offset))',
-          maxHeight: 'calc(100dvh - var(--app-mobile-nav-offset))',
-          zIndex: 1500,
-          backgroundColor: '#000',
-          boxSizing: 'border-box',
-          overflow: 'hidden',
-          // Fallback when dvh is unsupported
-          '@supports not (height: 100dvh)': {
-            height: 'calc(100svh - var(--app-mobile-nav-offset))',
-            maxHeight: 'calc(100svh - var(--app-mobile-nav-offset))',
-          },
-        }}
-      >
+      <Box className="news-reels-frame" sx={MOBILE_REELS_FRAME_SX}>
         {sortedItems.length === 0 ? (
           <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', px: 2 }}>
             <Box sx={{ textAlign: 'center' }}>
@@ -1385,6 +1365,8 @@ const NewsFeed = ({ userPreferences = {}, leagueId = null, leagueName = null }) 
               }
             }}
             sx={{
+              flex: 1,
+              minHeight: 0,
               width: '100%',
               height: '100%',
               overflowY: 'auto',

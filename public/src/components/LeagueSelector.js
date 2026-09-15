@@ -393,4 +393,97 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
   );
 });
 
+export const BundleMemberSelector = memo(function BundleMemberSelector({
+  label,
+  options,
+  value,
+  onChange,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuWidth, setMenuWidth] = useState(null);
+  const controlRef = useRef(null);
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const selected =
+    (options || []).find((opt) => String(opt.id) === String(value)) || (options || [])[0];
+
+  const openMenu = () => {
+    const node = controlRef.current;
+    if (node?.offsetWidth) setMenuWidth(node.offsetWidth);
+    setMenuOpen(true);
+  };
+
+  if (!options || options.length === 0 || !selected) return null;
+
+  const paperWidth = menuWidth
+    ? Math.max(menuWidth, isMobile ? 220 : 232)
+    : isMobile
+      ? 'min(100%, calc(100vw - 48px))'
+      : 232;
+
+  return (
+    <FormControl
+      ref={controlRef}
+      fullWidth
+      className="league-selector-control"
+      sx={{
+        maxWidth: '100%',
+        width: '100%',
+        minWidth: 0,
+        cursor: 'pointer',
+        '& .MuiInputLabel-root': { pointerEvents: 'none' },
+        '& .MuiOutlinedInput-notchedOutline': { pointerEvents: 'none' },
+        '& .MuiSelect-icon': { pointerEvents: 'none' },
+      }}
+    >
+      <InputLabel
+        id="bundle-member-select-label"
+        shrink
+        sx={{
+          color: '#94a3b8',
+          pointerEvents: 'none',
+          '&.Mui-focused': { color: '#10b981' },
+          '&.MuiInputLabel-shrink': { color: '#10b981' },
+        }}
+      >
+        {label}
+      </InputLabel>
+      <Select
+        labelId="bundle-member-select-label"
+        value={String(selected.id)}
+        open={menuOpen}
+        onOpen={openMenu}
+        onClose={() => setMenuOpen(false)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setMenuOpen(false);
+        }}
+        label={label}
+        renderValue={() => selected.name}
+        MenuProps={{
+          disablePortal: false,
+          disableScrollLock: true,
+          keepMounted: false,
+          marginThreshold: null,
+          transitionDuration: { enter: 120, exit: 90 },
+          sx: { zIndex: 2400 },
+          PaperProps: {
+            className: 'league-selector-menu-paper',
+            sx: menuPaperSx(paperWidth, isMobile, 280),
+          },
+          anchorOrigin: { vertical: 'bottom', horizontal: 'left' },
+          transformOrigin: { vertical: 'top', horizontal: 'left' },
+          disableAutoFocusItem: true,
+        }}
+        sx={selectFieldSx(menuOpen)}
+      >
+        {options.map((opt) => (
+          <MenuItem key={String(opt.id)} value={String(opt.id)}>
+            {opt.name}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+});
+
 export default LeagueSelector;

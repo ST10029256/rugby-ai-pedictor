@@ -11,6 +11,19 @@ import {
   leagueDisplayName,
 } from './utils/leagues';
 
+function requestLeagueIds(data, field = 'league_id') {
+  if (Array.isArray(data?.league_ids) && data.league_ids.length) {
+    return [...new Set(data.league_ids.map(Number).filter((id) => Number.isFinite(id) && id > 0))];
+  }
+  return expandLeagueIds(data?.[field] ?? data?.sportsdbLeagueId);
+}
+
+function withoutBundleIds(data) {
+  const next = { ...(data || {}) };
+  delete next.league_ids;
+  return next;
+}
+
 // Firebase config for rugby-ai-61fd0
 // For callable functions, we mainly need projectId
 // Other fields can be minimal for serverless functions
@@ -58,9 +71,10 @@ export const predictMatch = async (data) => {
 
 export const getUpcomingMatches = async (data) => {
   const callable = httpsCallable(functionsRegion, 'get_upcoming_matches');
-  const ids = expandLeagueIds(data?.league_id);
-  if (ids.length <= 1) return callable(data);
-  const results = await Promise.all(ids.map((id) => callable({ ...data, league_id: id })));
+  const ids = requestLeagueIds(data);
+  const payload = withoutBundleIds(data);
+  if (ids.length <= 1) return callable({ ...payload, league_id: ids[0] ?? data?.league_id });
+  const results = await Promise.all(ids.map((id) => callable({ ...payload, league_id: id })));
   const matches = [];
   for (let i = 0; i < results.length; i += 1) {
     for (const match of results[i]?.data?.matches || []) {
@@ -109,9 +123,10 @@ const fetchLiveMatchesOnce = async (data) => {
 };
 
 export const getLiveMatches = async (data) => {
-  const ids = expandLeagueIds(data?.league_id);
-  if (ids.length <= 1) return fetchLiveMatchesOnce(data);
-  const results = await Promise.all(ids.map((id) => fetchLiveMatchesOnce({ ...data, league_id: id })));
+  const ids = requestLeagueIds(data);
+  const payload = withoutBundleIds(data);
+  if (ids.length <= 1) return fetchLiveMatchesOnce({ ...payload, league_id: ids[0] ?? data?.league_id });
+  const results = await Promise.all(ids.map((id) => fetchLiveMatchesOnce({ ...payload, league_id: id })));
   const matches = [];
   let signature = '';
   let detection = false;
@@ -278,9 +293,10 @@ const fetchNewsFeedOnce = async (data) => {
 };
 
 export const getNewsFeed = async (data) => {
-  const ids = expandLeagueIds(data?.league_id);
-  if (ids.length <= 1) return fetchNewsFeedOnce(data);
-  const results = await Promise.all(ids.map((id) => fetchNewsFeedOnce({ ...data, league_id: id })));
+  const ids = requestLeagueIds(data);
+  const payload = withoutBundleIds(data);
+  if (ids.length <= 1) return fetchNewsFeedOnce({ ...payload, league_id: ids[0] ?? data?.league_id });
+  const results = await Promise.all(ids.map((id) => fetchNewsFeedOnce({ ...payload, league_id: id })));
   const news = [];
   let success = false;
   for (let i = 0; i < results.length; i += 1) {
@@ -362,12 +378,13 @@ const fetchLeagueStandingsOnce = async ({
 };
 
 export const getLeagueStandings = async (args) => {
-  const ids = expandLeagueIds(args?.sportsdbLeagueId);
-  if (ids.length <= 1) return fetchLeagueStandingsOnce(args);
+  const ids = requestLeagueIds(args, 'sportsdbLeagueId');
+  const payload = withoutBundleIds(args);
+  if (ids.length <= 1) return fetchLeagueStandingsOnce({ ...payload, sportsdbLeagueId: ids[0] ?? args?.sportsdbLeagueId });
   const parts = await Promise.all(
     ids.map((id) =>
       fetchLeagueStandingsOnce({
-        ...args,
+        ...payload,
         sportsdbLeagueId: id,
         highlightlyLeagueId: LEAGUE_ID_MAPPING[id] || args?.highlightlyLeagueId,
         leagueName: getLeagueConfig(id)?.matchLabel || getLeagueConfig(id)?.name || args?.leagueName,
@@ -428,9 +445,10 @@ const fetchLeagueLineupMatchesOnce = async ({
 };
 
 export const getLeagueLineupMatches = async (args = {}) => {
-  const ids = expandLeagueIds(args.sportsdbLeagueId);
-  if (ids.length <= 1) return fetchLeagueLineupMatchesOnce(args);
-  const parts = await Promise.all(ids.map((id) => fetchLeagueLineupMatchesOnce({ ...args, sportsdbLeagueId: id })));
+  const ids = requestLeagueIds(args, 'sportsdbLeagueId');
+  const payload = withoutBundleIds(args);
+  if (ids.length <= 1) return fetchLeagueLineupMatchesOnce({ ...payload, sportsdbLeagueId: ids[0] ?? args.sportsdbLeagueId });
+  const parts = await Promise.all(ids.map((id) => fetchLeagueLineupMatchesOnce({ ...payload, sportsdbLeagueId: id })));
   const matches = [];
   for (const part of parts) {
     matches.push(...(part?.matches || part?.data?.matches || []));
@@ -602,11 +620,12 @@ const postHistoryEndpoint = async ({ url, data, label, requestPrefix }) => {
 
 export const getHistoricalPredictions = async (data) => {
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_predictions_http';
-  const ids = expandLeagueIds(data?.league_id);
+  const ids = requestLeagueIds(data);
+  const payload = withoutBundleIds(data);
   if (ids.length <= 1) {
     return postHistoryEndpoint({
       url,
-      data,
+      data: { ...payload, league_id: ids[0] ?? data?.league_id },
       label: 'HistoryReplay',
       requestPrefix: 'hist-replay',
     });
@@ -619,7 +638,7 @@ export const getHistoricalPredictions = async (data) => {
     for (let pageNum = 0; pageNum < 20; pageNum += 1) {
       const page = await postHistoryEndpoint({
         url,
-        data: { ...data, league_id: id, offset, limit: data?.limit || 250 },
+        data: { ...payload, league_id: id, offset, limit: data?.limit || 250 },
         label: 'HistoryReplay',
         requestPrefix: 'hist-replay',
       });
@@ -646,11 +665,12 @@ export const getHistoricalPredictions = async (data) => {
 
 export const getHistoricalBacktest = async (data) => {
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_backtest_http';
-  const ids = expandLeagueIds(data?.league_id);
+  const ids = requestLeagueIds(data);
+  const payload = withoutBundleIds(data);
   if (ids.length <= 1) {
     return postHistoryEndpoint({
       url,
-      data,
+      data: { ...payload, league_id: ids[0] ?? data?.league_id },
       label: 'HistoryBacktest',
       requestPrefix: 'hist-backtest',
     });
@@ -659,7 +679,7 @@ export const getHistoricalBacktest = async (data) => {
     ids.map((id) =>
       postHistoryEndpoint({
         url,
-        data: { ...data, league_id: id },
+        data: { ...payload, league_id: id },
         label: 'HistoryBacktest',
         requestPrefix: 'hist-backtest',
       })

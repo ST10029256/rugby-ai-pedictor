@@ -390,6 +390,17 @@ jobs:
             sleep $((attempt * 10))
           done
 
+      - name: Refresh league training-game counts
+        env:
+          GOOGLE_CLOUD_PROJECT: rugby-ai-61fd0
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/sync_to_firestore.py \
+            --db data.sqlite \
+            --project-id rugby-ai-61fd0 \
+            --games-only
+
       - name: Deploy history and standings Functions
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks

@@ -134,7 +134,7 @@ const isLegacyStandingsCache = (standings) => {
   return isComputedStandings(standings) || Boolean(source && source !== 'highlightly');
 };
 
-const LeagueStandings = ({ leagueId, leagueName }) => {
+const LeagueStandings = ({ leagueId, leagueIds, leagueName }) => {
   const [standings, setStandings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -154,7 +154,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     } catch (e) {
       // ignore
     }
-    return `standings_cache_v5::${license}::sportsdb_${sportsdbLeagueId}::hl_${highlightlyLeagueId}`;
+    return `standings_cache_v5::${license}::sportsdb_${sportsdbLeagueId}::hl_${highlightlyLeagueId}::ids_${(leagueIds || [sportsdbLeagueId]).join('-')}`;
   };
 
   const countTeamsWithLogos = (standingsPayload) => {
@@ -287,6 +287,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
         const data = await getLeagueStandings({
           highlightlyLeagueId,
           sportsdbLeagueId: leagueId,
+          league_ids: leagueIds,
           leagueName,
           season: primarySeason,
           forceRefresh: cacheIsLegacyComputed || cacheMissingLogos,
@@ -322,7 +323,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     };
 
     loadStandings();
-  }, [leagueId]);
+  }, [leagueId, leagueIds]);
 
   // Subscribe to Firestore standings cache for real-time updates when API updates server cache
   useEffect(() => {
@@ -331,7 +332,8 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     if (!highlightlyLeagueId || leagueId === 5479) return;
     // Bundled cups/tiers are merged over HTTP; a single-league cache snapshot
     // would wipe the other tables.
-    if (expandLeagueIds(leagueId).length > 1) return;
+    const scopedIds = Array.isArray(leagueIds) && leagueIds.length ? leagueIds : expandLeagueIds(leagueId);
+    if (scopedIds.length > 1) return;
 
     const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
 
@@ -359,7 +361,7 @@ const LeagueStandings = ({ leagueId, leagueName }) => {
     });
 
     return unsub;
-  }, [leagueId]);
+  }, [leagueId, leagueIds]);
 
   if (!leagueId) {
     return null;

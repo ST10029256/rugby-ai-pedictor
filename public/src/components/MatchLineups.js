@@ -830,7 +830,7 @@ const PositionGroupBlock = ({ group, kit, compact = false, showTopDivider = fals
   );
 };
 
-const MatchLineups = ({ leagueId, leagueName }) => {
+const MatchLineups = ({ leagueId, leagueIds, leagueName }) => {
   const theme = useTheme();
   const isWide = useMediaQuery(theme.breakpoints.up('lg'));
 
@@ -870,6 +870,7 @@ const MatchLineups = ({ leagueId, leagueName }) => {
     let cancelled = false;
     getLeagueStandings({
       sportsdbLeagueId: leagueId,
+      league_ids: leagueIds,
       highlightlyLeagueId: hlId,
       leagueName,
       season: seasonYear,
@@ -885,7 +886,7 @@ const MatchLineups = ({ leagueId, leagueName }) => {
     return () => {
       cancelled = true;
     };
-  }, [leagueId, leagueName, seasonYear]);
+  }, [leagueId, leagueIds, leagueName, seasonYear]);
 
   useEffect(() => {
     if (!leagueId) {
@@ -904,6 +905,7 @@ const MatchLineups = ({ leagueId, leagueName }) => {
 
     getLeagueLineupMatches({
       sportsdbLeagueId: leagueId,
+      league_ids: leagueIds,
       matchScope: lineupScope,
     })
       .then((data) => {
@@ -935,7 +937,7 @@ const MatchLineups = ({ leagueId, leagueName }) => {
     return () => {
       cancelled = true;
     };
-  }, [leagueId, lineupScope]);
+  }, [leagueId, leagueIds, lineupScope]);
 
   useEffect(() => {
     if (!leagueId || !selectedEventId || matchesLoading) {
@@ -971,7 +973,7 @@ const MatchLineups = ({ leagueId, leagueName }) => {
     return () => {
       cancelled = true;
     };
-  }, [leagueId, selectedEventId, matchesLoading]);
+  }, [leagueId, leagueIds, selectedEventId, matchesLoading]);
 
   const teams = lineups?.teams || [];
   const homeTeam = teams.find((t) => t.qualifier === 'home') || teams[0];

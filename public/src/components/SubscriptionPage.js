@@ -303,7 +303,7 @@ const SubscriptionPage = ({ onBack }) => {
   return (
     <Box
       sx={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
         position: 'relative',
         overflow: 'auto',
@@ -311,6 +311,10 @@ const SubscriptionPage = ({ onBack }) => {
         pt: { xs: 2, md: 10 },
         pb: 4,
         px: { xs: 2, sm: 3 },
+        boxSizing: 'border-box',
+        '@supports not (min-height: 100dvh)': {
+          minHeight: '100vh',
+        },
       }}
     >
       {onBack && (

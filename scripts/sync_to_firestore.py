@@ -677,6 +677,62 @@ def prune_orphaned_matches(
     return deleted
 
 
+def sync_league_training_game_counts(sqlite_conn: sqlite3.Connection, firestore_db: Any) -> int:
+    """Keep league_metrics.training_games equal to completed SQLite fixtures."""
+    if firestore_db is None:
+        return 0
+
+    try:
+        from prediction.config import LEAGUE_MAPPINGS
+        league_names = {str(int(lid)): name for lid, name in LEAGUE_MAPPINGS.items()}
+    except Exception:
+        league_names = {}
+
+    rows = sqlite_conn.execute(
+        """
+        SELECT league_id, COUNT(*)
+        FROM event
+        WHERE home_score IS NOT NULL AND away_score IS NOT NULL
+        GROUP BY league_id
+        """
+    ).fetchall()
+    now = datetime.utcnow().isoformat()
+    updated = 0
+
+    for league_id, count in rows:
+        lid = str(int(league_id))
+        games = int(count)
+        ref = firestore_db.collection("league_metrics").document(lid)
+        payload = {
+            "league_id": int(lid),
+            "training_games": games,
+            "training_games_updated_at": now,
+            "last_updated": now,
+        }
+        if lid in league_names:
+            payload["league_name"] = league_names[lid]
+
+        def _write(ref=ref, payload=payload, lid=lid, games=games):
+            snap = ref.get()
+            if not snap.exists:
+                payload = {
+                    **payload,
+                    "accuracy": 0,
+                    "overall_mae": 0,
+                    "ai_rating": "N/A",
+                    "model_type": "champion",
+                    "model_family": "champion",
+                }
+            ref.set(payload, merge=True)
+            logger.info(f"  league_metrics/{lid} training_games={games}")
+
+        _retry_firestore_call(_write, description=f"league_metrics/{lid} training_games")
+        updated += 1
+
+    logger.info(f"✅ Training game counts: {updated} leagues")
+    return updated
+
+
 def prune_upcoming_firestore_clones(firestore_db: Any, days_back: int = 2, days_ahead: int = 180) -> int:
     """Delete upcoming non-canonical match docs (doc id != highlightly_match_id)."""
     from datetime import timedelta, timezone as tz
@@ -811,8 +867,25 @@ def main():
         action='store_true',
         help='Skip deleting match docs whose SQLite fixture no longer exists',
     )
+    parser.add_argument(
+        '--skip-training-games',
+        action='store_true',
+        help='Skip refreshing league_metrics.training_games from completed SQLite matches',
+    )
+    parser.add_argument(
+        '--games-only',
+        action='store_true',
+        help='Only refresh league_metrics.training_games; skip match/team/league sync',
+    )
     
     args = parser.parse_args()
+    if args.games_only:
+        args.skip_teams = True
+        args.skip_matches = True
+        args.skip_leagues = True
+        args.skip_prune_clones = True
+        args.skip_prune_orphans = True
+        args.skip_training_games = False
     
     # Connect to SQLite
     if not os.path.exists(args.db):
@@ -856,6 +929,7 @@ def main():
     total_updated = 0
     total_pruned = 0
     total_orphans = 0
+    total_training_games = 0
     
     if not args.skip_leagues:
         logger.info("\nSyncing leagues...")
@@ -882,6 +956,10 @@ def main():
         if not args.dry_run and not args.skip_prune_orphans:
             logger.info("\nPruning match docs with no SQLite fixture...")
             total_orphans = prune_orphaned_matches(sqlite_conn, firestore_db, existing_match_ids)
+
+    if not args.dry_run and not args.skip_training_games:
+        logger.info("\nRefreshing league_metrics training_games...")
+        total_training_games = sync_league_training_game_counts(sqlite_conn, firestore_db)
     
     sqlite_conn.close()
     
@@ -892,6 +970,7 @@ def main():
     logger.info(f"   Total updated: {total_updated}")
     logger.info(f"   Total pruned clones: {total_pruned}")
     logger.info(f"   Total pruned orphans: {total_orphans}")
+    logger.info(f"   Training-game leagues: {total_training_games}")
     logger.info(f"   Duration: {duration:.1f}s")
     logger.info("="*60)
     

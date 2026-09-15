@@ -1,4 +1,9 @@
 /* Global dark theme */
+html, body, #root {
+  min-height: 100dvh;
+  background-color: #0e1117;
+}
+
 body {
   background-color: #0e1117;
   color: #fafafa;
@@ -152,10 +157,22 @@ body.drawer-open .league-selector-menu-paper {
 }
 
 .mobile-control-panel {
+  overflow: hidden !important;
+  overscroll-behavior: contain;
+  top: var(--app-mobile-nav-offset) !important;
+  bottom: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
+.mobile-control-panel .mobile-nav-scroll {
   overflow-y: auto !important;
   overflow-x: hidden !important;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  touch-action: pan-y;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 /* Force mobile drawer to be visible when open */
@@ -205,8 +222,9 @@ video {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
-    height: 100dvh !important;
-    max-height: 100dvh !important;
+    bottom: 0 !important;
+    height: auto !important;
+    max-height: none !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
   }
@@ -218,6 +236,8 @@ video {
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
+    min-height: 100dvh !important;
+    box-sizing: border-box !important;
   }
   
   /* Fix Select League input width on desktop - prevent expansion */
@@ -428,12 +448,19 @@ video {
   .app-top-nav {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
+    filter: none !important;
+    transform: none !important;
+    isolation: isolate;
+    background: #0e1117 !important;
     background-color: #0e1117 !important;
-    /* Full visual width ??? scrollbar scrolls underneath, no right-side gap */
+    background-image: none !important;
     left: 0 !important;
-    right: auto !important;
-    width: 100vw !important;
-    max-width: 100vw !important;
+    right: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    -webkit-font-smoothing: auto;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: auto;
   }
 
   .app-top-nav .MuiTypography-root {
@@ -442,11 +469,14 @@ video {
     background: none !important;
     -webkit-background-clip: border-box !important;
     background-clip: border-box !important;
+    -webkit-font-smoothing: auto !important;
+    text-rendering: auto !important;
   }
 
   .app-top-nav .MuiIconButton-root {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
+    filter: none !important;
   }
 
   .app-top-nav img {
@@ -459,7 +489,7 @@ html.news-page-scroll {
   overflow-x: hidden !important;
   overflow-y: auto !important;
   height: auto !important;
-  min-height: 100%;
+  min-height: 100dvh !important;
   overscroll-behavior-y: none;
 }
 
@@ -467,7 +497,7 @@ body.news-page-scroll,
 #root.news-page-scroll {
   overflow: visible !important;
   height: auto !important;
-  min-height: 100%;
+  min-height: 100dvh !important;
 }
 
 /* Lock document while a tab loader is showing (all screens) ??? no empty-page scroll */
@@ -526,23 +556,29 @@ body.view-loading.news-page-scroll,
     touch-action: auto !important;
   }
 
-  /* App shell grows with real content only ??? don't force extra viewport height stacking */
+  /* App shell fills the viewport, then grows with real content */
   body.news-page-scroll #root > .app-shell,
   body.news-page-scroll #root > div {
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
-    min-height: 100%;
+    min-height: 100dvh !important;
   }
 
   .main-news-page-scroll,
+  main.main-news-page-scroll {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 100dvh !important;
+    box-sizing: border-box !important;
+  }
+
   .main-news-page-scroll .main-content-wrapper,
-  main.main-news-page-scroll,
   .main-content-wrapper {
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
-    min-height: 0 !important;
   }
 
   .main-content-wrapper {
@@ -556,22 +592,25 @@ body.view-loading.news-page-scroll,
   overflow: visible !important;
   height: auto !important;
   max-height: none !important;
+  min-height: 100dvh !important;
+  box-sizing: border-box !important;
 }
 
 /* Fixed header always paints edge-to-edge (scrollbar slides under it) */
 .app-top-nav {
   left: 0 !important;
-  right: auto !important;
-  width: 100vw !important;
-  max-width: 100vw !important;
+  right: 0 !important;
+  width: auto !important;
+  max-width: none !important;
   box-sizing: border-box !important;
 }
 
 @media (min-width: 900px) {
   .app-top-nav {
     left: 280px !important;
-    width: calc(100vw - 280px) !important;
-    max-width: calc(100vw - 280px) !important;
+    right: 0 !important;
+    width: auto !important;
+    max-width: none !important;
   }
 }
 
@@ -593,6 +632,28 @@ body.news-reels-immersive,
   padding: 0 !important;
 }
 
+html.news-reels-immersive,
+body.news-reels-immersive {
+  position: static !important;
+}
+
+.news-reels-frame {
+  position: fixed !important;
+  top: var(--app-mobile-nav-offset) !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
+.news-reels-frame,
+.news-reels-scroller {
+  max-width: none !important;
+}
+
 @supports not (height: 100dvh) {
   html.news-reels-immersive,
   body.news-reels-immersive,
@@ -604,6 +665,9 @@ body.news-reels-immersive,
 }
 
 .news-reels-scroller {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
   scroll-snap-type: y mandatory;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: none;
@@ -1878,10 +1942,11 @@ h2.match-title {
     width: 100%;
     max-width: 100vw;
     position: relative;
+    min-height: 100dvh;
   }
   
   /* Ensure all containers fit */
-  * {
+  *:not(.app-top-nav):not(.news-reels-frame):not(.news-reels-scroller) {
     max-width: 100%;
   }
   

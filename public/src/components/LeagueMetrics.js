@@ -4,7 +4,17 @@ import RugbyBallLoader from './RugbyBallLoader';
 import { getLeagueMetrics } from '../firebase';
 import { predictionsWidgetSx } from '../utils/predictionsLayout';
 
-const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
+const ratingFromAccuracy = (accuracy) => {
+  if (accuracy >= 80) return '9/10';
+  if (accuracy >= 75) return '8/10';
+  if (accuracy >= 70) return '7/10';
+  if (accuracy >= 65) return '6/10';
+  if (accuracy >= 60) return '5/10';
+  if (accuracy > 0) return '4/10';
+  return 'N/A';
+};
+
+const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueIds, leagueName }) {
   const [metrics, setMetrics] = useState({
     accuracy: 0,
     trainingGames: 0,
@@ -12,9 +22,13 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
     margin: 0,
     loading: true
   });
+  const leagueIdsKey = Array.isArray(leagueIds) && leagueIds.length
+    ? leagueIds.join(',')
+    : String(leagueId || '');
 
   useEffect(() => {
-        if (!leagueId) {
+    const ids = [...new Set(leagueIdsKey.split(',').map((id) => String(id || '').trim()).filter(Boolean))];
+    if (!ids.length) {
       setMetrics({ accuracy: 0, trainingGames: 0, aiRating: 'N/A', margin: 0, loading: false });
       return;
     }
@@ -32,55 +46,14 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
 
     const fetchMetrics = async () => {
       try {
-        debugLog(`📊 Fetching league metrics for league_id: ${leagueId}`);
+        debugLog(`📊 Fetching league metrics for league_ids: ${ids.join(',')}`);
         setMetrics(prev => ({ ...prev, loading: true }));
-        const result = await getLeagueMetrics({ league_id: leagueId });
-        
-        debugLog('📊 League metrics API response:', result);
-        debugLog('📊 Result.data:', result?.data);
-        
-        if (result && result.data) {
-          if (result.data.error) {
-            console.error('❌ League metrics error:', result.data.error);
-            setMetrics({
-              accuracy: 0,
-              trainingGames: 0,
-              aiRating: 'N/A',
-              margin: 0,
-              loading: false
-            });
-          } else {
-            const accuracy = result.data.accuracy || 0;
-            const trainingGames = result.data.training_games || 0;
-            const aiRating = result.data.ai_rating || 'N/A';
-            const margin = result.data.overall_mae || result.data.margin || 0;
-            
-            debugLog('✅ League metrics received:', {
-              accuracy: accuracy,
-              training_games: trainingGames,
-              ai_rating: aiRating,
-              margin: margin,
-              full_data: result.data
-            });
-            
-            // Log the actual values clearly
-            debugLog(`📊 Metrics for league ${leagueId}:`);
-            debugLog(`   Accuracy: ${accuracy}%`);
-            debugLog(`   Games Trained: ${trainingGames}`);
-            debugLog(`   Margin Error: ${margin.toFixed(2)} points`);
-            
-            // Also log the full data object for debugging
-            debugLog('   Full response data:', JSON.stringify(result.data, null, 2));
-            
-            setMetrics({
-              accuracy: accuracy,
-              trainingGames: trainingGames,
-              aiRating: aiRating,
-              margin: margin,
-              loading: false
-            });
-          }
-        } else {
+        const results = await Promise.all(ids.map((id) => getLeagueMetrics({ league_id: id })));
+        const rows = results
+          .map((result) => result?.data)
+          .filter((data) => data && !data.error);
+
+        if (!rows.length) {
           debugLog('⚠️ No data in league metrics response');
           setMetrics({
             accuracy: 0,
@@ -89,10 +62,41 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
             margin: 0,
             loading: false
           });
+          return;
         }
+
+        const trainingGames = rows.reduce((sum, data) => sum + (Number(data.training_games) || 0), 0);
+        const accuracyWeight = rows.reduce(
+          (sum, data) => sum + ((Number(data.accuracy) || 0) * (Number(data.training_games) || 0)),
+          0
+        );
+        const marginWeight = rows.reduce(
+          (sum, data) => sum + ((Number(data.overall_mae || data.margin) || 0) * (Number(data.training_games) || 0)),
+          0
+        );
+        const accuracy = trainingGames > 0 ? accuracyWeight / trainingGames : (Number(rows[0].accuracy) || 0);
+        const margin = trainingGames > 0 ? marginWeight / trainingGames : (Number(rows[0].overall_mae || rows[0].margin) || 0);
+        const aiRating = rows.length === 1
+          ? (rows[0].ai_rating || ratingFromAccuracy(accuracy))
+          : ratingFromAccuracy(accuracy);
+
+        debugLog('✅ League metrics received:', {
+          ids,
+          accuracy,
+          training_games: trainingGames,
+          ai_rating: aiRating,
+          margin,
+        });
+
+        setMetrics({
+          accuracy,
+          trainingGames,
+          aiRating,
+          margin,
+          loading: false
+        });
       } catch (error) {
         console.error('❌ Exception fetching league metrics:', error);
-        // Keep details only when debugging.
         if (DEBUG_METRICS) {
           console.error('Error details:', {
             name: error.name,
@@ -111,7 +115,7 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueName }) {
     };
 
     fetchMetrics();
-  }, [leagueId]);
+  }, [leagueIdsKey]);
 
   if (metrics.loading) {
     return (
