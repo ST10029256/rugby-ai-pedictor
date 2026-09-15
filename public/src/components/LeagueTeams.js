@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import { TabLoadingScreen } from '../utils/viewLoader';
 import { getLeagueLineupMatches, getLeagueStandings, getUpcomingMatches } from '../firebase';
-import { getPrimaryStandingsSeasonYear } from '../utils/season';
+import { getViewStandingsSeasonYear } from '../utils/season';
 import {
   buildTeamLogoMapFromStandings,
   canonicalTeamKey,
@@ -208,8 +208,8 @@ const LeagueTeams = ({ leagueId, leagueIds, leagueName }) => {
   const isCompact = useMediaQuery('(max-width:899.95px)');
 
   const seasonYear = useMemo(
-    () => (leagueId ? getPrimaryStandingsSeasonYear(leagueId) : null),
-    [leagueId]
+    () => (leagueId ? getViewStandingsSeasonYear(leagueId, leagueIds) : null),
+    [leagueId, leagueIds]
   );
 
   useEffect(() => {

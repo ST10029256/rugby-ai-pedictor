@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { TabLoadingScreen } from '../utils/viewLoader';
 import { getLeagueLineupMatches, getLeagueStandings, getMatchLineups } from '../firebase';
-import { getPrimaryStandingsSeasonYear } from '../utils/season';
+import { getViewStandingsSeasonYear } from '../utils/season';
 import {
   buildTeamLogoCandidates,
   buildTeamLogoMapFromStandings,
@@ -846,8 +846,8 @@ const MatchLineups = ({ leagueId, leagueIds, leagueName }) => {
   const [teamLogoMap, setTeamLogoMap] = useState({});
 
   const seasonYear = useMemo(
-    () => (leagueId ? getPrimaryStandingsSeasonYear(leagueId) : null),
-    [leagueId]
+    () => (leagueId ? getViewStandingsSeasonYear(leagueId, leagueIds) : null),
+    [leagueId, leagueIds]
   );
 
   const kitOptions = useMemo(

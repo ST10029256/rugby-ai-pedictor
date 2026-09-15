@@ -28,7 +28,7 @@ import { hasMeaningfulTime, formatSASTDateYMD, formatSASTTimePM } from '../utils
 import leagueSeasonWindows from '../data/leagueSeasonWindows.json';
 import { assignHistoryPlayoffStages, PLAYOFF_STAGE_ORDER, playoffStageSortVal, regularRoundLabel, getCompetitionFinalsFormat, seasonYearFromMatches, buildRankingRoundEntries } from '../utils/historyPlayoffRounds';
 import { resolveSeasonLabel, crossYearSeasonStartMonth } from '../utils/season';
-import { expandLeagueIds } from '../utils/leagues';
+import { expandLeagueIds, filterHistoryPayloadForWxvView, isWxvOldFormatIds, WXV_OLD_FORMAT_SEASON_YEAR, wxvViewYearAllowed } from '../utils/leagues';
 
 const HistoricalPredictions = ({ leagueId, leagueIds, leagueName }) => {
   const [loading, setLoading] = useState(true);
@@ -60,7 +60,9 @@ const HistoricalPredictions = ({ leagueId, leagueIds, leagueName }) => {
     setSelectedYear(null);
     setExpandedWeeks(new Set());
     autoPreferredYearAppliedRef.current = false;
-    const initialYear = isRugbyWorldCup ? null : currentYear;
+    const initialYear = isRugbyWorldCup
+      ? null
+      : (isWxvOldFormatIds(leagueIds) ? String(WXV_OLD_FORMAT_SEASON_YEAR) : currentYear);
     fetchHistoricalData(initialYear);
   }, [leagueId, leagueIds]);
 
@@ -265,18 +267,36 @@ const HistoricalPredictions = ({ leagueId, leagueIds, leagueName }) => {
         }
       }
       if (result?.data) {
-        setData(result.data);
+        const scoped = filterHistoryPayloadForWxvView(result.data, leagueIds) || result.data;
+        const yearKey = yearOverride && yearOverride !== 'all' ? String(yearOverride) : null;
+        if (yearKey && scoped.matches_by_year_week) {
+          const yearBlock = scoped.matches_by_year_week[yearKey];
+          scoped.matches_by_year_week = yearBlock ? { [yearKey]: yearBlock } : {};
+        }
+        if (yearKey && Array.isArray(scoped.all_matches)) {
+          scoped.all_matches = scoped.all_matches.filter((match) => {
+            const iso = String(match?.date || match?.date_event || '').slice(0, 10);
+            return iso.slice(0, 4) === yearKey;
+          });
+        }
+        if (yearKey) scoped.selected_year = yearKey;
+        if (Array.isArray(scoped.all_matches)) {
+          const derived = buildStatsFromMatches(scoped.all_matches);
+          scoped.statistics = derived.statistics;
+          scoped.by_league = derived.by_league;
+        }
+        setData(scoped);
 
-        const fromBackendYears = Array.isArray(result.data.available_years) ? result.data.available_years : [];
+        const fromBackendYears = Array.isArray(scoped.available_years) ? scoped.available_years : [];
         setAvailableYears(fromBackendYears);
         
         // Prefer backend-selected year (prevents loading everything at once)
-        const backendSelected = result.data.selected_year ? String(result.data.selected_year) : null;
+        const backendSelected = scoped.selected_year ? String(scoped.selected_year) : null;
         if (backendSelected) {
           setSelectedYear(backendSelected);
-        } else if (result.data.matches_by_year_week) {
+        } else if (scoped.matches_by_year_week) {
           // Fallback: derive from payload
-          const years = Object.keys(result.data.matches_by_year_week).sort().reverse();
+          const years = Object.keys(scoped.matches_by_year_week).sort().reverse();
           if (years.length > 0) setSelectedYear(years[0]);
         }
 
@@ -375,7 +395,10 @@ const HistoricalPredictions = ({ leagueId, leagueIds, leagueName }) => {
     }
     const numericYears = isRugbyWorldCup
       ? baseNumericYears
-      : [...new Set([...baseNumericYears, currentYear])].sort().reverse();
+      : [...new Set([...baseNumericYears, currentYear])]
+        .filter((y) => wxvViewYearAllowed(y, leagueIds))
+        .sort()
+        .reverse();
     const allOption = [];
     if (isRugbyWorldCup) {
       // Keep RWC selector clean: only real tournament years (every 4 years).
@@ -388,7 +411,17 @@ const HistoricalPredictions = ({ leagueId, leagueIds, leagueName }) => {
     return [...allOption, ...numericYears];
   })();
   const yearSummary = data?.year_summary || {};
-  const stats = data.statistics || {};
+  const stats = (() => {
+    const selYr = selectedYear && selectedYear !== 'all' ? String(selectedYear) : null;
+    const fromAll = Array.isArray(data.all_matches) ? data.all_matches : [];
+    const yearFromAll = selYr
+      ? fromAll.filter((m) => String(m?.year || String(m?.date || m?.date_event || '').slice(0, 4)) === selYr)
+      : fromAll;
+    if (yearFromAll.length) return buildStatsFromMatches(yearFromAll).statistics;
+    if (!selYr) return data.statistics || {};
+    const yearWeeks = data.matches_by_year_week?.[selYr] || {};
+    return buildStatsFromMatches(Object.values(yearWeeks).flat()).statistics;
+  })();
   const hasCompletedMatches = Number(stats.total_matches || 0) > 0;
   const selectedYearDateRange = (() => {
     const yr = String(selectedYear || '');

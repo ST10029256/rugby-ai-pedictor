@@ -9,7 +9,7 @@ import {
   Box,
   Typography,
 } from '@mui/material';
-import { GENDER_OPTIONS } from '../utils/leagues';
+import { GENDER_OPTIONS, getLeagueConfig, leagueDisplayName, bundleMemberDisplayName } from '../utils/leagues';
 
 const MOBILE_BREAKPOINT = '(max-width:899.95px)';
 
@@ -172,7 +172,7 @@ export const GenderSelector = memo(function GenderSelector({ value, onChange }) 
           '&.MuiInputLabel-shrink': { color: '#10b981' },
         }}
       >
-        Competition
+        Gender
       </InputLabel>
       <Select
         labelId="gender-select-label"
@@ -184,8 +184,10 @@ export const GenderSelector = memo(function GenderSelector({ value, onChange }) 
           onChange(e.target.value);
           setMenuOpen(false);
         }}
-        label="Competition"
-        renderValue={() => selected.label}
+        label="Gender"
+        renderValue={(current) =>
+          GENDER_OPTIONS.find((opt) => opt.id === current)?.label || selected.label || ''
+        }
         MenuProps={{
           disablePortal: false,
           disableScrollLock: true,
@@ -357,8 +359,12 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
         renderValue={(value) => {
           if (!value) return '';
           const league = leagues.find((l) => String(l.id) === String(value));
-          if (!league) return 'Select League';
-          return league.name;
+          return (
+            league?.name
+            || getLeagueConfig(value)?.name
+            || leagueDisplayName(value)
+            || ''
+          );
         }}
         MenuProps={{
           disablePortal: false,
@@ -388,6 +394,11 @@ const LeagueSelector = memo(function LeagueSelector({ leagues, selectedLeague, o
         sx={selectFieldSx(menuOpen)}
       >
         {leagues.map((league) => renderLeagueItem(league))}
+        {selectedLeague && !leagues.some((l) => String(l.id) === String(selectedLeague)) ? (
+          <MenuItem value={String(selectedLeague)} sx={{ display: 'none' }}>
+            {getLeagueConfig(selectedLeague)?.name || leagueDisplayName(selectedLeague)}
+          </MenuItem>
+        ) : null}
       </Select>
     </FormControl>
   );
@@ -454,11 +465,17 @@ export const BundleMemberSelector = memo(function BundleMemberSelector({
         onOpen={openMenu}
         onClose={() => setMenuOpen(false)}
         onChange={(e) => {
-          onChange(e.target.value);
+          const next = e.target.value;
+          if (options.some((opt) => String(opt.id) === String(next) && opt.comingSoon)) return;
+          onChange(next);
           setMenuOpen(false);
         }}
         label={label}
-        renderValue={() => selected.name}
+        renderValue={(current) =>
+          bundleMemberDisplayName(current, options)
+          || selected?.name
+          || ''
+        }
         MenuProps={{
           disablePortal: false,
           disableScrollLock: true,
@@ -477,8 +494,13 @@ export const BundleMemberSelector = memo(function BundleMemberSelector({
         sx={selectFieldSx(menuOpen)}
       >
         {options.map((opt) => (
-          <MenuItem key={String(opt.id)} value={String(opt.id)}>
-            {opt.name}
+          <MenuItem
+            key={String(opt.id)}
+            value={String(opt.id)}
+            disabled={Boolean(opt.comingSoon)}
+            sx={opt.comingSoon ? { opacity: '0.7 !important', justifyContent: 'center' } : undefined}
+          >
+            {opt.comingSoon ? `${opt.name} · Coming soon` : opt.name}
           </MenuItem>
         ))}
       </Select>

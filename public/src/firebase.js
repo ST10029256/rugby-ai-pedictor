@@ -7,9 +7,10 @@ import { getDeviceAuthPayload } from './utils/deviceId';
 import {
   expandLeagueIds,
   LEAGUE_ID_MAPPING,
-  getLeagueConfig,
   leagueDisplayName,
+  leagueMatchLabel,
 } from './utils/leagues';
+import { standingsSeasonYear, wxvStandingsForView } from './utils/wxvStandings';
 
 function requestLeagueIds(data, field = 'league_id') {
   if (Array.isArray(data?.league_ids) && data.league_ids.length) {
@@ -380,25 +381,36 @@ const fetchLeagueStandingsOnce = async ({
 export const getLeagueStandings = async (args) => {
   const ids = requestLeagueIds(args, 'sportsdbLeagueId');
   const payload = withoutBundleIds(args);
-  if (ids.length <= 1) return fetchLeagueStandingsOnce({ ...payload, sportsdbLeagueId: ids[0] ?? args?.sportsdbLeagueId });
+  if (ids.length <= 1) {
+    const singleId = ids[0] ?? args?.sportsdbLeagueId;
+    const result = await fetchLeagueStandingsOnce({ ...payload, sportsdbLeagueId: singleId });
+    const season = Number(payload.season) || standingsSeasonYear(result?.standings);
+    const resolved = wxvStandingsForView(result?.standings, singleId, season);
+    if (resolved) {
+      return { success: true, standings: resolved, season };
+    }
+    return result;
+  }
   const parts = await Promise.all(
     ids.map((id) =>
       fetchLeagueStandingsOnce({
         ...payload,
         sportsdbLeagueId: id,
         highlightlyLeagueId: LEAGUE_ID_MAPPING[id] || args?.highlightlyLeagueId,
-        leagueName: getLeagueConfig(id)?.matchLabel || getLeagueConfig(id)?.name || args?.leagueName,
+        leagueName: leagueMatchLabel(id, payload.season) || args?.leagueName,
       })
     )
   );
+  const requestedSeason = Number(payload.season);
   const groups = [];
   let first = null;
   for (let i = 0; i < parts.length; i += 1) {
     const part = parts[i];
-    if (!part?.success || !part.standings) continue;
-    if (!first) first = part;
-    const label = getLeagueConfig(ids[i])?.matchLabel || getLeagueConfig(ids[i])?.name;
-    for (const group of part.standings.groups || []) {
+    const resolved = wxvStandingsForView(part?.standings, ids[i], requestedSeason);
+    if (!resolved) continue;
+    if (!first) first = { success: true, standings: resolved, season: requestedSeason };
+    const label = leagueMatchLabel(ids[i], requestedSeason);
+    for (const group of resolved.groups || []) {
       const groupName = group?.name || group?.group_name;
       groups.push({
         ...group,
@@ -406,7 +418,7 @@ export const getLeagueStandings = async (args) => {
       });
     }
   }
-  if (!first) return parts.find(Boolean) || { success: false };
+  if (!first) return { success: false, standings: null, error: 'No standings data available' };
   return {
     ...first,
     standings: {
@@ -618,6 +630,38 @@ const postHistoryEndpoint = async ({ url, data, label, requestPrefix }) => {
   };
 };
 
+function historyMatchKey(match) {
+  return (
+    match?.match_id ??
+    `${String(match?.date || match?.date_event || '').slice(0, 10)}-${match?.home_team || ''}-${match?.away_team || ''}`
+  );
+}
+
+function dedupeHistoryMatches(matches = []) {
+  const seen = new Set();
+  const out = [];
+  (matches || []).forEach((match) => {
+    const key = historyMatchKey(match);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(match);
+  });
+  return out;
+}
+
+function yearWeekMapFromMatches(matches = []) {
+  const out = {};
+  (matches || []).forEach((match) => {
+    const year = String(match?.year || String(match?.date || match?.date_event || '').slice(0, 4));
+    if (!year || year === 'undefined') return;
+    const week = String(match?.year_week || match?.week || 'week');
+    if (!out[year]) out[year] = {};
+    if (!out[year][week]) out[year][week] = [];
+    out[year][week].push(match);
+  });
+  return out;
+}
+
 export const getHistoricalPredictions = async (data) => {
   const url = 'https://us-central1-rugby-ai-61fd0.cloudfunctions.net/get_historical_predictions_http';
   const ids = requestLeagueIds(data);
@@ -631,7 +675,6 @@ export const getHistoricalPredictions = async (data) => {
     });
   }
   const allMatches = [];
-  let matchesByYearWeek = {};
   let firstPage = null;
   for (const id of ids) {
     let offset = 0;
@@ -645,20 +688,20 @@ export const getHistoricalPredictions = async (data) => {
       if (!firstPage) firstPage = page;
       const pageData = page?.data || {};
       allMatches.push(...(pageData.all_matches || []));
-      matchesByYearWeek = { ...matchesByYearWeek, ...(pageData.matches_by_year_week || {}) };
       if (!pageData.pagination?.has_more) break;
       const nextOffset = Number(pageData.pagination?.next_offset);
       if (!Number.isFinite(nextOffset) || nextOffset <= offset) break;
       offset = nextOffset;
     }
   }
+  const mergedMatches = dedupeHistoryMatches(allMatches);
   return {
     ...(firstPage || {}),
     data: {
       ...(firstPage?.data || {}),
-      all_matches: allMatches,
-      matches_by_year_week: matchesByYearWeek,
-      pagination: { has_more: false, returned_rows: allMatches.length, total_rows: allMatches.length },
+      all_matches: mergedMatches,
+      matches_by_year_week: yearWeekMapFromMatches(mergedMatches),
+      pagination: { has_more: false, returned_rows: mergedMatches.length, total_rows: mergedMatches.length },
     },
   };
 };
@@ -686,22 +729,17 @@ export const getHistoricalBacktest = async (data) => {
     )
   );
   const allMatches = [];
-  let matchesByYearWeek = {};
   for (const page of pages) {
     const pageData = page?.data || {};
     allMatches.push(...(pageData.all_matches || []));
-    matchesByYearWeek = {
-      ...matchesByYearWeek,
-      ...(pageData.matches_by_year_week || {}),
-    };
   }
+  const mergedMatches = dedupeHistoryMatches(allMatches);
   return {
     ...(pages[0] || {}),
     data: {
       ...(pages[0]?.data || {}),
-      all_matches: allMatches,
-      matches_by_year_week: matchesByYearWeek,
-      statistics: pages[0]?.data?.statistics,
+      all_matches: mergedMatches,
+      matches_by_year_week: yearWeekMapFromMatches(mergedMatches),
     },
   };
 };

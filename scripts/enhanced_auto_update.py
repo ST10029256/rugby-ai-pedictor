@@ -10,7 +10,7 @@ import os
 import sys
 import logging
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
@@ -789,6 +789,27 @@ def update_database_with_games(conn: sqlite3.Connection, games: List[Dict[str, A
             home_team_id = get_team_id(conn, game["home_team"], game["league_id"])
             away_team_id = get_team_id(conn, game["away_team"], game["league_id"])
             if not home_team_id or not away_team_id:
+                continue
+
+            # Never insert a past hole. Completed games arrive with scores;
+            # upcoming games have a future date.
+            incoming_unscored = game.get("home_score") is None or game.get("away_score") is None
+            raw_day = game.get("date_event")
+            game_day = None
+            if isinstance(raw_day, datetime):
+                game_day = raw_day.date()
+            elif isinstance(raw_day, date):
+                game_day = raw_day
+            else:
+                try:
+                    game_day = datetime.strptime(str(raw_day)[:10], "%Y-%m-%d").date()
+                except (TypeError, ValueError):
+                    game_day = None
+            if (
+                incoming_unscored
+                and game_day is not None
+                and game_day < datetime.now(timezone(timedelta(hours=2))).date()
+            ):
                 continue
 
             existing = None

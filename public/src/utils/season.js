@@ -6,7 +6,7 @@
  * including Nations Championship and the women's internationals.
  */
 
-import { LEAGUE_IDS } from './leagues';
+import { LEAGUE_IDS, WXV_OLD_FORMAT_SEASON_YEAR, isWxvOldFormatIds } from './leagues';
 
 export { LEAGUE_IDS };
 
@@ -106,6 +106,11 @@ export function resolveSeasonLabel(leagueId, kickoffDate = new Date()) {
  */
 export function getPrimaryStandingsSeasonYear(leagueId, now = new Date()) {
   return resolveSeasonStartYear(leagueId, now);
+}
+
+export function getViewStandingsSeasonYear(leagueId, leagueIds, now = new Date()) {
+  if (isWxvOldFormatIds(leagueIds)) return WXV_OLD_FORMAT_SEASON_YEAR;
+  return getPrimaryStandingsSeasonYear(leagueId, now);
 }
 
 /**

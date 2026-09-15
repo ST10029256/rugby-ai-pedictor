@@ -3,6 +3,7 @@ import { Box } from '@mui/material';
 import RugbyBallLoader from './RugbyBallLoader';
 import { getLeagueMetrics } from '../firebase';
 import { predictionsWidgetSx } from '../utils/predictionsLayout';
+import { wxvTrainingGamesFromMetrics } from '../utils/leagues';
 
 const ratingFromAccuracy = (accuracy) => {
   if (accuracy >= 80) return '9/10';
@@ -65,7 +66,13 @@ const LeagueMetrics = memo(function LeagueMetrics({ leagueId, leagueIds, leagueN
           return;
         }
 
-        const trainingGames = rows.reduce((sum, data) => sum + (Number(data.training_games) || 0), 0);
+        const rowsById = {};
+        results.forEach((result, index) => {
+          const data = result?.data;
+          if (data && !data.error) rowsById[Number(ids[index])] = data;
+        });
+
+        const trainingGames = wxvTrainingGamesFromMetrics(ids, rowsById);
         const accuracyWeight = rows.reduce(
           (sum, data) => sum + ((Number(data.accuracy) || 0) * (Number(data.training_games) || 0)),
           0

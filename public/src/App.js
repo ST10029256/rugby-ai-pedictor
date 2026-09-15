@@ -41,6 +41,9 @@ import {
   queryLeagueIds,
   defaultBundleMember,
   BUNDLE_ALL_VALUE,
+  LEAGUE_IDS,
+  WXV_OLD_FORMAT_VALUE,
+  matchInWxvView,
 } from './utils/leagues';
 import { hasUsableOdds, impliedHomeProbability, oddsAdjustedView } from './utils/oddsAdjustment';
 
@@ -652,8 +655,11 @@ function App() {
     try {
       const raw = localStorage.getItem('rugby_ai_selected_bundle_member');
       if (raw == null || raw === '' || raw === 'all') return null;
+      if (raw === WXV_OLD_FORMAT_VALUE) return raw;
       const parsed = parseInt(raw, 10);
-      return Number.isNaN(parsed) ? null : parsed;
+      if (Number.isNaN(parsed)) return null;
+      if (parsed === LEAGUE_IDS.WXV_2 || parsed === LEAGUE_IDS.WXV_3) return WXV_OLD_FORMAT_VALUE;
+      return parsed;
     } catch (_) {
       return null;
     }
@@ -931,7 +937,10 @@ function App() {
   useEffect(() => {
     const fallback = defaultBundleMember(selectedLeague);
     if (fallback == null) return;
-    if (selectedBundleMember == null) setSelectedBundleMember(fallback);
+    const valid = bundleMemberOptions(selectedLeague).some(
+      (opt) => !opt.comingSoon && String(opt.id) === String(selectedBundleMember)
+    );
+    if (!valid) setSelectedBundleMember(fallback);
   }, [selectedLeague, selectedBundleMember]);
 
   // Prevent page scrolling when mobile drawer is open (only while authenticated).
@@ -1218,7 +1227,9 @@ function App() {
               exclusion_reason: reason || 'included',
             };
           });
-          const upcomingOnlyMatches = dedupedMatches.filter((m) => isUpcomingMatch(m, selectedLeague));
+          const upcomingOnlyMatches = dedupedMatches.filter(
+            (m) => isUpcomingMatch(m, selectedLeague) && matchInWxvView(m, viewLeagueIds)
+          );
 
           if (DEBUG_UPCOMING_LEAGUES.has(Number(selectedLeague))) {
             const reasonCounts = diagnostics.reduce((acc, row) => {
@@ -1740,11 +1751,19 @@ function App() {
   }, []);
 
   const handleBundleMemberChange = useCallback((value) => {
+    if (value === WXV_OLD_FORMAT_VALUE) {
+      setSelectedBundleMember(WXV_OLD_FORMAT_VALUE);
+      return;
+    }
     if (value === BUNDLE_ALL_VALUE || value === 'all' || value === '') {
       setSelectedBundleMember(defaultBundleMember(selectedLeague));
       return;
     }
     const parsed = parseInt(value, 10);
+    if (parsed === LEAGUE_IDS.WXV_2 || parsed === LEAGUE_IDS.WXV_3) {
+      setSelectedBundleMember(WXV_OLD_FORMAT_VALUE);
+      return;
+    }
     setSelectedBundleMember(Number.isNaN(parsed) ? defaultBundleMember(selectedLeague) : parsed);
   }, [selectedLeague]);
 

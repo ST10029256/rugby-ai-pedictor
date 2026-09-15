@@ -36,6 +36,11 @@ CROSS_YEAR_LOCAL_IDS = set(CROSS_YEAR_LEAGUE_IDS)
 STANDINGS_TEAM_CANONICAL: Dict[str, str] = {
     "newcastle red bulls": "newcastle falcons",
     "newcastle": "newcastle falcons",
+    "united states women": "usa women",
+    "united states": "usa women",
+    "usa": "usa women",
+    "hong kong china women": "hong kong women",
+    "hong kong china": "hong kong women",
 }
 
 STANDINGS_TEAM_DISPLAY: Dict[str, str] = {
@@ -96,6 +101,25 @@ SKIP_COMPUTE_LEAGUE_IDS = {
 }
 
 NATIONS_CHAMPIONSHIP_ID = 5480
+WXV_1_ID = 5485
+WXV_2_ID = 5486
+WXV_3_ID = 5487
+WXV_LEAGUE_IDS = {WXV_1_ID, WXV_2_ID, WXV_3_ID}
+WXV_GLOBAL_SERIES_FROM_YEAR = 2026
+WXV_GLOBAL_SERIES_TEAMS = (
+    "Australia Women",
+    "Canada Women",
+    "England Women",
+    "France Women",
+    "Ireland Women",
+    "Italy Women",
+    "Japan Women",
+    "New Zealand Women",
+    "Scotland Women",
+    "South Africa Women",
+    "USA Women",
+    "Wales Women",
+)
 
 # Finals Weekend seeding is within each hemisphere, not a combined 1–12 table.
 NC_NORTH_KEYS = {
@@ -180,6 +204,9 @@ def _resolve_season(conn: sqlite3.Connection, league_id: int, season: Any) -> Op
         for a in available:
             if _season_start_year(a) == target_year:
                 return a
+    # Never show 2024 WXV 2/3 as if they were the current Global Series season.
+    if int(league_id) in WXV_LEAGUE_IDS:
+        return None
     return _pick_latest_season(conn, league_id)
 
 
@@ -348,7 +375,7 @@ def _enrich_standings_row(row: Dict[str, Any]) -> None:
         row.setdefault("played", played)
 
 
-STANDINGS_CACHE_VERSION = 6
+STANDINGS_CACHE_VERSION = 7
 
 # Competitions with no meaningful league table in the app.
 NO_STANDINGS_LOCAL_IDS = {5479}
@@ -545,6 +572,46 @@ def fetch_highlightly_standings_for_year(
     return normalized
 
 
+def _wxv_seed_names(league_id: int, season_year: Optional[int], *, has_matches: bool) -> List[str]:
+    """Official 2026+ WXV Global Series roster, including unplayed sides."""
+    if season_year is None or int(season_year) < WXV_GLOBAL_SERIES_FROM_YEAR:
+        return []
+    if int(league_id) == WXV_1_ID:
+        return list(WXV_GLOBAL_SERIES_TEAMS)
+    return []
+
+
+def _lookup_team_id(conn: sqlite3.Connection, display_name: str) -> int:
+    row = conn.execute(
+        "SELECT id FROM team WHERE lower(name) = lower(?) LIMIT 1",
+        (display_name,),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _seed_wxv_teams(
+    stats: Dict[str, Dict[str, Any]],
+    seed_names: List[str],
+    conn: sqlite3.Connection,
+    team_factory,
+) -> None:
+    existing = set(stats.keys())
+    for raw_name in seed_names:
+        key = _normalize_team_key(raw_name)
+        if key in existing:
+            continue
+        team_factory(key, raw_name, _lookup_team_id(conn, raw_name))
+        existing.add(key)
+
+
+def _wxv_group_name(league_id: int, season_year: Optional[int]) -> Optional[str]:
+    if season_year is None or int(season_year) < WXV_GLOBAL_SERIES_FROM_YEAR:
+        return None
+    if int(league_id) == WXV_1_ID:
+        return "Global Series"
+    return None
+
+
 def normalize_highlightly_standings(standings: Dict[str, Any]) -> Dict[str, Any]:
     """Merge alias teams and fill derived fields on a Highlightly standings payload."""
     if not isinstance(standings, dict):
@@ -641,15 +708,16 @@ def compute_standings_from_db(
             """,
             (our_league_id, season_str),
         ).fetchall()
-        if not matches:
-            return None
 
         matches = _dedupe_fixtures(matches)
         if int(our_league_id) == NATIONS_CHAMPIONSHIP_ID:
             matches = _exclude_nations_championship_finals(matches)
-        else:
+        elif int(our_league_id) not in WXV_LEAGUE_IDS:
             matches = _exclude_trailing_playoffs(matches)
-        if not matches:
+
+        start_year = _season_start_year(season_str)
+        seed_names = _wxv_seed_names(our_league_id, start_year, has_matches=bool(matches))
+        if not matches and not seed_names:
             return None
 
         stats: Dict[str, Dict[str, Any]] = {}
@@ -719,6 +787,8 @@ def compute_standings_from_db(
                 home["pts"] += draw_points
                 away["pts"] += draw_points
 
+        _seed_wxv_teams(stats, seed_names, conn, team)
+
         if not stats:
             return None
 
@@ -763,6 +833,7 @@ def compute_standings_from_db(
             )
 
         start_year = _season_start_year(season_str)
+        group_name = _wxv_group_name(our_league_id, start_year)
         note = (
             "Computed from regular-season match results (win 4 / draw 2 / "
             "losing bonus for margin \u22647). Try-scoring bonus is estimated "
@@ -782,7 +853,7 @@ def compute_standings_from_db(
                 "season": start_year if start_year is not None else season_str,
                 "season_label": season_str,
             },
-            "groups": [{"name": None, "standings": standings_list}],
+            "groups": [{"name": group_name, "standings": standings_list}],
             "_computed": True,
             "_source": "match_results",
             "note": note,

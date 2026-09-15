@@ -4,6 +4,7 @@ import { getLiveMatches, getUpcomingMatches } from '../firebase';
 import { TabLoadingScreen } from '../utils/viewLoader';
 import { formatKickoffSAST, formatSASTDateYMD, getKickoffAtFromMatch } from '../utils/date';
 import { readStandingsLogoCache } from '../utils/teamLogos';
+import { matchInWxvView } from '../utils/leagues';
 import TeamLogoImage from './TeamLogoImage';
 
 const PLAYING_STATES = new Set([
@@ -455,10 +456,12 @@ function LiveBroadcast({ leagueId, leagueIds, leagueName }) {
       ]);
 
       const livePayload = liveResult?.data || {};
-      const liveMatches = Array.isArray(livePayload.matches) ? livePayload.matches : [];
+      const liveMatches = (Array.isArray(livePayload.matches) ? livePayload.matches : [])
+        .filter((match) => matchInWxvView(match, leagueIds));
       if (upcomingResult) {
         const upcomingPayload = upcomingResult?.data || {};
-        upcomingRef.current = Array.isArray(upcomingPayload.matches) ? upcomingPayload.matches : [];
+        upcomingRef.current = (Array.isArray(upcomingPayload.matches) ? upcomingPayload.matches : [])
+          .filter((match) => matchInWxvView(match, leagueIds));
       }
 
       const merged = mergeBroadcastMatches(upcomingRef.current, liveMatches, leagueId);

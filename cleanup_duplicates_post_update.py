@@ -9,6 +9,11 @@ correct:
   2. Remove duplicate events (same league, date, and teams).
   3. Remove orphan events whose league_id is not a configured league (junk rows).
   4. Remove orphan league rows that are not configured and hold no events.
+  5. Remove past fixtures that never received a score (holes, not results).
+  6. Remove placeholder dumps (same team listed twice on one day).
+  7. Drop prediction snapshots that no longer point at a real event.
+
+Real upcoming fixtures (future date, no score yet) are kept.
 
 The script is idempotent and exits 0 on success (cleanup is the goal, not an
 error). It exits non-zero only on an actual failure.
@@ -16,6 +21,8 @@ error). It exits non-zero only on an actual failure.
 
 import sqlite3
 import sys
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -37,7 +44,90 @@ _FALLBACK_LEAGUE_NAMES = {
     4714: "Six Nations Championship",
     5479: "Rugby Union International Friendlies",
     5480: "Nations Championship",
+    5481: "Investec Champions Cup",
+    5482: "EPCR Challenge Cup",
+    5483: "Women's Rugby World Cup",
+    5484: "Women's Six Nations",
+    5485: "WXV 1",
+    5486: "WXV 2",
+    5487: "WXV 3",
 }
+
+SAST = timezone(timedelta(hours=2))
+
+
+def _today_sast_iso() -> str:
+    return datetime.now(SAST).date().isoformat()
+
+
+def _table_exists(cursor: sqlite3.Cursor, name: str) -> bool:
+    row = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (name,),
+    ).fetchone()
+    return bool(row)
+
+
+def _delete_event_ids(cursor: sqlite3.Cursor, event_ids: list[int]) -> int:
+    deleted = 0
+    for event_id in event_ids:
+        cursor.execute("DELETE FROM event WHERE id = ?", (event_id,))
+        deleted += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+    return deleted
+
+
+def _remove_past_unscored(cursor: sqlite3.Cursor, today_iso: str) -> int:
+    rows = cursor.execute(
+        """
+        SELECT id FROM event
+        WHERE date(date_event) < date(?)
+          AND (home_score IS NULL OR away_score IS NULL)
+        """,
+        (today_iso,),
+    ).fetchall()
+    ids = [int(r[0]) for r in rows]
+    return _delete_event_ids(cursor, ids)
+
+
+def _remove_placeholder_unscored(cursor: sqlite3.Cursor) -> int:
+    """Drop impossible schedules: a team cannot play two games on the same day."""
+    rows = cursor.execute(
+        """
+        SELECT id, league_id, DATE(date_event), home_team_id, away_team_id
+        FROM event
+        WHERE home_score IS NULL OR away_score IS NULL
+        """
+    ).fetchall()
+    by_league_date = defaultdict(list)
+    for event_id, league_id, day, home_id, away_id in rows:
+        if not day or home_id is None or away_id is None:
+            continue
+        by_league_date[(int(league_id), str(day))].append(
+            (int(event_id), int(home_id), int(away_id))
+        )
+
+    drop: set[int] = set()
+    for games in by_league_date.values():
+        appearances: dict[int, set[int]] = defaultdict(set)
+        for event_id, home_id, away_id in games:
+            appearances[home_id].add(event_id)
+            appearances[away_id].add(event_id)
+        for event_ids in appearances.values():
+            if len(event_ids) > 1:
+                drop.update(event_ids)
+    return _delete_event_ids(cursor, sorted(drop))
+
+
+def _prune_orphan_snapshots(cursor: sqlite3.Cursor) -> int:
+    if not _table_exists(cursor, "prediction_snapshot"):
+        return 0
+    cursor.execute(
+        """
+        DELETE FROM prediction_snapshot
+        WHERE match_id NOT IN (SELECT id FROM event)
+        """
+    )
+    return int(cursor.rowcount or 0)
 
 
 def _configured_league_names() -> dict:
@@ -159,6 +249,30 @@ def cleanup_database(db_path: str = "data.sqlite") -> int:
         print(f"Removed {orphan_leagues} orphan league rows")
     else:
         print("No orphan league rows found")
+
+    # 5. Past dates with no score are holes (cancelled, never ingested, or dummy).
+    #    Keep future unscored rows — those are real upcoming fixtures.
+    today_iso = _today_sast_iso()
+    past_unscored = _remove_past_unscored(cursor, today_iso)
+    if past_unscored:
+        print(f"Removed {past_unscored} past events with no score")
+    else:
+        print("No past unscored events found")
+
+    # 6. Placeholder tournament dumps (e.g. World Cup 2027 all dated one day,
+    #    with the same nation listed two or three times).
+    placeholders_removed = _remove_placeholder_unscored(cursor)
+    if placeholders_removed:
+        print(f"Removed {placeholders_removed} placeholder / impossible-schedule events")
+    else:
+        print("No placeholder schedule dumps found")
+
+    # 7. Snapshots must not outlive the fixture they belong to.
+    orphan_snaps = _prune_orphan_snapshots(cursor)
+    if orphan_snaps:
+        print(f"Removed {orphan_snaps} orphan prediction snapshots")
+    else:
+        print("No orphan prediction snapshots found")
 
     conn.commit()
 

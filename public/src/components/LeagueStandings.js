@@ -20,7 +20,7 @@ import {
 } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getLeagueStandings, subscribeToStandingsCache } from '../firebase';
-import { formatStandingsSeasonLabel, getPrimaryStandingsSeasonYear } from '../utils/season';
+import { formatStandingsSeasonLabel, getViewStandingsSeasonYear } from '../utils/season';
 import { TabLoadingScreen } from '../utils/viewLoader';
 import { LEAGUE_ID_MAPPING, expandLeagueIds } from '../utils/leagues';
 import { buildTeamLogoCandidates, resolveTeamLogoUrl } from '../utils/teamLogos';
@@ -154,7 +154,7 @@ const LeagueStandings = ({ leagueId, leagueIds, leagueName }) => {
     } catch (e) {
       // ignore
     }
-    return `standings_cache_v5::${license}::sportsdb_${sportsdbLeagueId}::hl_${highlightlyLeagueId}::ids_${(leagueIds || [sportsdbLeagueId]).join('-')}`;
+    return `standings_cache_v6::${license}::sportsdb_${sportsdbLeagueId}::hl_${highlightlyLeagueId}::ids_${(leagueIds || [sportsdbLeagueId]).join('-')}::season_${getViewStandingsSeasonYear(sportsdbLeagueId, leagueIds)}`;
   };
 
   const countTeamsWithLogos = (standingsPayload) => {
@@ -248,7 +248,7 @@ const LeagueStandings = ({ leagueId, leagueIds, leagueName }) => {
         const cachedAt = cached?.cachedAt ? Number(cached.cachedAt) : null;
         cachedStandings = cached?.standings || null;
         const cacheAge = cachedAt ? now - cachedAt : null;
-        const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
+        const primarySeason = getViewStandingsSeasonYear(leagueId, leagueIds);
         const cachedSeason = Number(cached?.season ?? cachedStandings?.league?.season);
         const cacheSeasonStale = Number.isFinite(cachedSeason) && cachedSeason < primarySeason;
         const cacheIsLegacyComputed = isLegacyStandingsCache(cachedStandings);
@@ -335,7 +335,7 @@ const LeagueStandings = ({ leagueId, leagueIds, leagueName }) => {
     const scopedIds = Array.isArray(leagueIds) && leagueIds.length ? leagueIds : expandLeagueIds(leagueId);
     if (scopedIds.length > 1) return;
 
-    const primarySeason = getPrimaryStandingsSeasonYear(leagueId);
+    const primarySeason = getViewStandingsSeasonYear(leagueId, leagueIds);
 
     const unsub = subscribeToStandingsCache(leagueId, [primarySeason], (newStandings, _season, meta) => {
       if (!newStandings || typeof newStandings !== 'object') return;

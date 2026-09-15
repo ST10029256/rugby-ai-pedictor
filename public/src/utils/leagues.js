@@ -36,7 +36,11 @@ export const LEAGUE_IDS = {
 
 /** Cups/tiers that share one picker row. */
 export const EPCR_MEMBER_IDS = [LEAGUE_IDS.CHAMPIONS_CUP, LEAGUE_IDS.CHALLENGE_CUP];
-export const WXV_MEMBER_IDS = [LEAGUE_IDS.WXV_1, LEAGUE_IDS.WXV_2, LEAGUE_IDS.WXV_3];
+export const WXV_MEMBER_IDS = [LEAGUE_IDS.WXV_1];
+export const WXV_OLD_FORMAT_IDS = [LEAGUE_IDS.WXV_1, LEAGUE_IDS.WXV_2, LEAGUE_IDS.WXV_3];
+export const WXV_OLD_FORMAT_VALUE = 'wxv-old-format';
+export const WXV_GLOBAL_SERIES_FROM_YEAR = 2026;
+export const WXV_OLD_FORMAT_SEASON_YEAR = 2024;
 
 const BUNDLE_BY_PRIMARY = {
   [LEAGUE_IDS.CHAMPIONS_CUP]: EPCR_MEMBER_IDS,
@@ -65,7 +69,7 @@ export const LEAGUE_CATALOG = [
   { id: LEAGUE_IDS.FRIENDLIES, name: 'Rugby Union International Friendlies', gender: GENDER_MEN, highlightlyId: 72268, neutralMode: true },
   { id: LEAGUE_IDS.WOMEN_SIX_NATIONS, name: "Women's Six Nations", gender: GENDER_WOMEN, highlightlyId: 47589, neutralMode: true },
   { id: LEAGUE_IDS.WOMEN_RWC, name: "Women's Rugby World Cup", gender: GENDER_WOMEN, highlightlyId: 60354, neutralMode: true },
-  { id: LEAGUE_IDS.WXV_1, name: 'WXV', matchLabel: 'WXV 1', gender: GENDER_WOMEN, highlightlyId: 120775, neutralMode: true, memberIds: WXV_MEMBER_IDS },
+  { id: LEAGUE_IDS.WXV_1, name: 'WXV', matchLabel: 'Global Series', gender: GENDER_WOMEN, highlightlyId: 120775, neutralMode: true, memberIds: WXV_MEMBER_IDS },
   { id: LEAGUE_IDS.WXV_2, name: 'WXV 2', matchLabel: 'WXV 2', gender: GENDER_WOMEN, highlightlyId: 121626, neutralMode: true, picker: false, bundleId: LEAGUE_IDS.WXV_1 },
   { id: LEAGUE_IDS.WXV_3, name: 'WXV 3', matchLabel: 'WXV 3', gender: GENDER_WOMEN, highlightlyId: 122477, neutralMode: true, picker: false, bundleId: LEAGUE_IDS.WXV_1 },
 ];
@@ -150,21 +154,135 @@ export function bundleSubpickerLabel(leagueId) {
 }
 
 export function bundleAllowsAll(leagueId) {
-  return canonicalizePickerLeagueId(leagueId) === LEAGUE_IDS.WXV_1;
+  return false;
 }
 
 export function defaultBundleMember(leagueId) {
   const primary = canonicalizePickerLeagueId(leagueId);
   const ids = BUNDLE_BY_PRIMARY[primary];
   if (!ids?.length) return null;
-  if (primary === LEAGUE_IDS.CHAMPIONS_CUP) return ids[0];
+  return ids[0];
+}
+
+export function isWxvOldFormatMember(bundleMemberId) {
+  return String(bundleMemberId) === WXV_OLD_FORMAT_VALUE;
+}
+
+export const WXV_OLD_FORMAT_WXV1_GAMES = 18; // 2023 + 2024, 9 matches each
+
+export function isWxvGlobalSeriesIds(leagueIds) {
+  const ids = [...new Set((leagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0))];
+  return ids.length === 1 && ids[0] === LEAGUE_IDS.WXV_1;
+}
+
+export function wxvTrainingGamesFromMetrics(leagueIds, rowsById) {
+  const ids = [...new Set((leagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0))];
+  const gamesFor = (id) => Number(rowsById?.[id]?.training_games) || 0;
+  if (isWxvOldFormatIds(ids)) {
+    return ids.reduce((sum, id) => {
+      const total = gamesFor(id);
+      if (id === LEAGUE_IDS.WXV_1) return sum + Math.min(total, WXV_OLD_FORMAT_WXV1_GAMES);
+      return sum + total;
+    }, 0);
+  }
+  if (isWxvGlobalSeriesIds(ids)) {
+    return Math.max(0, gamesFor(LEAGUE_IDS.WXV_1) - WXV_OLD_FORMAT_WXV1_GAMES);
+  }
+  return ids.reduce((sum, id) => sum + gamesFor(id), 0);
+}
+
+export function bundleMemberDisplayName(optionId, options = []) {
+  const match = (options || []).find((opt) => String(opt.id) === String(optionId));
+  if (match?.name) return match.name;
+  if (isWxvOldFormatMember(optionId)) return 'WXV 1 / 2 / 3';
+  return getLeagueConfig(optionId)?.matchLabel || getLeagueConfig(optionId)?.name || '';
+}
+
+export function isWxvOldFormatIds(leagueIds) {
+  const ids = [...new Set((leagueIds || []).map(Number))];
+  return (
+    ids.includes(LEAGUE_IDS.WXV_1) &&
+    ids.includes(LEAGUE_IDS.WXV_2) &&
+    ids.includes(LEAGUE_IDS.WXV_3)
+  );
+}
+
+export function leagueMatchLabel(leagueId, seasonYear) {
+  if (
+    Number(leagueId) === LEAGUE_IDS.WXV_1 &&
+    Number(seasonYear) < WXV_GLOBAL_SERIES_FROM_YEAR
+  ) {
+    return 'WXV 1';
+  }
+  const config = getLeagueConfig(leagueId);
+  return config?.matchLabel || config?.name || `League ${leagueId}`;
+}
+
+export function wxvViewYearRange(leagueIds) {
+  const ids = [...new Set((leagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0))];
+  if (!ids.length) return null;
+  if (isWxvOldFormatIds(ids)) return { maxExclusive: WXV_GLOBAL_SERIES_FROM_YEAR };
+  if (ids.length === 1 && ids[0] === LEAGUE_IDS.WXV_1) {
+    return { minInclusive: WXV_GLOBAL_SERIES_FROM_YEAR };
+  }
   return null;
+}
+
+export function wxvViewYearAllowed(year, leagueIds) {
+  const range = wxvViewYearRange(leagueIds);
+  if (!range) return true;
+  const y = Number(year);
+  if (!Number.isFinite(y)) return true;
+  if (range.minInclusive != null && y < range.minInclusive) return false;
+  if (range.maxExclusive != null && y >= range.maxExclusive) return false;
+  return true;
+}
+
+export function matchInWxvView(match, leagueIds) {
+  const range = wxvViewYearRange(leagueIds);
+  if (!range) return true;
+  const iso = String(
+    match?.date_event || match?.date || match?.kickoff_at || match?.timestamp || ''
+  ).slice(0, 10);
+  const year = Number(iso.slice(0, 4));
+  if (!Number.isFinite(year)) return true;
+  return wxvViewYearAllowed(year, leagueIds);
+}
+
+export function filterHistoryPayloadForWxvView(data, leagueIds) {
+  if (!data || !wxvViewYearRange(leagueIds)) return data;
+  const next = { ...data };
+  if (next.matches_by_year_week) {
+    next.matches_by_year_week = Object.fromEntries(
+      Object.entries(next.matches_by_year_week).filter(([year]) => wxvViewYearAllowed(year, leagueIds))
+    );
+  }
+  if (Array.isArray(next.all_matches)) {
+    next.all_matches = next.all_matches.filter((match) => matchInWxvView(match, leagueIds));
+  }
+  if (Array.isArray(next.available_years)) {
+    next.available_years = next.available_years.filter((year) => wxvViewYearAllowed(year, leagueIds));
+  }
+  if (next.selected_year && !wxvViewYearAllowed(next.selected_year, leagueIds)) {
+    const years = (next.available_years || Object.keys(next.matches_by_year_week || {}))
+      .map(String)
+      .sort()
+      .reverse();
+    next.selected_year = years[0] || null;
+  }
+  return next;
 }
 
 export function bundleMemberOptions(leagueId) {
   const primary = canonicalizePickerLeagueId(leagueId);
   const ids = BUNDLE_BY_PRIMARY[primary];
   if (!ids) return [];
+  if (primary === LEAGUE_IDS.WXV_1) {
+    return [
+      { id: LEAGUE_IDS.WXV_1, name: 'Global Series' },
+      { id: WXV_OLD_FORMAT_VALUE, name: 'WXV 1 / 2 / 3' },
+    ];
+  }
   const members = ids.map((id) => {
     const config = getLeagueConfig(id);
     return { id, name: config?.matchLabel || config?.name || `League ${id}` };
@@ -181,6 +299,9 @@ export function queryLeagueIds(pickerLeagueId, bundleMemberId) {
     const id = Number(pickerLeagueId);
     return Number.isFinite(id) ? [id] : [];
   }
+  if (primary === LEAGUE_IDS.WXV_1 && isWxvOldFormatMember(bundleMemberId)) {
+    return [...WXV_OLD_FORMAT_IDS];
+  }
   if (
     bundleMemberId == null ||
     bundleMemberId === '' ||
@@ -191,15 +312,17 @@ export function queryLeagueIds(pickerLeagueId, bundleMemberId) {
   }
   const member = Number(bundleMemberId);
   if (members.includes(member)) return [member];
-  return [...members];
+  return [members[0]];
 }
 
 export function leagueViewDisplayName(pickerLeagueId, bundleMemberId, fallback = 'Unknown') {
+  if (isWxvOldFormatMember(bundleMemberId)) return 'WXV 1 / 2 / 3';
   const ids = queryLeagueIds(pickerLeagueId, bundleMemberId);
   if (ids.length === 1) {
     const config = getLeagueConfig(ids[0]);
     return config?.matchLabel || config?.name || fallback;
   }
+  if (isWxvOldFormatIds(ids)) return 'WXV 1 / 2 / 3';
   return leagueDisplayName(pickerLeagueId, fallback);
 }
 
