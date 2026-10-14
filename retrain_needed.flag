@@ -18,9 +18,9 @@
     5486,
     5487
   ],
-  "games_updated": 328,
-  "timestamp": "2026-10-13T02:47:00.157794",
+  "games_updated": 320,
+  "timestamp": "2026-10-14T00:42:57.411809",
   "reason": "new_games_fetched",
   "trigger": "comprehensive_data_update",
-  "description": "Found 328 new/updated games from Highlightly - retraining all models to capture latest data"
+  "description": "Found 320 new/updated games from Highlightly - retraining all models to capture latest data"
 }
